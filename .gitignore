@@ -1,5 +1,14 @@
 /target/
+/logs/
 /decompiled/
 /assets/client-*.jar
 /tools/*.jar
 /vendors/
+/assets/libraries/
+/crates/redstone-java-26/data/26.1.2/.cache/
+/crates/redstone-java-26/data/26.1.2/reports/biome_parameters/
+/crates/redstone-java-26/data/26.1.2/reports/minecraft/
+/crates/redstone-java-26/data/26.1.2/reports/commands.json
+/crates/redstone-java-26/data/26.1.2/reports/datapack.json
+/crates/redstone-java-26/data/26.1.2/reports/json-rpc-api-schema.json
+/crates/redstone-java-26/data/26.1.2/reports/packets.json

@@ -1,10 +1,39 @@
 VINEFLOWER := "tools/vineflower-1.12.0.jar"
 CLIENT_JAR := "assets/client-26.1.2.jar"
 OUT_DIR := "decompiled/client-26.1.2"
+RUNTIME_DIR := "assets/libraries/26.1.2"
+REPORT_DIR := "crates/redstone-java-26/data/26.1.2"
 
 [private]
 default:
     @just --list
+
+# 编译整个 workspace.
+build:
+    cargo build --workspace
+
+# 对整个 workspace 执行 clippy.
+clippy:
+    cargo clippy --workspace --all-targets
+
+# 运行整个 workspace 的测试.
+test:
+    cargo test --workspace
+
+# just run path/to/scenario.toml
+# 运行一个红石时序场景.
+run scenario *args:
+    cargo run -p redstone-cli -- run {{ scenario }} {{ args }}
+
+# just inspect path/to/structure.litematic
+# 检查结构内容和未支持方块.
+inspect structure:
+    cargo run -p redstone-cli -- inspect {{ structure }}
+
+# just bench --ticks 100
+# 运行大规模空闲刻基准.
+bench *args:
+    cargo run --release -p redstone-cli -- bench {{ args }}
 
 # just decompile
 # 使用 Vineflower 反编译客户端 JAR.
@@ -49,3 +78,47 @@ download-client version="26.1.2":
     fi
     echo "下载 client JAR: assets/client-{{ version }}.jar"
     curl -fL "$client_url" -o "assets/client-{{ version }}.jar"
+
+# just download-runtime 26.1.2
+# 下载指定 Minecraft 版本的数据生成运行库.
+download-runtime version="26.1.2":
+    #!/usr/bin/env sh
+    set -eu
+    runtime_dir="assets/libraries/{{ version }}"
+    mkdir -p "$runtime_dir"
+    version_json="$(mktemp)"
+    manifest="$(mktemp)"
+    libraries="$(mktemp)"
+    trap 'rm -f "$version_json" "$manifest" "$libraries"' EXIT
+    echo "读取 Mojang 版本清单"
+    curl -fsSL https://piston-meta.mojang.com/mc/game/version_manifest_v2.json -o "$manifest"
+    version_url="$(jq -r --arg version "{{ version }}" '.versions[] | select(.id == $version) | .url // empty' "$manifest")"
+    if [ -z "$version_url" ]; then
+      echo "未找到版本: {{ version }}" >&2
+      exit 1
+    fi
+    curl -fsSL "$version_url" -o "$version_json"
+    jq -r '.libraries[].downloads.artifact | select(.url != null) | [.path, .url] | @tsv' "$version_json" > "$libraries"
+    total="$(wc -l < "$libraries" | tr -d ' ')"
+    current=0
+    while IFS="$(printf '\t')" read -r path url; do
+      current=$((current + 1))
+      target="$runtime_dir/$path"
+      if [ ! -f "$target" ]; then
+        mkdir -p "$(dirname "$target")"
+        curl -fsSL "$url" -o "$target"
+      fi
+      if [ $((current % 10)) -eq 0 ] || [ "$current" -eq "$total" ]; then
+        echo "运行库下载进度: $current/$total"
+      fi
+    done < "$libraries"
+
+# just generate-reports
+# 使用官方数据生成器输出 26.1.2 方块和注册表报告.
+generate-reports: download-runtime
+    #!/usr/bin/env sh
+    set -eu
+    mkdir -p "{{ REPORT_DIR }}"
+    classpath="{{ CLIENT_JAR }}:$(find "{{ RUNTIME_DIR }}" -name '*.jar' -type f | sort | paste -sd ':' -)"
+    echo "生成 Minecraft 26.1.2 数据报告"
+    java -Xmx4g -cp "$classpath" net.minecraft.data.Main --reports --output "{{ REPORT_DIR }}"

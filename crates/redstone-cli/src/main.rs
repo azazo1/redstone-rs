@@ -1,0 +1,590 @@
+use std::collections::BTreeMap;
+use std::fs::File;
+use std::process::Command as ProcessCommand;
+use std::sync::Arc;
+use std::time::{Duration, Instant};
+use std::path::{Path, PathBuf};
+
+use anyhow::{Context, Result, anyhow, bail};
+use clap::{Parser, Subcommand};
+use redstone_core::{
+    Action, BlockPos, BlockStateId, GameTick, ProbeValue, Simulation, SimulationConfig,
+    SparseWorld,
+};
+use redstone_io::{
+    InitializationMode, Scenario, ScenarioActionKind, StructureLoader, StructureStateResolver,
+};
+use redstone_java_26::{
+    JAVA_DATA_VERSION, JAVA_VERSION, Java26Registry, Java26Rules, StateResolveError, StateResolver,
+};
+use tokio::sync::Semaphore;
+use tracing::info;
+use tracing_indicatif::{IndicatifLayer, span_ext::IndicatifSpanExt, style::ProgressStyle};
+use tracing_subscriber::EnvFilter;
+use tracing_subscriber::layer::SubscriberExt;
+use tracing_subscriber::util::SubscriberInitExt;
+
+#[derive(Debug, Parser)]
+#[command(name = "redstone", version, about = "Java 26.1.2 红石时序仿真器")]
+struct Cli {
+    #[command(subcommand)]
+    command: Command,
+}
+
+#[derive(Debug, Subcommand)]
+enum Command {
+    Inspect {
+        structure: PathBuf,
+    },
+    Run {
+        scenario: PathBuf,
+        #[arg(long)]
+        trace: Option<PathBuf>,
+        #[arg(long)]
+        vcd: Option<PathBuf>,
+        #[arg(long)]
+        allow_static_fallback: bool,
+    },
+    Test {
+        path: PathBuf,
+        #[arg(long)]
+        oracle: bool,
+        #[arg(long)]
+        allow_static_fallback: bool,
+    },
+    Trace {
+        scenario: PathBuf,
+        #[arg(long)]
+        output: PathBuf,
+        #[arg(long)]
+        vcd: Option<PathBuf>,
+    },
+    Bench {
+        #[arg(long, default_value_t = 1_000_000)]
+        blocks: usize,
+        #[arg(long, default_value_t = 10_000)]
+        active: usize,
+        #[arg(long, default_value_t = 100)]
+        ticks: usize,
+    },
+}
+
+#[tokio::main]
+async fn main() -> Result<()> {
+    let indicatif_layer = IndicatifLayer::new();
+    let writer = indicatif_layer.get_stderr_writer();
+    tracing_subscriber::registry()
+        .with(
+            tracing_subscriber::fmt::layer()
+                .with_writer(writer)
+                .with_target(true)
+                .with_timer(tracing_subscriber::fmt::time::uptime()),
+        )
+        .with(indicatif_layer)
+        .with(EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info")))
+        .init();
+    let cli = Cli::parse();
+    match cli.command {
+        Command::Inspect { structure } => inspect(&structure),
+        Command::Run {
+            scenario,
+            trace,
+            vcd,
+            allow_static_fallback,
+        } => run(&scenario, trace.as_deref(), vcd.as_deref(), allow_static_fallback).await,
+        Command::Test {
+            path,
+            oracle,
+            allow_static_fallback,
+        } => test_path(&path, oracle, allow_static_fallback).await,
+        Command::Trace {
+            scenario,
+            output,
+            vcd,
+        } => run(&scenario, Some(&output), vcd.as_deref(), false).await,
+        Command::Bench {
+            blocks,
+            active,
+            ticks,
+        } => bench(blocks, active, ticks).await,
+    }
+}
+
+async fn bench(blocks: usize, active: usize, ticks: usize) -> Result<()> {
+    if blocks == 0 || ticks == 0 {
+        bail!("blocks 和 ticks 必须大于 0");
+    }
+    if active > blocks {
+        bail!("active 不能大于 blocks");
+    }
+    let started = Instant::now();
+    let mut registry = Java26Registry::new();
+    let stone = registry.resolve_state("minecraft:stone", &BTreeMap::new())?;
+    let pressure_plate = registry.resolve_state(
+        "minecraft:oak_pressure_plate",
+        &BTreeMap::from([("powered".to_owned(), "false".to_owned())]),
+    )?;
+    let mut world = SparseWorld::new(registry.air_state());
+    let side = cube_side(blocks);
+    let progress = tracing::info_span!("benchmark_world");
+    progress.pb_set_style(
+        &ProgressStyle::with_template("{span_child_prefix}{msg} {wide_bar} {pos}/{len}")?
+            .progress_chars("=>-"),
+    );
+    progress.pb_set_length(blocks as u64);
+    progress.pb_set_message("构建基准世界");
+    progress.pb_start();
+    for index in 0..blocks {
+        let pos = benchmark_position(index, side)?;
+        world.set_block(pos, if index < active { pressure_plate } else { stone })?;
+        if index % 16_384 == 0 {
+            progress.pb_set_position(index as u64);
+        }
+    }
+    progress.pb_set_position(blocks as u64);
+    let build_elapsed = started.elapsed();
+    let sections = world.section_count();
+    let rules = Java26Rules::new(registry);
+    let mut simulation = Simulation::load(rules, world, SimulationConfig::default()).await?;
+    let mut samples = Vec::with_capacity(ticks);
+    info!(blocks, active, sections, ?build_elapsed, "完成基准世界构建");
+    for _ in 0..ticks {
+        let started = Instant::now();
+        simulation.step().await?;
+        samples.push(started.elapsed());
+    }
+    samples.sort_unstable();
+    println!("blocks: {blocks}");
+    println!("active_components: {active}");
+    println!("sections: {sections}");
+    println!("build_ms: {:.3}", build_elapsed.as_secs_f64() * 1_000.0);
+    println!("tick_p50_ms: {:.3}", percentile(&samples, 50).as_secs_f64() * 1_000.0);
+    println!("tick_p95_ms: {:.3}", percentile(&samples, 95).as_secs_f64() * 1_000.0);
+    println!("tick_p99_ms: {:.3}", percentile(&samples, 99).as_secs_f64() * 1_000.0);
+    if let Some(rss) = resident_memory_bytes() {
+        println!("resident_memory_mib: {:.2}", rss as f64 / 1024.0 / 1024.0);
+    }
+    Ok(())
+}
+
+fn cube_side(blocks: usize) -> usize {
+    let mut side = 1usize;
+    while side.saturating_mul(side).saturating_mul(side) < blocks {
+        side += 1;
+    }
+    side
+}
+
+fn benchmark_position(index: usize, side: usize) -> Result<BlockPos> {
+    let layer = side.saturating_mul(side);
+    Ok(BlockPos::new(
+        i32::try_from(index % side)?,
+        i32::try_from(index / layer)?,
+        i32::try_from((index / side) % side)?,
+    ))
+}
+
+fn percentile(samples: &[Duration], percentile: usize) -> Duration {
+    let index = (samples.len() - 1) * percentile / 100;
+    samples[index]
+}
+
+fn resident_memory_bytes() -> Option<u64> {
+    #[cfg(target_os = "linux")]
+    {
+        let statm = std::fs::read_to_string("/proc/self/statm").ok()?;
+        let resident_pages = statm.split_whitespace().nth(1)?.parse::<u64>().ok()?;
+        return Some(resident_pages.saturating_mul(4_096));
+    }
+    #[cfg(target_os = "macos")]
+    {
+        let mut info = std::mem::MaybeUninit::<libc::proc_taskinfo>::zeroed();
+        let size = std::mem::size_of::<libc::proc_taskinfo>();
+        // SAFETY: proc_pidinfo writes at most size bytes into the correctly sized output buffer.
+        let written = unsafe {
+            libc::proc_pidinfo(
+                std::process::id() as i32,
+                libc::PROC_PIDTASKINFO,
+                0,
+                info.as_mut_ptr().cast(),
+                size as i32,
+            )
+        };
+        if written != size as i32 {
+            return None;
+        }
+        // SAFETY: a full-size proc_pidinfo result initialized the entire proc_taskinfo value.
+        let info = unsafe { info.assume_init() };
+        return Some(info.pti_resident_size);
+    }
+    #[allow(unreachable_code)]
+    None
+}
+
+fn inspect(path: &Path) -> Result<()> {
+    let mut resolver = RegistryResolver(Java26Registry::new());
+    let structure = StructureLoader::load(path, redstone_core::BlockPos::ZERO, &mut resolver)?;
+    reject_newer_data_version(structure.data_version)?;
+    println!("format: {}", structure.format);
+    println!("data_version: {:?}", structure.data_version);
+    println!("bounds: {:?} .. {:?}", structure.min, structure.max);
+    println!("non_air_blocks: {}", structure.world.non_air_blocks());
+    println!("sections: {}", structure.world.section_count());
+    println!("block_types:");
+    for (name, count) in structure.block_counts {
+        println!("  {name}: {count}");
+    }
+    let unsupported = resolver
+        .0
+        .states()
+        .filter(|state| !state.supported)
+        .map(|state| state.name.clone())
+        .collect::<Vec<_>>();
+    if !unsupported.is_empty() {
+        println!("unsupported_active_blocks:");
+        for name in unsupported {
+            println!("  {name}");
+        }
+    }
+    Ok(())
+}
+
+#[derive(Debug)]
+struct RunSummary {
+    ticks: u64,
+    blocks: usize,
+    trace_events: usize,
+}
+
+async fn run(
+    scenario_path: &Path,
+    trace_path: Option<&Path>,
+    vcd_path: Option<&Path>,
+    allow_static_fallback: bool,
+) -> Result<()> {
+    let summary = execute_scenario(
+        scenario_path,
+        trace_path,
+        vcd_path,
+        allow_static_fallback,
+    )
+    .await?;
+    println!("ticks: {}", summary.ticks);
+    println!("blocks: {}", summary.blocks);
+    println!("trace_events: {}", summary.trace_events);
+    println!("expectations: passed");
+    Ok(())
+}
+
+async fn execute_scenario(
+    scenario_path: &Path,
+    trace_path: Option<&Path>,
+    vcd_path: Option<&Path>,
+    allow_static_fallback: bool,
+) -> Result<RunSummary> {
+    let scenario = Scenario::load(scenario_path)?;
+    if scenario.version != JAVA_VERSION {
+        bail!("场景版本必须是 {JAVA_VERSION}, 收到 {}", scenario.version);
+    }
+    let mut resolver = RegistryResolver(Java26Registry::new());
+    let loaded = StructureLoader::load_transformed(
+        &scenario.source.path,
+        scenario.source.transform(),
+        &mut resolver,
+    )?;
+    reject_newer_data_version(loaded.data_version)?;
+    let mut actions = scenario
+        .actions
+        .iter()
+        .map(|action| {
+            Ok((
+                action.tick,
+                resolve_scenario_action(&mut resolver.0, &action.action)?,
+            ))
+        })
+        .collect::<Result<Vec<_>>>()?;
+    actions.sort_by_key(|(tick, _)| *tick);
+
+    let rules = Java26Rules::new(resolver.0);
+    let mut simulation = Simulation::load(
+        rules,
+        loaded.world,
+        SimulationConfig {
+            mode: scenario.mode,
+            seed: scenario.seed,
+            strict: scenario.strict && !allow_static_fallback,
+            ..SimulationConfig::default()
+        },
+    )
+    .await?;
+    for probe in &scenario.probes {
+        simulation.add_probe(&probe.name, probe.probe.clone());
+    }
+    if scenario.source.initialization == InitializationMode::Notify {
+        simulation.initialize().await?;
+    }
+
+    let mut action_index = 0;
+    let mut samples = BTreeMap::<(GameTick, String), ProbeValue>::new();
+    while simulation.current_tick().0 < scenario.max_ticks {
+        let next_tick = GameTick(simulation.current_tick().0 + 1);
+        let mut current_actions = Vec::new();
+        while actions
+            .get(action_index)
+            .is_some_and(|(tick, _)| *tick == next_tick)
+        {
+            current_actions.push(actions[action_index].1.clone());
+            action_index += 1;
+        }
+        let delta = simulation.step_with_actions(&current_actions).await?;
+        for sample in delta.probes {
+            samples.insert((delta.tick, sample.name), sample.value);
+        }
+    }
+
+    let mut failures = Vec::new();
+    for expectation in scenario.expectations() {
+        let actual = samples.get(&(expectation.tick, expectation.probe.clone()));
+        if actual != Some(&expectation.equals) {
+            failures.push(format!(
+                "tick {} probe {}: expected {:?}, actual {:?}",
+                expectation.tick.0, expectation.probe, expectation.equals, actual
+            ));
+        }
+    }
+    if let Some(path) = trace_path {
+        let output = File::create(path).with_context(|| format!("创建轨迹文件失败: {}", path.display()))?;
+        simulation.trace().write_jsonl(output)?;
+        info!(path = %path.display(), "写入 JSONL 轨迹");
+    }
+    if let Some(path) = vcd_path {
+        let output = File::create(path).with_context(|| format!("创建 VCD 文件失败: {}", path.display()))?;
+        simulation.trace().write_vcd(output)?;
+        info!(path = %path.display(), "写入 VCD 波形");
+    }
+    if !failures.is_empty() {
+        for failure in &failures {
+            eprintln!("FAIL {failure}");
+        }
+        bail!("{} 个断言失败", failures.len());
+    }
+    Ok(RunSummary {
+        ticks: simulation.current_tick().0,
+        blocks: simulation.world().non_air_blocks(),
+        trace_events: simulation.trace().events().len(),
+    })
+}
+
+async fn test_path(path: &Path, oracle: bool, allow_static_fallback: bool) -> Result<()> {
+    let mut scenarios = if path.is_dir() {
+        std::fs::read_dir(path)?
+            .filter_map(Result::ok)
+            .map(|entry| entry.path())
+            .filter(|path| path.extension().is_some_and(|extension| extension == "toml"))
+            .collect::<Vec<_>>()
+    } else {
+        vec![path.to_path_buf()]
+    };
+    scenarios.sort();
+    if scenarios.is_empty() {
+        bail!("没有找到 TOML 场景");
+    }
+    let concurrency = std::thread::available_parallelism().map_or(1, usize::from);
+    let semaphore = Arc::new(Semaphore::new(concurrency));
+    let progress = tracing::info_span!("scenario_tests");
+    progress.pb_set_style(
+        &ProgressStyle::with_template("{span_child_prefix}{msg} {wide_bar} {pos}/{len}")?
+            .progress_chars("=>-"),
+    );
+    progress.pb_set_length(scenarios.len() as u64);
+    progress.pb_set_message("批量场景");
+    progress.pb_start();
+    let mut tasks = Vec::new();
+    for (index, scenario) in scenarios.into_iter().enumerate() {
+        let permit = semaphore.clone().acquire_owned().await?;
+        let progress = progress.clone();
+        tasks.push(tokio::spawn(async move {
+            let _permit = permit;
+            let result = execute_test_scenario(&scenario, oracle, allow_static_fallback).await;
+            progress.pb_inc(1);
+            (index, scenario, result)
+        }));
+    }
+    let mut results = Vec::new();
+    for task in tasks {
+        results.push(task.await?);
+    }
+    results.sort_by_key(|(index, _, _)| *index);
+    let mut failures = 0;
+    for (_, scenario, result) in results {
+        match result {
+            Ok(summary) => println!(
+                "PASS {} ticks={} trace_events={}",
+                scenario.display(), summary.ticks, summary.trace_events
+            ),
+            Err(error) => {
+                failures += 1;
+                eprintln!("FAIL {}\n{error:#}", scenario.display());
+            }
+        }
+    }
+    if failures == 0 {
+        Ok(())
+    } else {
+        Err(anyhow!("{failures} 个场景失败"))
+    }
+}
+
+async fn execute_test_scenario(
+    scenario: &Path,
+    oracle: bool,
+    allow_static_fallback: bool,
+) -> Result<RunSummary> {
+    let trace_path = oracle.then(|| {
+        std::env::temp_dir().join(format!(
+            "redstone-rust-trace-{}-{}.jsonl",
+            std::process::id(),
+            stable_path_hash(scenario)
+        ))
+    });
+    let result = execute_scenario(
+        scenario,
+        trace_path.as_deref(),
+        None,
+        allow_static_fallback,
+    )
+    .await;
+    if let (Ok(_), Some(trace_path)) = (&result, trace_path.as_deref()) {
+        compare_with_oracle(scenario, trace_path)?;
+    }
+    if let Some(trace_path) = trace_path {
+        let _ = std::fs::remove_file(trace_path);
+    }
+    result
+}
+
+fn compare_with_oracle(scenario: &Path, rust_trace: &Path) -> Result<()> {
+    let oracle = std::env::var_os("REDSTONE_ORACLE")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from("tools/vanilla-oracle/run.sh"));
+    if !oracle.is_file() {
+        bail!(
+            "--oracle 需要可执行探针 {}, 或设置 REDSTONE_ORACLE",
+            oracle.display()
+        );
+    }
+    let oracle_trace = std::env::temp_dir().join(format!(
+        "redstone-java-trace-{}-{}.jsonl",
+        std::process::id(),
+        stable_path_hash(scenario)
+    ));
+    let mut command = if oracle.extension().is_some_and(|extension| extension == "sh") {
+        let mut command = ProcessCommand::new("sh");
+        command.arg(&oracle);
+        command
+    } else {
+        ProcessCommand::new(&oracle)
+    };
+    let status = command
+        .arg(scenario)
+        .arg(&oracle_trace)
+        .status()
+        .with_context(|| format!("启动 Java oracle 失败: {}", oracle.display()))?;
+    if !status.success() {
+        bail!("Java oracle 返回失败状态: {status}");
+    }
+    let rust = std::fs::read(rust_trace)?;
+    let java = std::fs::read(&oracle_trace)?;
+    let _ = std::fs::remove_file(&oracle_trace);
+    if rust != java {
+        let line = first_different_line(&rust, &java);
+        bail!("Rust 与 Java oracle 轨迹不一致, 首个差异位于第 {line} 行");
+    }
+    Ok(())
+}
+
+fn first_different_line(left: &[u8], right: &[u8]) -> usize {
+    let common = left
+        .iter()
+        .zip(right)
+        .take_while(|(left, right)| left == right)
+        .count();
+    left[..common].iter().filter(|byte| **byte == b'\n').count() + 1
+}
+
+fn stable_path_hash(path: &Path) -> u64 {
+    path.to_string_lossy()
+        .bytes()
+        .fold(0xcbf29ce484222325, |hash, byte| {
+            (hash ^ u64::from(byte)).wrapping_mul(0x100000001b3)
+        })
+}
+
+fn reject_newer_data_version(data_version: Option<i32>) -> Result<()> {
+    if data_version.is_some_and(|version| version > JAVA_DATA_VERSION) {
+        bail!(
+            "结构 DataVersion {:?} 高于 Java {JAVA_VERSION} 的 {JAVA_DATA_VERSION}",
+            data_version
+        );
+    }
+    Ok(())
+}
+
+struct RegistryResolver(Java26Registry);
+
+fn resolve_scenario_action(
+    registry: &mut Java26Registry,
+    action: &ScenarioActionKind,
+) -> Result<Action> {
+    Ok(match action {
+        ScenarioActionKind::SetBlock {
+            pos,
+            name,
+            properties,
+        } => Action::SetBlock {
+            pos: *pos,
+            state: registry.resolve_state(name, properties)?,
+        },
+        ScenarioActionKind::BreakBlock { pos } => Action::BreakBlock { pos: *pos },
+        ScenarioActionKind::UseBlock { pos } => Action::UseBlock { pos: *pos },
+        ScenarioActionKind::PressButton { pos } => Action::PressButton { pos: *pos },
+        ScenarioActionKind::PullLever { pos } => Action::PullLever { pos: *pos },
+        ScenarioActionKind::SetBlockEntity { pos, data } => Action::SetBlockEntity {
+            pos: *pos,
+            data: data.clone(),
+        },
+    })
+}
+
+impl StructureStateResolver for RegistryResolver {
+    type Error = StateResolveError;
+
+    fn resolve_state(
+        &mut self,
+        name: &str,
+        properties: &BTreeMap<String, String>,
+    ) -> Result<BlockStateId, Self::Error> {
+        self.0.resolve_state(name, properties)
+    }
+
+    fn air_state(&self) -> BlockStateId {
+        self.0.air_state()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn trace_diff_reports_the_first_changed_line() {
+        assert_eq!(first_different_line(b"a\nb\n", b"a\nc\n"), 2);
+        assert_eq!(first_different_line(b"a\n", b"a\nb\n"), 2);
+    }
+
+    #[test]
+    fn scenario_hash_is_stable() {
+        let path = Path::new("examples/basic.toml");
+        assert_eq!(stable_path_hash(path), stable_path_hash(path));
+    }
+}

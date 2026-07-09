@@ -1,0 +1,898 @@
+use std::collections::{BTreeMap, HashMap};
+use std::io::Read;
+use std::path::{Path, PathBuf};
+
+use fastnbt::Value;
+use flate2::read::GzDecoder;
+use redstone_core::{
+    BlockEntityData, BlockPos, BlockStateId, Direction, EntityData, SparseWorld,
+};
+use serde::Serialize;
+use thiserror::Error;
+use tracing::info;
+
+pub trait StructureStateResolver {
+    type Error: std::error::Error + Send + Sync + 'static;
+
+    fn resolve_state(
+        &mut self,
+        name: &str,
+        properties: &BTreeMap<String, String>,
+    ) -> Result<BlockStateId, Self::Error>;
+
+    fn air_state(&self) -> BlockStateId;
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum StructureFormat {
+    Litematic,
+    VanillaStructure,
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Rotation {
+    #[default]
+    None,
+    Clockwise90,
+    Clockwise180,
+    Counterclockwise90,
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Mirror {
+    #[default]
+    None,
+    LeftRight,
+    FrontBack,
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct StructureTransform {
+    pub origin: BlockPos,
+    pub rotation: Rotation,
+    pub mirror: Mirror,
+}
+
+impl StructureTransform {
+    pub fn apply(self, pos: BlockPos) -> BlockPos {
+        let mirrored = match self.mirror {
+            Mirror::None => pos,
+            Mirror::LeftRight => BlockPos::new(pos.x, pos.y, -pos.z),
+            Mirror::FrontBack => BlockPos::new(-pos.x, pos.y, pos.z),
+        };
+        let rotated = match self.rotation {
+            Rotation::None => mirrored,
+            Rotation::Clockwise90 => BlockPos::new(-mirrored.z, mirrored.y, mirrored.x),
+            Rotation::Clockwise180 => BlockPos::new(-mirrored.x, mirrored.y, -mirrored.z),
+            Rotation::Counterclockwise90 => BlockPos::new(mirrored.z, mirrored.y, -mirrored.x),
+        };
+        self.origin.offset(rotated.x, rotated.y, rotated.z)
+    }
+
+    pub fn apply_point(self, point: [f64; 3]) -> [f64; 3] {
+        let mirrored = match self.mirror {
+            Mirror::None => point,
+            Mirror::LeftRight => [point[0], point[1], -point[2]],
+            Mirror::FrontBack => [-point[0], point[1], point[2]],
+        };
+        let rotated = match self.rotation {
+            Rotation::None => mirrored,
+            Rotation::Clockwise90 => [-mirrored[2], mirrored[1], mirrored[0]],
+            Rotation::Clockwise180 => [-mirrored[0], mirrored[1], -mirrored[2]],
+            Rotation::Counterclockwise90 => [mirrored[2], mirrored[1], -mirrored[0]],
+        };
+        [
+            rotated[0] + self.origin.x as f64,
+            rotated[1] + self.origin.y as f64,
+            rotated[2] + self.origin.z as f64,
+        ]
+    }
+}
+
+#[derive(Clone, Debug, Serialize)]
+pub struct LoadedStructure {
+    pub world: SparseWorld,
+    pub min: BlockPos,
+    pub max: BlockPos,
+    pub format: String,
+    pub data_version: Option<i32>,
+    pub block_counts: BTreeMap<String, usize>,
+}
+
+pub struct StructureLoader;
+
+impl StructureLoader {
+    pub fn detect(path: &Path) -> Result<StructureFormat, StructureError> {
+        match path.extension().and_then(|extension| extension.to_str()) {
+            Some("litematic") => Ok(StructureFormat::Litematic),
+            Some("nbt" | "structure") => Ok(StructureFormat::VanillaStructure),
+            _ => Err(StructureError::UnknownFormat(path.to_path_buf())),
+        }
+    }
+
+    pub fn load<R: StructureStateResolver>(
+        path: impl AsRef<Path>,
+        origin: BlockPos,
+        resolver: &mut R,
+    ) -> Result<LoadedStructure, StructureError> {
+        Self::load_transformed(
+            path,
+            StructureTransform {
+                origin,
+                ..StructureTransform::default()
+            },
+            resolver,
+        )
+    }
+
+    pub fn load_transformed<R: StructureStateResolver>(
+        path: impl AsRef<Path>,
+        transform: StructureTransform,
+        resolver: &mut R,
+    ) -> Result<LoadedStructure, StructureError> {
+        let path = path.as_ref();
+        let format = Self::detect(path)?;
+        let root = read_nbt(path)?;
+        info!(path = %path.display(), ?format, "读取结构文件");
+        match format {
+            StructureFormat::VanillaStructure => load_vanilla(root, transform, resolver),
+            StructureFormat::Litematic => load_litematic(root, transform, resolver),
+        }
+    }
+}
+
+fn read_nbt(path: &Path) -> Result<HashMap<String, Value>, StructureError> {
+    let bytes = std::fs::read(path)?;
+    let mut decoded = Vec::new();
+    if bytes.starts_with(&[0x1f, 0x8b]) {
+        GzDecoder::new(bytes.as_slice()).read_to_end(&mut decoded)?;
+    } else {
+        decoded = bytes;
+    }
+    fastnbt::from_bytes(&decoded).map_err(StructureError::Nbt)
+}
+
+fn load_vanilla<R: StructureStateResolver>(
+    root: HashMap<String, Value>,
+    transform: StructureTransform,
+    resolver: &mut R,
+) -> Result<LoadedStructure, StructureError> {
+    let palette = list(&root, "palette")?;
+    let mut states = Vec::new();
+    let mut names = Vec::new();
+    for entry in palette {
+        let entry = compound_value(entry)?;
+        let name = string(entry, "Name")?;
+        let properties = transform_properties(
+            optional_properties(entry, "Properties")?,
+            transform,
+        );
+        states.push(resolve(resolver, name, &properties)?);
+        names.push(name.to_owned());
+    }
+
+    let size = int_list(&root, "size")?;
+    let mut world = SparseWorld::new(resolver.air_state());
+    let mut counts = BTreeMap::new();
+    let mut min = None::<BlockPos>;
+    let mut max = None::<BlockPos>;
+    for block in list(&root, "blocks")? {
+        let block = compound_value(block)?;
+        let pos = int_list(block, "pos")?;
+        let palette_index = integer(block, "state")? as usize;
+        let state = *states
+            .get(palette_index)
+            .ok_or(StructureError::InvalidPaletteIndex(palette_index))?;
+        let absolute = transform.apply(BlockPos::new(pos[0], pos[1], pos[2]));
+        world.set_block(absolute, state)?;
+        update_bounds(&mut min, &mut max, absolute);
+        *counts.entry(names[palette_index].clone()).or_default() += 1;
+        if let Some(Value::Compound(nbt)) = block.get("nbt") {
+            world.set_block_entity(absolute, nbt_to_block_entity(nbt));
+        }
+    }
+    if let Ok(entities) = list(&root, "entities") {
+        for entity in entities {
+            let entity = compound_value(entity)?;
+            if let Some(local) = entity_from_nbt(entity)? {
+                world.spawn_entity(transform_entity(local, transform, BlockPos::ZERO));
+            }
+        }
+    }
+    Ok(LoadedStructure {
+        world,
+        min: min.unwrap_or(transform.origin),
+        max: max.unwrap_or(transform.apply(BlockPos::new(
+            size[0] - 1,
+            size[1] - 1,
+            size[2] - 1,
+        ))),
+        format: "vanilla_structure".to_owned(),
+        data_version: root.get("DataVersion").and_then(value_i32),
+        block_counts: counts,
+    })
+}
+
+fn load_litematic<R: StructureStateResolver>(
+    root: HashMap<String, Value>,
+    transform: StructureTransform,
+    resolver: &mut R,
+) -> Result<LoadedStructure, StructureError> {
+    let regions = compound(&root, "Regions")?;
+    let mut world = SparseWorld::new(resolver.air_state());
+    let mut counts = BTreeMap::new();
+    let mut min = None::<BlockPos>;
+    let mut max = None::<BlockPos>;
+
+    let mut region_entries = regions.iter().collect::<Vec<_>>();
+    region_entries.sort_by(|(left_name, left), (right_name, right)| {
+        let left_pos = compound_value(left)
+            .and_then(|region| xyz_compound(region, "Position"))
+            .unwrap_or(BlockPos::ZERO);
+        let right_pos = compound_value(right)
+            .and_then(|region| xyz_compound(region, "Position"))
+            .unwrap_or(BlockPos::ZERO);
+        left_pos.cmp(&right_pos).then_with(|| left_name.cmp(right_name))
+    });
+    for (_region_name, region_value) in region_entries {
+        let region = compound_value(region_value)?;
+        let region_position = xyz_compound(region, "Position")?;
+        let size = xyz_compound(region, "Size")?;
+        let end = region_position.offset(
+            relative_end(size.x),
+            relative_end(size.y),
+            relative_end(size.z),
+        );
+        let start = BlockPos::new(
+            region_position.x.min(end.x),
+            region_position.y.min(end.y),
+            region_position.z.min(end.z),
+        );
+        let dimensions = [size.x.unsigned_abs(), size.y.unsigned_abs(), size.z.unsigned_abs()];
+        if dimensions.contains(&0) {
+            continue;
+        }
+        let palette = list(region, "BlockStatePalette")?;
+        let mut states = Vec::new();
+        let mut names = Vec::new();
+        for entry in palette {
+            let entry = compound_value(entry)?;
+            let name = string(entry, "Name")?;
+            let properties = transform_properties(
+                optional_properties(entry, "Properties")?,
+                transform,
+            );
+            states.push(resolve(resolver, name, &properties)?);
+            names.push(name.to_owned());
+        }
+        let bits = bits_for_palette(states.len());
+        let longs = long_array(region, "BlockStates")?;
+        let volume = dimensions[0] as usize * dimensions[1] as usize * dimensions[2] as usize;
+        for index in 0..volume {
+            let palette_index = unpack_palette_index(longs, index, bits);
+            let state = *states
+                .get(palette_index)
+                .ok_or(StructureError::InvalidPaletteIndex(palette_index))?;
+            if state == resolver.air_state() {
+                continue;
+            }
+            let x = index % dimensions[0] as usize;
+            let z = (index / dimensions[0] as usize) % dimensions[2] as usize;
+            let y = index / (dimensions[0] as usize * dimensions[2] as usize);
+            let absolute = transform.apply(BlockPos::new(
+                start.x + x as i32,
+                start.y + y as i32,
+                start.z + z as i32,
+            ));
+            world.set_block(absolute, state)?;
+            *counts.entry(names[palette_index].clone()).or_default() += 1;
+            update_bounds(&mut min, &mut max, absolute);
+        }
+        if let Ok(block_entities) = list(region, "TileEntities") {
+            for entry in block_entities {
+                let entry = compound_value(entry)?;
+                let x = integer(entry, "x")?;
+                let y = integer(entry, "y")?;
+                let z = integer(entry, "z")?;
+                let absolute = transform.apply(BlockPos::new(start.x + x, start.y + y, start.z + z));
+                world.set_block_entity(absolute, nbt_to_block_entity(entry));
+            }
+        }
+        if let Ok(entities) = list(region, "Entities") {
+            for entry in entities {
+                let entry = compound_value(entry)?;
+                if let Some(local) = entity_from_nbt(entry)? {
+                    world.spawn_entity(transform_entity(local, transform, region_position));
+                }
+            }
+        }
+    }
+    Ok(LoadedStructure {
+        world,
+        min: min.unwrap_or(transform.origin),
+        max: max.unwrap_or(transform.origin),
+        format: "litematic".to_owned(),
+        data_version: root.get("MinecraftDataVersion").and_then(value_i32),
+        block_counts: counts,
+    })
+}
+
+fn resolve<R: StructureStateResolver>(
+    resolver: &mut R,
+    name: &str,
+    properties: &BTreeMap<String, String>,
+) -> Result<BlockStateId, StructureError> {
+    resolver
+        .resolve_state(name, properties)
+        .map_err(|error| StructureError::Resolve(error.to_string()))
+}
+
+fn bits_for_palette(size: usize) -> usize {
+    (usize::BITS - size.saturating_sub(1).leading_zeros()).max(2) as usize
+}
+
+fn relative_end(size: i32) -> i32 {
+    if size >= 0 { size - 1 } else { size + 1 }
+}
+
+fn update_bounds(min: &mut Option<BlockPos>, max: &mut Option<BlockPos>, pos: BlockPos) {
+    *min = Some(min.map_or(pos, |old| {
+        BlockPos::new(old.x.min(pos.x), old.y.min(pos.y), old.z.min(pos.z))
+    }));
+    *max = Some(max.map_or(pos, |old| {
+        BlockPos::new(old.x.max(pos.x), old.y.max(pos.y), old.z.max(pos.z))
+    }));
+}
+
+fn unpack_palette_index(longs: &[i64], index: usize, bits: usize) -> usize {
+    let mask = (1u64 << bits) - 1;
+    let bit_index = index * bits;
+    let start_long = bit_index / 64;
+    let start_offset = bit_index % 64;
+    let mut value = (longs.get(start_long).copied().unwrap_or(0) as u64) >> start_offset;
+    if start_offset + bits > 64 {
+        value |= (longs.get(start_long + 1).copied().unwrap_or(0) as u64) << (64 - start_offset);
+    }
+    (value & mask) as usize
+}
+
+fn nbt_to_block_entity(nbt: &HashMap<String, Value>) -> BlockEntityData {
+    let kind = nbt
+        .get("id")
+        .and_then(|value| match value { Value::String(value) => Some(value.clone()), _ => None })
+        .unwrap_or_else(|| "minecraft:unknown".to_owned());
+    let mut fields = nbt
+        .iter()
+        .filter(|(key, _)| !matches!(key.as_str(), "id" | "x" | "y" | "z"))
+        .map(|(key, value)| (key.clone(), nbt_value_to_json(value)))
+        .collect::<BTreeMap<_, _>>();
+    normalize_inventory_fields(&kind, nbt, &mut fields);
+    BlockEntityData { kind, fields }
+}
+
+fn entity_from_nbt(entity: &HashMap<String, Value>) -> Result<Option<EntityData>, StructureError> {
+    let nbt = match entity.get("nbt") {
+        Some(Value::Compound(nbt)) => nbt,
+        _ => entity,
+    };
+    let kind = nbt
+        .get("id")
+        .or_else(|| entity.get("id"))
+        .and_then(|value| match value {
+            Value::String(value) => Some(value.clone()),
+            _ => None,
+        });
+    let Some(kind) = kind else {
+        return Ok(None);
+    };
+    let position = match entity.get("pos").or_else(|| nbt.get("Pos")) {
+        Some(Value::List(values)) if values.len() == 3 => [
+            value_f64(&values[0]).ok_or(StructureError::InvalidType("entity x"))?,
+            value_f64(&values[1]).ok_or(StructureError::InvalidType("entity y"))?,
+            value_f64(&values[2]).ok_or(StructureError::InvalidType("entity z"))?,
+        ],
+        _ => [0.0, 0.0, 0.0],
+    };
+    let mut fields = nbt
+        .iter()
+        .filter(|(key, _)| !matches!(key.as_str(), "id" | "Pos"))
+        .map(|(key, value)| (key.clone(), nbt_value_to_json(value)))
+        .collect::<BTreeMap<_, _>>();
+    normalize_inventory_fields(&kind, nbt, &mut fields);
+    normalize_item_entity_fields(&kind, nbt, &mut fields);
+    Ok(Some(EntityData {
+        kind,
+        position,
+        fields,
+    }))
+}
+
+fn normalize_inventory_fields(
+    kind: &str,
+    nbt: &HashMap<String, Value>,
+    fields: &mut BTreeMap<String, serde_json::Value>,
+) {
+    let Some(Value::List(items)) = nbt.get("Items").or_else(|| nbt.get("items")) else {
+        normalize_cooldown(nbt, fields);
+        return;
+    };
+    let mut inventory = items
+        .iter()
+        .filter_map(|item| {
+            let Value::Compound(item) = item else {
+                return None;
+            };
+            let slot = item
+                .get("Slot")
+                .or_else(|| item.get("slot"))
+                .and_then(value_i32)?;
+            let item_id = item.get("id").and_then(|value| match value {
+                Value::String(value) => Some(value.clone()),
+                _ => None,
+            })?;
+            let count = item
+                .get("count")
+                .or_else(|| item.get("Count"))
+                .and_then(value_i32)?;
+            (count > 0).then_some((slot, item_id, count))
+        })
+        .collect::<Vec<_>>();
+    inventory.sort_by_key(|(slot, _, _)| *slot);
+    let item_count = inventory.iter().map(|(_, _, count)| i64::from(*count)).sum::<i64>();
+    let first_item = inventory.first().map(|(_, item_id, _)| item_id.clone());
+    let inventory = inventory
+        .into_iter()
+        .map(|(slot, item_id, count)| {
+            serde_json::json!({
+                "slot": slot,
+                "item_id": item_id,
+                "count": count,
+            })
+        })
+        .collect::<Vec<_>>();
+    let slot_count = container_slot_count(kind, fields, &inventory);
+    fields.insert("inventory".to_owned(), serde_json::Value::Array(inventory));
+    fields.insert("item_count".to_owned(), serde_json::Value::from(item_count));
+    fields.insert("slot_count".to_owned(), serde_json::Value::from(slot_count));
+    fields.insert(
+        "capacity".to_owned(),
+        serde_json::Value::from(i64::from(slot_count) * 64),
+    );
+    if let Some(item_id) = first_item {
+        fields.insert("item_id".to_owned(), serde_json::Value::String(item_id));
+    }
+    normalize_cooldown(nbt, fields);
+}
+
+fn normalize_cooldown(
+    nbt: &HashMap<String, Value>,
+    fields: &mut BTreeMap<String, serde_json::Value>,
+) {
+    if let Some(cooldown) = nbt
+        .get("TransferCooldown")
+        .or_else(|| nbt.get("transfer_cooldown"))
+        .and_then(value_i32)
+    {
+        fields.insert("cooldown".to_owned(), serde_json::Value::from(cooldown));
+    }
+}
+
+fn container_slot_count(
+    kind: &str,
+    fields: &BTreeMap<String, serde_json::Value>,
+    inventory: &[serde_json::Value],
+) -> i32 {
+    let known = match kind {
+        "minecraft:hopper" | "minecraft:brewing_stand" => Some(5),
+        "minecraft:dispenser" | "minecraft:dropper" | "minecraft:crafter" => Some(9),
+        "minecraft:furnace" | "minecraft:blast_furnace" | "minecraft:smoker" => Some(3),
+        "minecraft:chest" | "minecraft:trapped_chest" | "minecraft:barrel" => Some(27),
+        value if value.ends_with("_shulker_box") || value == "minecraft:shulker_box" => Some(27),
+        _ => None,
+    };
+    known.unwrap_or_else(|| {
+        inventory
+            .iter()
+            .filter_map(|entry| entry.get("slot").and_then(serde_json::Value::as_i64))
+            .max()
+            .map_or(1, |slot| slot.saturating_add(1).clamp(1, i64::from(i32::MAX)) as i32)
+            .max(
+                fields
+                    .get("Size")
+                    .and_then(serde_json::Value::as_i64)
+                    .unwrap_or(1)
+                    .clamp(1, i64::from(i32::MAX)) as i32,
+            )
+    })
+}
+
+fn normalize_item_entity_fields(
+    kind: &str,
+    nbt: &HashMap<String, Value>,
+    fields: &mut BTreeMap<String, serde_json::Value>,
+) {
+    if kind != "minecraft:item" {
+        return;
+    }
+    let Some(Value::Compound(item)) = nbt.get("Item").or_else(|| nbt.get("item")) else {
+        return;
+    };
+    if let Some(Value::String(item_id)) = item.get("id") {
+        fields.insert("item_id".to_owned(), serde_json::Value::String(item_id.clone()));
+    }
+    if let Some(count) = item
+        .get("count")
+        .or_else(|| item.get("Count"))
+        .and_then(value_i32)
+    {
+        fields.insert("item_count".to_owned(), serde_json::Value::from(count));
+    }
+    if let Some(age) = nbt.get("Age").or_else(|| nbt.get("age")).and_then(value_i32) {
+        fields.insert("age".to_owned(), serde_json::Value::from(age));
+    }
+    if let Some(delay) = nbt
+        .get("PickupDelay")
+        .or_else(|| nbt.get("pickup_delay"))
+        .and_then(value_i32)
+    {
+        fields.insert("pickup_delay".to_owned(), serde_json::Value::from(delay));
+    }
+}
+
+fn transform_entity(
+    mut entity: EntityData,
+    transform: StructureTransform,
+    offset: BlockPos,
+) -> EntityData {
+    entity.position = transform.apply_point([
+        entity.position[0] + offset.x as f64,
+        entity.position[1] + offset.y as f64,
+        entity.position[2] + offset.z as f64,
+    ]);
+    entity
+}
+
+fn transform_properties(
+    properties: BTreeMap<String, String>,
+    transform: StructureTransform,
+) -> BTreeMap<String, String> {
+    let mut transformed = BTreeMap::new();
+    for (key, value) in properties {
+        if let Some(direction) = parse_horizontal_direction(&key) {
+            transformed.insert(
+                direction_name(transform_direction(direction, transform)).to_owned(),
+                value,
+            );
+            continue;
+        }
+        let value = match key.as_str() {
+            "facing" => parse_direction(&value)
+                .map(|direction| direction_name(transform_direction(direction, transform)).to_owned())
+                .unwrap_or(value),
+            "axis"
+                if matches!(
+                    transform.rotation,
+                    Rotation::Clockwise90 | Rotation::Counterclockwise90
+                ) => match value.as_str() {
+                    "x" => "z".to_owned(),
+                    "z" => "x".to_owned(),
+                    _ => value,
+                },
+            "hinge" if transform.mirror != Mirror::None => match value.as_str() {
+                "left" => "right".to_owned(),
+                "right" => "left".to_owned(),
+                _ => value,
+            },
+            "shape" if transform.mirror != Mirror::None => match value.as_str() {
+                "inner_left" => "inner_right".to_owned(),
+                "inner_right" => "inner_left".to_owned(),
+                "outer_left" => "outer_right".to_owned(),
+                "outer_right" => "outer_left".to_owned(),
+                _ => transform_rail_shape(&value, transform),
+            },
+            "shape" => transform_rail_shape(&value, transform),
+            _ => value,
+        };
+        transformed.insert(key, value);
+    }
+    transformed
+}
+
+fn transform_rail_shape(value: &str, transform: StructureTransform) -> String {
+    let directions = match value {
+        "north_south" => Some(("north", "south", "")),
+        "east_west" => Some(("east", "west", "")),
+        "ascending_north" => Some(("north", "", "ascending_")),
+        "ascending_south" => Some(("south", "", "ascending_")),
+        "ascending_east" => Some(("east", "", "ascending_")),
+        "ascending_west" => Some(("west", "", "ascending_")),
+        "north_east" => Some(("north", "east", "")),
+        "north_west" => Some(("north", "west", "")),
+        "south_east" => Some(("south", "east", "")),
+        "south_west" => Some(("south", "west", "")),
+        _ => None,
+    };
+    let Some((first, second, prefix)) = directions else {
+        return value.to_owned();
+    };
+    let first = transform_direction(parse_direction(first).unwrap(), transform);
+    if second.is_empty() {
+        return format!("{prefix}{}", direction_name(first));
+    }
+    let second = transform_direction(parse_direction(second).unwrap(), transform);
+    canonical_pair(first, second)
+}
+
+fn canonical_pair(first: Direction, second: Direction) -> String {
+    let north_south = [Direction::North, Direction::South];
+    let east_west = [Direction::East, Direction::West];
+    if north_south.contains(&first) && north_south.contains(&second) {
+        return "north_south".to_owned();
+    }
+    if east_west.contains(&first) && east_west.contains(&second) {
+        return "east_west".to_owned();
+    }
+    let north_or_south = if matches!(first, Direction::North | Direction::South) {
+        first
+    } else {
+        second
+    };
+    let east_or_west = if matches!(first, Direction::East | Direction::West) {
+        first
+    } else {
+        second
+    };
+    format!(
+        "{}_{}",
+        direction_name(north_or_south),
+        direction_name(east_or_west)
+    )
+}
+
+fn transform_direction(direction: Direction, transform: StructureTransform) -> Direction {
+    let mirrored = match transform.mirror {
+        Mirror::None => direction,
+        Mirror::LeftRight => match direction {
+            Direction::North => Direction::South,
+            Direction::South => Direction::North,
+            other => other,
+        },
+        Mirror::FrontBack => match direction {
+            Direction::West => Direction::East,
+            Direction::East => Direction::West,
+            other => other,
+        },
+    };
+    match transform.rotation {
+        Rotation::None => mirrored,
+        Rotation::Clockwise90 => match mirrored {
+            Direction::North => Direction::East,
+            Direction::East => Direction::South,
+            Direction::South => Direction::West,
+            Direction::West => Direction::North,
+            other => other,
+        },
+        Rotation::Clockwise180 => match mirrored {
+            Direction::North => Direction::South,
+            Direction::South => Direction::North,
+            Direction::West => Direction::East,
+            Direction::East => Direction::West,
+            other => other,
+        },
+        Rotation::Counterclockwise90 => match mirrored {
+            Direction::North => Direction::West,
+            Direction::West => Direction::South,
+            Direction::South => Direction::East,
+            Direction::East => Direction::North,
+            other => other,
+        },
+    }
+}
+
+fn parse_horizontal_direction(value: &str) -> Option<Direction> {
+    match parse_direction(value) {
+        Some(direction) if direction.is_horizontal() => Some(direction),
+        _ => None,
+    }
+}
+
+fn parse_direction(value: &str) -> Option<Direction> {
+    match value {
+        "west" => Some(Direction::West),
+        "east" => Some(Direction::East),
+        "down" => Some(Direction::Down),
+        "up" => Some(Direction::Up),
+        "north" => Some(Direction::North),
+        "south" => Some(Direction::South),
+        _ => None,
+    }
+}
+
+fn direction_name(direction: Direction) -> &'static str {
+    match direction {
+        Direction::West => "west",
+        Direction::East => "east",
+        Direction::Down => "down",
+        Direction::Up => "up",
+        Direction::North => "north",
+        Direction::South => "south",
+    }
+}
+
+fn nbt_value_to_json(value: &Value) -> serde_json::Value {
+    match value {
+        Value::Byte(value) => serde_json::Value::from(*value),
+        Value::Short(value) => serde_json::Value::from(*value),
+        Value::Int(value) => serde_json::Value::from(*value),
+        Value::Long(value) => serde_json::Value::from(*value),
+        Value::Float(value) => serde_json::Value::from(*value),
+        Value::Double(value) => serde_json::Value::from(*value),
+        Value::String(value) => serde_json::Value::from(value.clone()),
+        Value::ByteArray(value) => serde_json::Value::Array(value.iter().map(|value| serde_json::Value::from(*value)).collect()),
+        Value::IntArray(value) => serde_json::Value::Array(value.iter().map(|value| serde_json::Value::from(*value)).collect()),
+        Value::LongArray(value) => serde_json::Value::Array(value.iter().map(|value| serde_json::Value::from(*value)).collect()),
+        Value::List(value) => serde_json::Value::Array(value.iter().map(nbt_value_to_json).collect()),
+        Value::Compound(value) => serde_json::Value::Object(value.iter().map(|(key, value)| (key.clone(), nbt_value_to_json(value))).collect()),
+    }
+}
+
+fn list<'a>(map: &'a HashMap<String, Value>, key: &str) -> Result<&'a Vec<Value>, StructureError> {
+    match map.get(key) {
+        Some(Value::List(value)) => Ok(value),
+        _ => Err(StructureError::MissingField(key.to_owned())),
+    }
+}
+
+fn compound<'a>(map: &'a HashMap<String, Value>, key: &str) -> Result<&'a HashMap<String, Value>, StructureError> {
+    match map.get(key) {
+        Some(Value::Compound(value)) => Ok(value),
+        _ => Err(StructureError::MissingField(key.to_owned())),
+    }
+}
+
+fn compound_value(value: &Value) -> Result<&HashMap<String, Value>, StructureError> {
+    match value {
+        Value::Compound(value) => Ok(value),
+        _ => Err(StructureError::InvalidType("compound")),
+    }
+}
+
+fn string<'a>(map: &'a HashMap<String, Value>, key: &str) -> Result<&'a str, StructureError> {
+    match map.get(key) {
+        Some(Value::String(value)) => Ok(value),
+        _ => Err(StructureError::MissingField(key.to_owned())),
+    }
+}
+
+fn integer(map: &HashMap<String, Value>, key: &str) -> Result<i32, StructureError> {
+    map.get(key)
+        .and_then(value_i32)
+        .ok_or_else(|| StructureError::MissingField(key.to_owned()))
+}
+
+fn int_list(map: &HashMap<String, Value>, key: &str) -> Result<[i32; 3], StructureError> {
+    let value = list(map, key)?;
+    if value.len() != 3 {
+        return Err(StructureError::InvalidType("3 element integer list"));
+    }
+    Ok([
+        value_i32(&value[0]).ok_or(StructureError::InvalidType("integer"))?,
+        value_i32(&value[1]).ok_or(StructureError::InvalidType("integer"))?,
+        value_i32(&value[2]).ok_or(StructureError::InvalidType("integer"))?,
+    ])
+}
+
+fn xyz_compound(map: &HashMap<String, Value>, key: &str) -> Result<BlockPos, StructureError> {
+    let value = compound(map, key)?;
+    Ok(BlockPos::new(integer(value, "x")?, integer(value, "y")?, integer(value, "z")?))
+}
+
+fn optional_properties(
+    map: &HashMap<String, Value>,
+    key: &str,
+) -> Result<BTreeMap<String, String>, StructureError> {
+    let Some(value) = map.get(key) else { return Ok(BTreeMap::new()); };
+    let Value::Compound(properties) = value else { return Err(StructureError::InvalidType("properties")); };
+    properties
+        .iter()
+        .map(|(key, value)| match value {
+            Value::String(value) => Ok((key.clone(), value.clone())),
+            _ => Err(StructureError::InvalidType("string property")),
+        })
+        .collect()
+}
+
+fn long_array<'a>(map: &'a HashMap<String, Value>, key: &str) -> Result<&'a [i64], StructureError> {
+    match map.get(key) {
+        Some(Value::LongArray(value)) => Ok(&value[..]),
+        _ => Err(StructureError::MissingField(key.to_owned())),
+    }
+}
+
+fn value_i32(value: &Value) -> Option<i32> {
+    match value {
+        Value::Byte(value) => Some(*value as i32),
+        Value::Short(value) => Some(*value as i32),
+        Value::Int(value) => Some(*value),
+        Value::Long(value) => i32::try_from(*value).ok(),
+        _ => None,
+    }
+}
+
+fn value_f64(value: &Value) -> Option<f64> {
+    match value {
+        Value::Byte(value) => Some(*value as f64),
+        Value::Short(value) => Some(*value as f64),
+        Value::Int(value) => Some(*value as f64),
+        Value::Long(value) => Some(*value as f64),
+        Value::Float(value) => Some(*value as f64),
+        Value::Double(value) => Some(*value),
+        _ => None,
+    }
+}
+
+#[derive(Debug, Error)]
+pub enum StructureError {
+    #[error(transparent)]
+    Io(#[from] std::io::Error),
+    #[error("NBT 解析失败: {0}")]
+    Nbt(fastnbt::error::Error),
+    #[error("无法识别结构格式: {0}")]
+    UnknownFormat(PathBuf),
+    #[error("缺少字段: {0}")]
+    MissingField(String),
+    #[error("NBT 字段类型无效, 期望 {0}")]
+    InvalidType(&'static str),
+    #[error("调色板索引越界: {0}")]
+    InvalidPaletteIndex(usize),
+    #[error("方块状态解析失败: {0}")]
+    Resolve(String),
+    #[error(transparent)]
+    World(#[from] redstone_core::WorldError),
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn packed_palette_values_can_cross_long_boundaries() {
+        let bits = 5;
+        let values = [3usize, 7, 17, 31, 1, 9, 12, 25, 4, 30, 2, 15, 28, 6];
+        let mut longs = vec![0u64; (values.len() * bits).div_ceil(64)];
+        for (index, value) in values.iter().copied().enumerate() {
+            let bit_index = index * bits;
+            let start = bit_index / 64;
+            let offset = bit_index % 64;
+            longs[start] |= (value as u64) << offset;
+            if offset + bits > 64 {
+                longs[start + 1] |= (value as u64) >> (64 - offset);
+            }
+        }
+        let longs = longs.into_iter().map(|value| value as i64).collect::<Vec<_>>();
+        for (index, expected) in values.into_iter().enumerate() {
+            assert_eq!(unpack_palette_index(&longs, index, bits), expected);
+        }
+    }
+
+    #[test]
+    fn relative_end_matches_litematica_negative_size_contract() {
+        assert_eq!(relative_end(3), 2);
+        assert_eq!(relative_end(-3), -2);
+    }
+
+    #[test]
+    fn transform_mirrors_before_rotating() {
+        let transform = StructureTransform {
+            origin: BlockPos::new(10, 20, 30),
+            mirror: Mirror::FrontBack,
+            rotation: Rotation::Clockwise90,
+        };
+        assert_eq!(
+            transform.apply(BlockPos::new(2, 3, 4)),
+            BlockPos::new(6, 23, 28)
+        );
+    }
+}
