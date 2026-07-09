@@ -75,6 +75,14 @@ download-server version="26.1.2":
       exit 1
     fi
     output="assets/server-{{ version }}.jar"
+    if [ -f "$output" ]; then
+      actual_sha1="$(shasum -a 1 "$output" | awk '{print $1}')"
+      if [ "$actual_sha1" = "$server_sha1" ]; then
+        echo "server JAR 已存在且校验通过"
+        exit 0
+      fi
+      echo "现有 server JAR 校验失败, 重新下载"
+    fi
     echo "下载 server JAR: $output"
     curl -fL "$server_url" -o "$output"
     actual_sha1="$(shasum -a 1 "$output" | awk '{print $1}')"
@@ -84,6 +92,21 @@ download-server version="26.1.2":
       exit 1
     fi
     echo "server JAR 校验完成"
+
+# just gametest-oracle 26.1.2 --help
+# 使用项目内运行目录启动官方 GameTest server.
+gametest-oracle version="26.1.2" *args: (download-server version)
+    #!/usr/bin/env sh
+    set -eu
+    runtime_dir=".gametest/{{ version }}"
+    mkdir -p "$runtime_dir"
+    echo "启动 GameTest oracle: $runtime_dir"
+    exec java \
+      -DbundlerMainClass=net.minecraft.gametest.Main \
+      -DbundlerRepoDir="$runtime_dir" \
+      -jar "assets/server-{{ version }}.jar" \
+      --universe "$runtime_dir/world" \
+      {{args}}
 
 # 运行 Rust 静态检查.
 clippy:

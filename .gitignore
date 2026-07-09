@@ -1,5 +1,8 @@
 /target/
 /decompiled/
 /assets/client-*.jar
+/assets/server-*.jar
+/.gametest/
 /tools/*.jar
 /vendors/
+*.log
