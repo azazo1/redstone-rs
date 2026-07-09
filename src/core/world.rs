@@ -33,15 +33,44 @@ impl SectionPos {
 pub struct BlockEntity {
     pub comparator_signal: u8,
     pub piston_motion: Option<PistonMotion>,
+    pub inventory: Option<Inventory>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Inventory {
+    pub items: u16,
+    pub capacity: u16,
+}
+
+impl Inventory {
+    pub fn signal(self) -> u8 {
+        if self.items == 0 || self.capacity == 0 {
+            0
+        } else {
+            let scaled = (self.items.min(self.capacity) as u32 * 14) / self.capacity as u32;
+            (scaled as u8 + 1).min(15)
+        }
+    }
+
+    pub fn available(self) -> u16 {
+        self.capacity.saturating_sub(self.items)
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PistonMotion {
     pub moved_state: BlockState,
+    pub moved_data: Option<MovingBlockData>,
     pub direction: super::Direction,
     pub extending: bool,
     pub source: bool,
     pub progress: u8,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MovingBlockData {
+    pub comparator_signal: u8,
+    pub inventory: Option<Inventory>,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -147,6 +176,21 @@ impl World {
         self.block_entities.get(&position)
     }
 
+    pub fn inventory(&self, position: Position) -> Option<Inventory> {
+        self.block_entities.get(&position)?.inventory
+    }
+
+    pub(crate) fn moving_block_data(&self, position: Position) -> Option<MovingBlockData> {
+        let entity = self.block_entities.get(&position)?;
+        if entity.piston_motion.is_some() {
+            return None;
+        }
+        Some(MovingBlockData {
+            comparator_signal: entity.comparator_signal,
+            inventory: entity.inventory,
+        })
+    }
+
     pub fn set_block_entity(&mut self, position: Position, entity: Option<BlockEntity>) {
         match entity {
             Some(entity) => {
@@ -158,12 +202,56 @@ impl World {
         }
     }
 
+    pub fn set_inventory(&mut self, position: Position, inventory: Inventory) {
+        let inventory = Inventory {
+            items: inventory.items.min(inventory.capacity),
+            capacity: inventory.capacity.max(1),
+        };
+        let entity = self.block_entities.entry(position).or_default();
+        entity.comparator_signal = inventory.signal();
+        entity.inventory = Some(inventory);
+    }
+
+    pub(crate) fn ensure_inventory(&mut self, position: Position, capacity: u16) {
+        if self.inventory(position).is_none() {
+            self.set_inventory(position, Inventory { items: 0, capacity });
+        }
+    }
+
+    pub(crate) fn transfer_inventory_unit(&mut self, source: Position, destination: Position) -> bool {
+        let Some(mut source_inventory) = self.inventory(source) else {
+            return false;
+        };
+        let Some(mut destination_inventory) = self.inventory(destination) else {
+            return false;
+        };
+        if source_inventory.items == 0 || destination_inventory.available() == 0 {
+            return false;
+        }
+        source_inventory.items -= 1;
+        destination_inventory.items += 1;
+        self.set_inventory(source, source_inventory);
+        self.set_inventory(destination, destination_inventory);
+        self.trace.record(
+            self.game_tick,
+            TraceKind::InventoryTransfer,
+            source,
+            Some(self.state(source)),
+            Some(self.state(source)),
+            format!("inventory_to:{destination}"),
+        );
+        self.update_neighbors_at(source, self.state(source).kind);
+        self.update_neighbors_at(destination, self.state(destination).kind);
+        true
+    }
+
     pub(crate) fn start_piston_motion(&mut self, position: Position, motion: PistonMotion) {
         self.block_entities.insert(
             position,
             BlockEntity {
                 comparator_signal: 0,
                 piston_motion: Some(motion),
+                inventory: None,
             },
         );
     }
@@ -380,6 +468,16 @@ impl World {
         self.block_entities.remove(&position);
         if self.state(position).kind == BlockKind::MovingPiston {
             self.set_state_silent(position, motion.moved_state, "piston_motion_complete".to_owned());
+            if let Some(data) = motion.moved_data {
+                self.block_entities.insert(
+                    position,
+                    BlockEntity {
+                        comparator_signal: data.comparator_signal,
+                        piston_motion: None,
+                        inventory: data.inventory,
+                    },
+                );
+            }
             self.update_neighbors_at(position, motion.moved_state.kind);
         }
         Some(motion)

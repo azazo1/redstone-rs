@@ -1,3 +1,4 @@
+mod inventory;
 mod piston;
 mod signal;
 
@@ -29,15 +30,19 @@ impl BlockBehavior for VanillaBehavior {
         changed_block: BlockKind,
         source: Position,
     ) {
-        signal::handle_neighbor_changed(world, position, changed_block, source);
+        if !inventory::handle_neighbor_changed(world, position) {
+            signal::handle_neighbor_changed(world, position, changed_block, source);
+        }
     }
 
     fn on_scheduled_tick(&self, world: &mut World, tick: ScheduledTick) {
-        signal::handle_scheduled_tick(world, tick);
+        if !inventory::handle_scheduled_tick(world, tick) {
+            signal::handle_scheduled_tick(world, tick);
+        }
     }
 
     fn on_block_event(&self, world: &mut World, event: BlockEvent) {
-        if !signal::handle_block_event(world, event) {
+        if !signal::handle_block_event(world, event) && !inventory::handle_block_event(world, event) {
             piston::handle_block_event(world, event);
         }
     }

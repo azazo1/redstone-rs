@@ -6,8 +6,8 @@ use tracing::info;
 
 use crate::{
     core::{
-        BlockEntity, BlockKind, BlockState, Position, Snapshot, TraceEvent, TraceFilter, TraceKind,
-        World, WorldError,
+        BlockEntity, BlockKind, BlockState, Inventory, Position, Snapshot, TraceEvent, TraceFilter,
+        TraceKind, World, WorldError,
     },
     io::StructureInput,
     minecraft::{toggle_lever, trigger_button},
@@ -39,6 +39,11 @@ pub enum InputOperation {
     SetSignal {
         position: Position,
         signal: u8,
+    },
+    SetInventory {
+        position: Position,
+        items: u16,
+        capacity: u16,
     },
     TriggerNeighborUpdate {
         position: Position,
@@ -153,6 +158,7 @@ impl SimulationSession {
                     Some(BlockEntity {
                         comparator_signal: signal.min(15),
                         piston_motion: None,
+                        inventory: None,
                     }),
                 );
                 self.world.update_neighbors_at(position, self.world.state(position).kind);
@@ -162,6 +168,15 @@ impl SimulationSession {
             }
             InputOperation::SetSignal { position, signal } => {
                 crate::minecraft::set_external_signal(&mut self.world, position, signal)?;
+            }
+            InputOperation::SetInventory {
+                position,
+                items,
+                capacity,
+            } => {
+                self.world.set_inventory(position, Inventory { items, capacity });
+                self.world.neighbor_changed(position, self.world.state(position).kind);
+                self.world.update_neighbors_at(position, self.world.state(position).kind);
             }
             InputOperation::TriggerNeighborUpdate {
                 position,

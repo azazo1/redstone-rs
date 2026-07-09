@@ -179,6 +179,172 @@ async fn door_follows_redstone_power_and_tnt_is_consumed_on_rising_edge() {
 }
 
 #[tokio::test]
+async fn hopper_transfers_one_inventory_unit_downward_every_eight_ticks() {
+    let source = Position::new(0, 1, 0);
+    let hopper = Position::new(0, 0, 0);
+    let destination = Position::new(0, -1, 0);
+    let mut session = SimulationSession::load_structure(StructureInput {
+        blocks: vec![
+            StructureBlock {
+                position: source,
+                state: BlockState::new(BlockKind::Container),
+            },
+            StructureBlock {
+                position: hopper,
+                state: BlockState::new(BlockKind::Hopper),
+            },
+            StructureBlock {
+                position: destination,
+                state: BlockState::new(BlockKind::Container),
+            },
+        ],
+    })
+    .await
+    .expect("structure should load");
+
+    session
+        .apply(InputAction {
+            tick: 1,
+            operation: InputOperation::SetInventory {
+                position: hopper,
+                items: 2,
+                capacity: 64,
+            },
+        })
+        .await;
+    session
+        .apply(InputAction {
+            tick: 1,
+            operation: InputOperation::SetInventory {
+                position: destination,
+                items: 0,
+                capacity: 64,
+            },
+        })
+        .await;
+    for _ in 0..8 {
+        session.step().await.expect("hopper tick should advance");
+    }
+
+    assert_eq!(session.world().inventory(hopper).expect("hopper inventory").items, 1);
+    assert_eq!(session.world().inventory(destination).expect("destination inventory").items, 1);
+    assert!(session
+        .trace()
+        .await
+        .iter()
+        .any(|event| event.kind == redstone_rs::core::TraceKind::InventoryTransfer));
+}
+
+#[tokio::test]
+async fn hopper_pulls_from_above_then_pushes_to_its_facing_direction() {
+    let source = Position::new(0, 1, 0);
+    let hopper = Position::new(0, 0, 0);
+    let destination = Position::new(0, -1, 0);
+    let mut session = SimulationSession::load_structure(StructureInput {
+        blocks: vec![
+            StructureBlock {
+                position: source,
+                state: BlockState::new(BlockKind::Container),
+            },
+            StructureBlock {
+                position: hopper,
+                state: BlockState::new(BlockKind::Hopper),
+            },
+            StructureBlock {
+                position: destination,
+                state: BlockState::new(BlockKind::Container),
+            },
+        ],
+    })
+    .await
+    .expect("structure should load");
+
+    session
+        .apply(InputAction {
+            tick: 1,
+            operation: InputOperation::SetInventory {
+                position: source,
+                items: 1,
+                capacity: 64,
+            },
+        })
+        .await;
+    session
+        .apply(InputAction {
+            tick: 1,
+            operation: InputOperation::SetInventory {
+                position: destination,
+                items: 0,
+                capacity: 64,
+            },
+        })
+        .await;
+    for _ in 0..16 {
+        session.step().await.expect("hopper should pull then push");
+    }
+
+    assert_eq!(session.world().inventory(source).expect("source inventory").items, 0);
+    assert_eq!(session.world().inventory(hopper).expect("hopper inventory").items, 0);
+    assert_eq!(session.world().inventory(destination).expect("destination inventory").items, 1);
+}
+
+#[tokio::test]
+async fn dropper_moves_one_inventory_unit_on_rising_edge() {
+    let lever = Position::new(-1, 0, 0);
+    let dropper = Position::new(0, 0, 0);
+    let destination = Position::new(1, 0, 0);
+    let mut session = SimulationSession::load_structure(StructureInput {
+        blocks: vec![
+            StructureBlock {
+                position: lever,
+                state: BlockState::new(BlockKind::Lever),
+            },
+            StructureBlock {
+                position: dropper,
+                state: BlockState::new(BlockKind::Dropper).with_facing(Direction::East),
+            },
+            StructureBlock {
+                position: destination,
+                state: BlockState::new(BlockKind::Container),
+            },
+        ],
+    })
+    .await
+    .expect("structure should load");
+
+    session
+        .apply(InputAction {
+            tick: 1,
+            operation: InputOperation::SetInventory {
+                position: dropper,
+                items: 1,
+                capacity: 9,
+            },
+        })
+        .await;
+    session
+        .apply(InputAction {
+            tick: 1,
+            operation: InputOperation::SetInventory {
+                position: destination,
+                items: 0,
+                capacity: 64,
+            },
+        })
+        .await;
+    session
+        .apply(InputAction {
+            tick: 1,
+            operation: InputOperation::UseBlock { position: lever },
+        })
+        .await;
+    session.step().await.expect("dropper should activate");
+
+    assert_eq!(session.world().inventory(dropper).expect("dropper inventory").items, 0);
+    assert_eq!(session.world().inventory(destination).expect("destination inventory").items, 1);
+}
+
+#[tokio::test]
 async fn redstone_wire_loses_one_power_level_per_segment() {
     let source = Position::new(0, 0, 0);
     let first = Position::new(1, 0, 0);
@@ -312,6 +478,40 @@ async fn comparator_preserves_container_signal_strength() {
 
     assert_eq!(session.world().state(comparator).power(), 10);
     assert!(session.world().state(comparator).powered());
+}
+
+#[tokio::test]
+async fn comparator_derives_signal_from_container_inventory_fullness() {
+    let container = Position::new(0, 0, 0);
+    let comparator = Position::new(1, 0, 0);
+    let mut session = SimulationSession::load_structure(StructureInput {
+        blocks: vec![
+            StructureBlock {
+                position: container,
+                state: BlockState::new(BlockKind::Container),
+            },
+            StructureBlock {
+                position: comparator,
+                state: BlockState::new(BlockKind::Comparator).with_facing(Direction::East),
+            },
+        ],
+    })
+    .await
+    .expect("structure should load");
+
+    session
+        .apply(InputAction {
+            tick: 1,
+            operation: InputOperation::SetInventory {
+                position: container,
+                items: 32,
+                capacity: 64,
+            },
+        })
+        .await;
+    session.step().await.expect("comparator should observe inventory");
+
+    assert_eq!(session.world().state(comparator).power(), 8);
 }
 
 #[tokio::test]
@@ -801,6 +1001,50 @@ async fn piston_destroys_redstone_wire_in_its_path() {
         session.step().await.expect("piston motion should complete");
     }
     assert_eq!(session.world().state(wire).kind, BlockKind::PistonHead);
+}
+
+#[tokio::test]
+async fn piston_preserves_container_inventory_while_moving_it() {
+    let piston = Position::new(0, 0, 0);
+    let container = Position::new(1, 0, 0);
+    let destination = container.offset(Direction::East);
+    let mut session = SimulationSession::load_structure(StructureInput {
+        blocks: vec![
+            StructureBlock {
+                position: piston,
+                state: BlockState::new(BlockKind::Piston).with_facing(Direction::East),
+            },
+            StructureBlock {
+                position: container,
+                state: BlockState::new(BlockKind::Container),
+            },
+            StructureBlock {
+                position: Position::new(0, -1, 0),
+                state: BlockState::new(BlockKind::RedstoneBlock),
+            },
+        ],
+    })
+    .await
+    .expect("structure should load");
+
+    session
+        .apply(InputAction {
+            tick: 1,
+            operation: InputOperation::SetInventory {
+                position: container,
+                items: 17,
+                capacity: 64,
+            },
+        })
+        .await;
+    session.step().await.expect("piston should start moving container");
+    for _ in 0..3 {
+        session.step().await.expect("container motion should complete");
+    }
+
+    let inventory = session.world().inventory(destination).expect("moved container inventory");
+    assert_eq!(inventory.items, 17);
+    assert_eq!(inventory.capacity, 64);
 }
 
 #[tokio::test]

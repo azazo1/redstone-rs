@@ -135,6 +135,7 @@ pub enum BlockKind {
     Dispenser,
     Crafter,
     Tnt,
+    Hopper,
     Container,
     Piston,
     StickyPiston,
@@ -206,10 +207,10 @@ impl BlockState {
     const LIT: u32 = 1 << 13;
 
     pub const fn new(kind: BlockKind) -> Self {
-        let bits = if matches!(kind, BlockKind::RedstoneTorch) {
-            Self::POWERED
-        } else {
-            0
+        let bits = match kind {
+            BlockKind::RedstoneTorch => Self::POWERED,
+            BlockKind::Hopper => Direction::Down as u32,
+            _ => 0,
         };
         Self { kind, bits }
     }

@@ -61,9 +61,9 @@ fn extend(world: &mut World, piston: Position, state: BlockState) {
     let to_move = plan.to_move;
     let moved = to_move
         .iter()
-        .map(|position| (*position, world.state(*position)))
+        .map(|position| (*position, world.state(*position), world.moving_block_data(*position)))
         .collect::<Vec<_>>();
-    for (position, moved_state) in moved {
+    for (position, moved_state, moved_data) in moved {
         let destination = position.offset(direction);
         world.set_state_silent(
             destination,
@@ -74,6 +74,7 @@ fn extend(world: &mut World, piston: Position, state: BlockState) {
             destination,
             PistonMotion {
                 moved_state,
+                moved_data,
                 direction,
                 extending: true,
                 source: false,
@@ -92,6 +93,7 @@ fn extend(world: &mut World, piston: Position, state: BlockState) {
         head,
         PistonMotion {
             moved_state: BlockState::new(BlockKind::PistonHead).with_facing(direction),
+            moved_data: None,
             direction,
             extending: true,
             source: true,
@@ -126,6 +128,7 @@ fn retract(world: &mut World, piston: Position, state: BlockState) {
         };
         if !piston_piece && movable(world.state(pulled)) {
             let moved_state = world.state(pulled);
+            let moved_data = world.moving_block_data(pulled);
             world.set_state_silent(
                 arm,
                 BlockState::new(BlockKind::MovingPiston).with_facing(direction),
@@ -135,6 +138,7 @@ fn retract(world: &mut World, piston: Position, state: BlockState) {
                 arm,
                 PistonMotion {
                     moved_state,
+                    moved_data,
                     direction,
                     extending: false,
                     source: false,

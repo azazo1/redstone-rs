@@ -11,6 +11,7 @@ pub enum TraceKind {
     BlockEvent,
     NeighborUpdate,
     PistonMotion,
+    InventoryTransfer,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]

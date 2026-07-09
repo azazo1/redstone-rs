@@ -80,6 +80,7 @@ pub(crate) fn state_from_parts(
         "minecraft:dispenser" => BlockKind::Dispenser,
         "minecraft:crafter" => BlockKind::Crafter,
         "minecraft:tnt" => BlockKind::Tnt,
+        "minecraft:hopper" => BlockKind::Hopper,
         "minecraft:barrel" | "minecraft:chest" | "minecraft:trapped_chest" => BlockKind::Container,
         "minecraft:piston" => BlockKind::Piston,
         "minecraft:sticky_piston" => BlockKind::StickyPiston,
