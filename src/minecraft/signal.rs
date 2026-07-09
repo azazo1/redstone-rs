@@ -80,11 +80,7 @@ fn direct_signal_from(state: BlockState, toward: Direction) -> u8 {
         BlockKind::RedstoneBlock => 15,
         BlockKind::DaylightDetector | BlockKind::Target => state.power(),
         BlockKind::RedstoneWire => {
-            if matches!(toward, Direction::Up | Direction::Down) {
-                0
-            } else {
-                state.power()
-            }
+            if toward == Direction::Up { 0 } else { state.power() }
         }
         BlockKind::RedstoneTorch => {
             if state.powered() && toward != Direction::Down {
@@ -122,7 +118,7 @@ fn conductor_signal(world: &World, position: Position) -> u8 {
 }
 
 fn direct_conductor_signal_from(state: BlockState, toward: Direction) -> u8 {
-    if state.kind == BlockKind::RedstoneWire {
+    if state.kind == BlockKind::RedstoneWire && toward != Direction::Down {
         0
     } else {
         direct_signal_from(state, toward)

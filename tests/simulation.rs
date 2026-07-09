@@ -476,6 +476,41 @@ async fn redstone_wire_connects_upward_over_adjacent_conductor() {
 }
 
 #[tokio::test]
+async fn redstone_wire_strongly_powers_the_conductor_below_it() {
+    let source = Position::new(-1, 1, 0);
+    let wire = Position::new(0, 1, 0);
+    let conductor = Position::new(0, 0, 0);
+    let piston = Position::new(1, 0, 0);
+    let mut session = SimulationSession::load_structure(StructureInput {
+        blocks: vec![
+            StructureBlock {
+                position: source,
+                state: BlockState::new(BlockKind::RedstoneBlock),
+            },
+            StructureBlock {
+                position: wire,
+                state: BlockState::new(BlockKind::RedstoneWire),
+            },
+            StructureBlock {
+                position: conductor,
+                state: BlockState::new(BlockKind::Solid),
+            },
+            StructureBlock {
+                position: piston,
+                state: BlockState::new(BlockKind::Piston).with_facing(Direction::East),
+            },
+        ],
+    })
+    .await
+    .expect("structure should load");
+
+    session.step().await.expect("strong power should activate piston");
+
+    assert_eq!(session.world().state(wire).power(), 15);
+    assert!(session.world().state(piston).extended());
+}
+
+#[tokio::test]
 async fn repeater_applies_two_game_tick_delay_and_side_lock() {
     let source = Position::new(0, 0, 0);
     let repeater = Position::new(1, 0, 0);
@@ -578,6 +613,53 @@ async fn comparator_derives_signal_from_container_inventory_fullness() {
     session.step().await.expect("comparator should observe inventory");
 
     assert_eq!(session.world().state(comparator).power(), 8);
+}
+
+#[tokio::test]
+async fn replacing_container_clears_its_comparator_signal() {
+    let container = Position::new(0, 0, 0);
+    let comparator = Position::new(1, 0, 0);
+    let mut session = SimulationSession::load_structure(StructureInput {
+        blocks: vec![
+            StructureBlock {
+                position: container,
+                state: BlockState::new(BlockKind::Container),
+            },
+            StructureBlock {
+                position: comparator,
+                state: BlockState::new(BlockKind::Comparator).with_facing(Direction::East),
+            },
+        ],
+    })
+    .await
+    .expect("structure should load");
+
+    session
+        .apply(InputAction {
+            tick: 1,
+            operation: InputOperation::SetInventory {
+                position: container,
+                items: 64,
+                capacity: 64,
+            },
+        })
+        .await;
+    session.step().await.expect("container should update comparator");
+    assert_eq!(session.world().state(comparator).power(), 15);
+
+    session
+        .apply(InputAction {
+            tick: 2,
+            operation: InputOperation::SetBlock {
+                position: container,
+                state: BlockState::new(BlockKind::Solid),
+            },
+        })
+        .await;
+    session.step().await.expect("replacement should update comparator");
+
+    assert!(session.world().block_entity(container).is_none());
+    assert_eq!(session.world().state(comparator).power(), 0);
 }
 
 #[tokio::test]

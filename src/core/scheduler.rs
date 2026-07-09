@@ -42,6 +42,7 @@ pub struct Scheduler {
     scheduled_keys: BTreeSet<(BlockKind, Position)>,
     block_events: VecDeque<BlockEvent>,
     block_event_keys: BTreeSet<BlockEvent>,
+    peak_pending: usize,
 }
 
 impl Scheduler {
@@ -65,6 +66,7 @@ impl Scheduler {
         };
         self.next_sub_tick = self.next_sub_tick.wrapping_add(1);
         self.scheduled.push(Reverse(tick));
+        self.record_pending_peak();
     }
 
     pub fn pop_due(&mut self, current_tick: u64) -> Option<ScheduledTick> {
@@ -84,6 +86,7 @@ impl Scheduler {
     pub fn enqueue_block_event(&mut self, event: BlockEvent) {
         if self.block_event_keys.insert(event) {
             self.block_events.push_back(event);
+            self.record_pending_peak();
         }
     }
 
@@ -95,5 +98,13 @@ impl Scheduler {
 
     pub fn pending_len(&self) -> usize {
         self.scheduled.len() + self.block_events.len()
+    }
+
+    pub fn peak_pending_len(&self) -> usize {
+        self.peak_pending
+    }
+
+    fn record_pending_peak(&mut self) {
+        self.peak_pending = self.peak_pending.max(self.pending_len());
     }
 }

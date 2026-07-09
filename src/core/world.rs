@@ -290,7 +290,7 @@ impl World {
             return false;
         }
         section.set(position, state);
-        if state.kind == BlockKind::Air {
+        if before.kind != state.kind {
             self.block_entities.remove(&position);
         }
         self.trace.record(
@@ -518,6 +518,26 @@ impl World {
 
     pub fn scheduled_count(&self) -> usize {
         self.scheduler.pending_len()
+    }
+
+    pub fn peak_scheduled_count(&self) -> usize {
+        self.scheduler.peak_pending_len()
+    }
+
+    pub fn estimated_storage_bytes(&self) -> usize {
+        const BTREE_ENTRY_OVERHEAD: usize = 48;
+
+        let block_entries = self
+            .sections
+            .values()
+            .map(|section| section.blocks.len())
+            .sum::<usize>();
+        let section_bytes = self.sections.len() * (std::mem::size_of::<Section>() + BTREE_ENTRY_OVERHEAD);
+        let block_bytes = block_entries * (std::mem::size_of::<(u16, BlockState)>() + BTREE_ENTRY_OVERHEAD);
+        let entity_bytes = self.block_entities.len() * (std::mem::size_of::<(Position, BlockEntity)>() + BTREE_ENTRY_OVERHEAD);
+        let loaded_bytes = self.loaded_sections.len() * (std::mem::size_of::<SectionPos>() + BTREE_ENTRY_OVERHEAD);
+
+        section_bytes + block_bytes + entity_bytes + loaded_bytes
     }
 
 }

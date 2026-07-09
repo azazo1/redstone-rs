@@ -1,5 +1,5 @@
 use redstone_rs::{
-    core::{NeighborUpdate, NeighborUpdater, Scheduler, TickPriority},
+    core::{BlockEvent, NeighborUpdate, NeighborUpdater, Scheduler, TickPriority},
     BlockKind, Direction, Position,
 };
 
@@ -17,6 +17,24 @@ fn scheduled_ticks_use_priority_then_insertion_order_and_deduplicate() {
     assert_eq!(first.block, BlockKind::Comparator);
     assert_eq!(second.block, BlockKind::Repeater);
     assert!(scheduler.pop_due(12).is_none());
+}
+
+#[test]
+fn scheduler_retains_the_high_water_mark_after_events_are_processed() {
+    let mut scheduler = Scheduler::default();
+    scheduler.schedule(0, Position::new(0, 0, 0), BlockKind::Repeater, 1, TickPriority::Normal);
+    scheduler.enqueue_block_event(BlockEvent {
+        position: Position::new(1, 0, 0),
+        block: BlockKind::Piston,
+        action: 0,
+        parameter: 0,
+    });
+
+    assert_eq!(scheduler.peak_pending_len(), 2);
+    assert!(scheduler.pop_due(1).is_some());
+    assert!(scheduler.pop_block_event().is_some());
+    assert_eq!(scheduler.pending_len(), 0);
+    assert_eq!(scheduler.peak_pending_len(), 2);
 }
 
 #[test]

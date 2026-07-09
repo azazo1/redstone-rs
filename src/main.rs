@@ -94,10 +94,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             session.run_until(ticks).await;
             let elapsed = start.elapsed();
             let snapshot = session.snapshot().await;
+            let elapsed_seconds = elapsed.as_secs_f64().max(f64::MIN_POSITIVE);
             info!(
                 blocks = snapshot.blocks.len(),
                 elapsed_ms = elapsed.as_millis(),
+                ticks_per_second = ticks as f64 / elapsed_seconds,
+                block_ticks_per_second = snapshot.blocks.len() as f64 * ticks as f64 / elapsed_seconds,
                 scheduled = session.world().scheduled_count(),
+                peak_scheduled = session.world().peak_scheduled_count(),
+                estimated_storage_bytes = session.world().estimated_storage_bytes(),
                 "benchmark completed"
             );
         }
