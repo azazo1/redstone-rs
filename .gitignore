@@ -1,0 +1,4 @@
+/target/
+/decompiled/
+/assets/client-*.jar
+/tools/*.jar
