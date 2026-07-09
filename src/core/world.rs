@@ -422,9 +422,4 @@ impl World {
         self.scheduler.pending_len()
     }
 
-    pub(crate) fn move_state_silent(&mut self, from: Position, to: Position, cause: String) {
-        let state = self.state(from);
-        self.set_state_silent(to, state, cause.clone());
-        self.set_state_silent(from, BlockState::new(BlockKind::Air), cause);
-    }
 }

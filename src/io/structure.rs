@@ -65,6 +65,9 @@ pub(crate) fn state_from_parts(
         "minecraft:comparator" => BlockKind::Comparator,
         "minecraft:observer" => BlockKind::Observer,
         "minecraft:redstone_lamp" => BlockKind::Lamp,
+        "minecraft:copper_bulb" | "minecraft:exposed_copper_bulb" | "minecraft:weathered_copper_bulb" | "minecraft:oxidized_copper_bulb" | "minecraft:waxed_copper_bulb" => BlockKind::CopperBulb,
+        "minecraft:daylight_detector" => BlockKind::DaylightDetector,
+        "minecraft:target" => BlockKind::Target,
         "minecraft:barrel" | "minecraft:chest" | "minecraft:trapped_chest" => BlockKind::Container,
         "minecraft:piston" => BlockKind::Piston,
         "minecraft:sticky_piston" => BlockKind::StickyPiston,
@@ -83,7 +86,12 @@ pub(crate) fn state_from_parts(
         state = state.with_powered(parse_bool(powered)?);
     }
     if let Some(lit) = properties.get("lit") {
-        state = state.with_powered(parse_bool(lit)?);
+        let lit = parse_bool(lit)?;
+        state = if kind == BlockKind::RedstoneTorch {
+            state.with_powered(lit)
+        } else {
+            state.with_lit(lit)
+        };
     }
     if let Some(power) = properties.get("power") {
         state = state.with_power(power.parse::<u8>().map_err(|_| StructureError::UnsupportedBlock(name.to_owned()))?);

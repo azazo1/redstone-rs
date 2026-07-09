@@ -2,7 +2,8 @@ use std::path::PathBuf;
 
 use clap::{Parser, Subcommand};
 use redstone_rs::{
-    io::{StructureBlock, StructureInput, TestVector}, BlockKind, BlockState, Position, SimulationSession,
+    io::{diff_snapshots, SimulationTrace, StructureBlock, StructureInput, TestVector}, BlockKind, BlockState,
+    Position, SimulationSession,
 };
 use tracing::{info, Level};
 use tracing_subscriber::{fmt, EnvFilter};
@@ -37,6 +38,14 @@ enum Command {
     Vector {
         #[arg(long)]
         vector: PathBuf,
+        #[arg(long)]
+        output: PathBuf,
+    },
+    Diff {
+        #[arg(long)]
+        expected: PathBuf,
+        #[arg(long)]
+        actual: PathBuf,
         #[arg(long)]
         output: PathBuf,
     },
@@ -97,6 +106,21 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             let encoded = serde_json::to_vec_pretty(&trace)?;
             tokio::fs::write(&output, encoded).await?;
             info!(frames = trace.frames.len(), events = trace.events.len(), path = %output.display(), "test vector completed");
+        }
+        Command::Diff {
+            expected,
+            actual,
+            output,
+        } => {
+            let expected_trace: SimulationTrace = serde_json::from_slice(&tokio::fs::read(&expected).await?)?;
+            let actual_trace: SimulationTrace = serde_json::from_slice(&tokio::fs::read(&actual).await?)?;
+            let differences = diff_snapshots(&expected_trace.frames, &actual_trace.frames);
+            tokio::fs::write(&output, serde_json::to_vec_pretty(&differences)?).await?;
+            info!(
+                differences = differences.len(),
+                path = %output.display(),
+                "simulation traces compared"
+            );
         }
     }
 

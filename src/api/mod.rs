@@ -36,6 +36,10 @@ pub enum InputOperation {
         position: Position,
         powered: bool,
     },
+    SetSignal {
+        position: Position,
+        signal: u8,
+    },
     TriggerNeighborUpdate {
         position: Position,
         changed_block: BlockKind,
@@ -155,6 +159,9 @@ impl SimulationSession {
             }
             InputOperation::SetPowered { position, powered } => {
                 crate::minecraft::set_external_power(&mut self.world, position, powered)?;
+            }
+            InputOperation::SetSignal { position, signal } => {
+                crate::minecraft::set_external_signal(&mut self.world, position, signal)?;
             }
             InputOperation::TriggerNeighborUpdate {
                 position,

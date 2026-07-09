@@ -51,9 +51,14 @@ fn piston_powered(world: &World, position: Position, push_direction: Direction) 
 
 fn extend(world: &mut World, piston: Position, state: BlockState) {
     let direction = state.facing();
-    let Some(to_move) = resolve_push(world, piston, direction) else {
+    let Some(plan) = resolve_push(world, piston, direction) else {
         return;
     };
+    for position in &plan.to_destroy {
+        world.set_state_silent(*position, BlockState::new(BlockKind::Air), "piston_destroy".to_owned());
+        world.update_neighbors_at(*position, BlockKind::Air);
+    }
+    let to_move = plan.to_move;
     let moved = to_move
         .iter()
         .map(|position| (*position, world.state(*position)))
@@ -120,31 +125,63 @@ fn retract(world: &mut World, piston: Position, state: BlockState) {
             false
         };
         if !piston_piece && movable(world.state(pulled)) {
-            world.move_state_silent(pulled, arm, "sticky_piston_retract".to_owned());
+            let moved_state = world.state(pulled);
+            world.set_state_silent(
+                arm,
+                BlockState::new(BlockKind::MovingPiston).with_facing(direction),
+                "sticky_piston_start_retract".to_owned(),
+            );
+            world.start_piston_motion(
+                arm,
+                PistonMotion {
+                    moved_state,
+                    direction,
+                    extending: false,
+                    source: false,
+                    progress: 0,
+                },
+            );
+            world.set_state_silent(pulled, BlockState::new(BlockKind::Air), "sticky_piston_start_retract".to_owned());
             world.update_neighbors_at(pulled, BlockKind::Air);
-            world.update_neighbors_at(arm, world.state(arm).kind);
+            world.update_neighbors_at(arm, BlockKind::MovingPiston);
         }
     }
     world.set_state_silent(piston, state.with_extended(false), "piston_retract".to_owned());
     world.update_neighbors_at(piston, state.kind);
-    world.update_neighbors_at(arm, BlockKind::Air);
+    world.update_neighbors_at(arm, world.state(arm).kind);
 }
 
-fn resolve_push(world: &World, piston: Position, direction: Direction) -> Option<Vec<Position>> {
+struct PushPlan {
+    to_move: Vec<Position>,
+    to_destroy: Vec<Position>,
+}
+
+fn resolve_push(world: &World, piston: Position, direction: Direction) -> Option<PushPlan> {
     let first = piston.offset(direction);
     if world.state(first).kind == BlockKind::Air {
-        return Some(Vec::new());
+        return Some(PushPlan {
+            to_move: Vec::new(),
+            to_destroy: Vec::new(),
+        });
     }
     let mut positions = BTreeSet::new();
+    let mut to_destroy = BTreeSet::new();
     let mut pending = VecDeque::from([first]);
     while let Some(position) = pending.pop_front() {
+        if positions.contains(&position) || to_destroy.contains(&position) {
+            continue;
+        }
+        let state = world.state(position);
+        if state.kind.is_piston_destroyable() {
+            to_destroy.insert(position);
+            continue;
+        }
         if !positions.insert(position) {
             continue;
         }
         if positions.len() > 12 {
             return None;
         }
-        let state = world.state(position);
         if !movable(state) {
             return None;
         }
@@ -168,7 +205,10 @@ fn resolve_push(world: &World, piston: Position, direction: Direction) -> Option
     }
     let mut ordered = positions.into_iter().collect::<Vec<_>>();
     ordered.sort_by_key(|position| -projection(*position, piston, direction));
-    Some(ordered)
+    Some(PushPlan {
+        to_move: ordered,
+        to_destroy: to_destroy.into_iter().collect(),
+    })
 }
 
 fn movable(state: BlockState) -> bool {

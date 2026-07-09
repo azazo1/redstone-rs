@@ -24,6 +24,7 @@ pub(crate) fn handle_neighbor_changed(
         }
         BlockKind::Piston | BlockKind::StickyPiston => piston::check_piston(world, position, state),
         BlockKind::Lamp => update_lamp_from_neighbor(world, position, state),
+        BlockKind::CopperBulb => update_copper_bulb(world, position, state),
         _ => {}
     }
 }
@@ -43,6 +44,7 @@ pub(crate) fn handle_scheduled_tick(world: &mut World, tick: ScheduledTick) {
         BlockKind::Comparator => update_comparator(world, tick.position),
         BlockKind::Observer => update_observer(world, tick.position),
         BlockKind::Lamp => update_lamp_tick(world, tick.position),
+        BlockKind::Target => reset_target(world, tick.position),
         _ => {}
     }
 }
@@ -64,6 +66,7 @@ pub(crate) fn signal_from(world: &World, source: Position, toward: Direction) ->
 fn direct_signal_from(state: BlockState, toward: Direction) -> u8 {
     match state.kind {
         BlockKind::RedstoneBlock => 15,
+        BlockKind::DaylightDetector | BlockKind::Target => state.power(),
         BlockKind::RedstoneWire => {
             if matches!(toward, Direction::Up | Direction::Down) {
                 0
@@ -225,7 +228,12 @@ fn schedule_repeater_update(world: &mut World, position: Position, state: BlockS
         && (input_signal(world, position, state.facing()) > 0) != state.powered()
         && !world.has_scheduled_tick(position, BlockKind::Repeater)
     {
-        world.schedule_tick(position, BlockKind::Repeater, state.delay() as u64 * 2, TickPriority::High);
+        world.schedule_tick(
+            position,
+            BlockKind::Repeater,
+            state.delay() as u64 * 2,
+            diode_priority(world, position, state),
+        );
     }
 }
 
@@ -244,7 +252,20 @@ fn update_repeater(world: &mut World, position: Position) {
 fn schedule_comparator_update(world: &mut World, position: Position, state: BlockState) {
     let output = comparator_output(world, position, state);
     if output != state.power() && !world.has_scheduled_tick(position, BlockKind::Comparator) {
-        world.schedule_tick(position, BlockKind::Comparator, 1, TickPriority::Normal);
+        world.schedule_tick(position, BlockKind::Comparator, 1, diode_priority(world, position, state));
+    }
+}
+
+fn diode_priority(world: &World, position: Position, state: BlockState) -> TickPriority {
+    let behind = world.state(position.offset(state.facing().opposite()));
+    if matches!(behind.kind, BlockKind::Repeater | BlockKind::Comparator)
+        && behind.facing() != state.facing().opposite()
+    {
+        TickPriority::ExtremelyHigh
+    } else if state.powered() {
+        TickPriority::VeryHigh
+    } else {
+        TickPriority::High
     }
 }
 
@@ -298,6 +319,19 @@ fn update_lamp_tick(world: &mut World, position: Position) {
     }
 }
 
+fn update_copper_bulb(world: &mut World, position: Position, state: BlockState) {
+    let powered = received_signal(world, position) > 0;
+    if powered == state.powered() {
+        return;
+    }
+    let next = if powered {
+        state.with_powered(true).with_lit(!state.lit())
+    } else {
+        state.with_powered(false)
+    };
+    let _ = world.set_state(position, next, "copper_bulb_edge");
+}
+
 fn set_powered(world: &mut World, position: Position, state: BlockState, powered: bool, cause: &str) {
     let next = state.with_powered(powered).with_power(if powered { state.power().max(15) } else { 0 });
     if next != state {
@@ -336,6 +370,24 @@ pub(crate) fn set_external_power(world: &mut World, position: Position, powered:
         world.schedule_tick(position, BlockKind::Button, 20, TickPriority::Normal);
     }
     Ok(())
+}
+
+pub(crate) fn set_external_signal(world: &mut World, position: Position, signal: u8) -> Result<(), WorldError> {
+    let state = world.state(position);
+    let signal = signal.min(15);
+    let next = state.with_power(signal).with_powered(signal > 0);
+    world.set_state(position, next, "external_signal")?;
+    if state.kind == BlockKind::Target && signal > 0 {
+        world.schedule_tick(position, BlockKind::Target, 20, TickPriority::Normal);
+    }
+    Ok(())
+}
+
+fn reset_target(world: &mut World, position: Position) {
+    let state = world.state(position);
+    if state.power() > 0 {
+        let _ = world.set_state(position, state.with_power(0).with_powered(false), "target_timeout");
+    }
 }
 
 fn notify_attached_conductors(world: &mut World, position: Position, changed_block: BlockKind) {

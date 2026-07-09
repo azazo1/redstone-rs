@@ -81,6 +81,68 @@ async fn external_power_operation_drives_and_releases_pressure_plate_signal() {
 }
 
 #[tokio::test]
+async fn external_signal_preserves_daylight_detector_power_level() {
+    let detector = Position::new(0, 0, 0);
+    let wire = Position::new(1, 0, 0);
+    let mut session = SimulationSession::load_structure(StructureInput {
+        blocks: vec![
+            StructureBlock {
+                position: detector,
+                state: BlockState::new(BlockKind::DaylightDetector),
+            },
+            StructureBlock {
+                position: wire,
+                state: BlockState::new(BlockKind::RedstoneWire),
+            },
+        ],
+    })
+    .await
+    .expect("structure should load");
+
+    session
+        .apply(InputAction {
+            tick: 1,
+            operation: InputOperation::SetSignal {
+                position: detector,
+                signal: 9,
+            },
+        })
+        .await;
+    session.step().await.expect("daylight detector should power wire");
+
+    assert_eq!(session.world().state(wire).power(), 9);
+}
+
+#[tokio::test]
+async fn target_block_signal_expires_after_twenty_game_ticks() {
+    let target = Position::new(0, 0, 0);
+    let mut session = SimulationSession::load_structure(StructureInput {
+        blocks: vec![StructureBlock {
+            position: target,
+            state: BlockState::new(BlockKind::Target),
+        }],
+    })
+    .await
+    .expect("structure should load");
+
+    session
+        .apply(InputAction {
+            tick: 1,
+            operation: InputOperation::SetSignal {
+                position: target,
+                signal: 15,
+            },
+        })
+        .await;
+    session.step().await.expect("target should activate");
+    assert_eq!(session.world().state(target).power(), 15);
+    for _ in 0..19 {
+        session.step().await.expect("target timeout should advance");
+    }
+    assert_eq!(session.world().state(target).power(), 0);
+}
+
+#[tokio::test]
 async fn redstone_wire_loses_one_power_level_per_segment() {
     let source = Position::new(0, 0, 0);
     let first = Position::new(1, 0, 0);
@@ -380,6 +442,39 @@ async fn redstone_lamp_turns_off_after_four_game_ticks_without_power() {
 }
 
 #[tokio::test]
+async fn copper_bulb_toggles_only_on_power_rising_edges() {
+    let source = Position::new(0, 0, 0);
+    let bulb = Position::new(1, 0, 0);
+    let mut session = SimulationSession::load_structure(StructureInput {
+        blocks: vec![
+            StructureBlock {
+                position: source,
+                state: BlockState::new(BlockKind::Lever),
+            },
+            StructureBlock {
+                position: bulb,
+                state: BlockState::new(BlockKind::CopperBulb),
+            },
+        ],
+    })
+    .await
+    .expect("structure should load");
+
+    for tick in [1, 2, 3] {
+        session
+            .apply(InputAction {
+                tick,
+                operation: InputOperation::UseBlock { position: source },
+            })
+            .await;
+        session.step().await.expect("bulb input should update");
+    }
+
+    assert!(session.world().state(bulb).powered());
+    assert!(!session.world().state(bulb).lit());
+}
+
+#[tokio::test]
 async fn redstone_torch_burns_out_after_eight_recent_turn_offs() {
     let support = Position::new(0, 0, 0);
     let torch = Position::new(0, 1, 0);
@@ -560,6 +655,116 @@ async fn sticky_piston_finishes_in_flight_extension_before_fast_retraction() {
 
     assert!(!session.world().state(piston).extended());
     assert_eq!(session.world().state(block.offset(Direction::East)).kind, BlockKind::Solid);
+}
+
+#[tokio::test]
+async fn sticky_piston_pulls_completed_extension_back_one_block() {
+    let piston = Position::new(0, 0, 0);
+    let block = Position::new(1, 0, 0);
+    let source = Position::new(0, -1, 0);
+    let mut session = SimulationSession::load_structure(StructureInput {
+        blocks: vec![
+            StructureBlock {
+                position: piston,
+                state: BlockState::new(BlockKind::StickyPiston).with_facing(Direction::East),
+            },
+            StructureBlock {
+                position: block,
+                state: BlockState::new(BlockKind::Solid),
+            },
+            StructureBlock {
+                position: source,
+                state: BlockState::new(BlockKind::RedstoneBlock),
+            },
+        ],
+    })
+    .await
+    .expect("structure should load");
+
+    session.step().await.expect("piston should start extending");
+    for _ in 0..3 {
+        session.step().await.expect("piston motion should complete");
+    }
+    assert_eq!(session.world().state(block.offset(Direction::East)).kind, BlockKind::Solid);
+
+    session
+        .apply(InputAction {
+            tick: 5,
+            operation: InputOperation::SetBlock {
+                position: source,
+                state: BlockState::new(BlockKind::Air),
+            },
+        })
+        .await;
+    session.step().await.expect("sticky piston should retract");
+
+    assert!(!session.world().state(piston).extended());
+    assert_eq!(session.world().state(block).kind, BlockKind::MovingPiston);
+    for _ in 0..3 {
+        session.step().await.expect("retraction motion should complete");
+    }
+    assert_eq!(session.world().state(block).kind, BlockKind::Solid);
+}
+
+#[tokio::test]
+async fn piston_refuses_to_push_more_than_twelve_blocks() {
+    let piston = Position::new(0, 0, 0);
+    let mut blocks = vec![
+        StructureBlock {
+            position: piston,
+            state: BlockState::new(BlockKind::Piston).with_facing(Direction::East),
+        },
+        StructureBlock {
+            position: Position::new(0, -1, 0),
+            state: BlockState::new(BlockKind::RedstoneBlock),
+        },
+    ];
+    for x in 1..=13 {
+        blocks.push(StructureBlock {
+            position: Position::new(x, 0, 0),
+            state: BlockState::new(BlockKind::Solid),
+        });
+    }
+    let mut session = SimulationSession::load_structure(StructureInput { blocks })
+        .await
+        .expect("structure should load");
+
+    session.step().await.expect("piston should evaluate push limit");
+
+    assert!(!session.world().state(piston).extended());
+    assert_eq!(session.world().state(Position::new(13, 0, 0)).kind, BlockKind::Solid);
+}
+
+#[tokio::test]
+async fn piston_destroys_redstone_wire_in_its_path() {
+    let piston = Position::new(0, 0, 0);
+    let wire = Position::new(1, 0, 0);
+    let mut session = SimulationSession::load_structure(StructureInput {
+        blocks: vec![
+            StructureBlock {
+                position: piston,
+                state: BlockState::new(BlockKind::Piston).with_facing(Direction::East),
+            },
+            StructureBlock {
+                position: wire,
+                state: BlockState::new(BlockKind::RedstoneWire),
+            },
+            StructureBlock {
+                position: Position::new(0, -1, 0),
+                state: BlockState::new(BlockKind::RedstoneBlock),
+            },
+        ],
+    })
+    .await
+    .expect("structure should load");
+
+    session.step().await.expect("piston should extend");
+
+    assert_eq!(session.world().state(wire).kind, BlockKind::MovingPiston);
+    for _ in 0..3 {
+        session.step().await.expect("piston motion should complete");
+    }
+    assert_eq!(session.world().state(wire).kind, BlockKind::PistonHead);
 }
 
 #[tokio::test]

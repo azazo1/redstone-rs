@@ -124,6 +124,9 @@ pub enum BlockKind {
     Comparator,
     Observer,
     Lamp,
+    CopperBulb,
+    DaylightDetector,
+    Target,
     Container,
     Piston,
     StickyPiston,
@@ -159,6 +162,13 @@ impl BlockKind {
     pub const fn is_immovable(self) -> bool {
         matches!(self, Self::Immovable | Self::PistonHead | Self::MovingPiston)
     }
+
+    pub const fn is_piston_destroyable(self) -> bool {
+        matches!(
+            self,
+            Self::RedstoneWire | Self::RedstoneTorch | Self::Lever | Self::Button | Self::PressurePlate
+        )
+    }
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
@@ -185,6 +195,7 @@ impl BlockState {
     const LOCKED: u32 = 1 << 10;
     const SUBTRACT: u32 = 1 << 11;
     const EXTENDED: u32 = 1 << 12;
+    const LIT: u32 = 1 << 13;
 
     pub const fn new(kind: BlockKind) -> Self {
         let bits = if matches!(kind, BlockKind::RedstoneTorch) {
@@ -291,5 +302,18 @@ impl BlockState {
 
     pub const fn extended(self) -> bool {
         self.bits & Self::EXTENDED != 0
+    }
+
+    pub const fn with_lit(mut self, lit: bool) -> Self {
+        if lit {
+            self.bits |= Self::LIT;
+        } else {
+            self.bits &= !Self::LIT;
+        }
+        self
+    }
+
+    pub const fn lit(self) -> bool {
+        self.bits & Self::LIT != 0
     }
 }
