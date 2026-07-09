@@ -32,6 +32,10 @@ pub enum InputOperation {
         position: Position,
         signal: u8,
     },
+    SetPowered {
+        position: Position,
+        powered: bool,
+    },
     TriggerNeighborUpdate {
         position: Position,
         changed_block: BlockKind,
@@ -144,9 +148,13 @@ impl SimulationSession {
                     position,
                     Some(BlockEntity {
                         comparator_signal: signal.min(15),
+                        piston_motion: None,
                     }),
                 );
                 self.world.update_neighbors_at(position, self.world.state(position).kind);
+            }
+            InputOperation::SetPowered { position, powered } => {
+                crate::minecraft::set_external_power(&mut self.world, position, powered)?;
             }
             InputOperation::TriggerNeighborUpdate {
                 position,

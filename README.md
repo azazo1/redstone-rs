@@ -10,5 +10,6 @@
 cargo run -- run --structure machine.nbt --ticks 200 --trace trace.json
 cargo run -- run --structure machine.litematic --ticks 200
 cargo run -- run --structure r.0.0.mca --ticks 200
+cargo run -- vector --vector cases/repeater.json --output repeater-trace.json
 cargo run -- benchmark --blocks 100000 --ticks 1000
 ```

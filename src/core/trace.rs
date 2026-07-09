@@ -10,6 +10,7 @@ pub enum TraceKind {
     ScheduledTick,
     BlockEvent,
     NeighborUpdate,
+    PistonMotion,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]

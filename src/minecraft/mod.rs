@@ -1,7 +1,7 @@
 mod piston;
 mod signal;
 
-pub(crate) use signal::{toggle_lever, trigger_button};
+pub(crate) use signal::{set_external_power, toggle_lever, trigger_button};
 
 use crate::core::{BlockEvent, BlockKind, Position, ScheduledTick, World};
 

@@ -68,6 +68,8 @@ impl Direction {
         Self::Up,
     ];
 
+    pub const HORIZONTAL: [Self; 4] = [Self::North, Self::South, Self::West, Self::East];
+
     pub const fn opposite(self) -> Self {
         match self {
             Self::North => Self::South,
@@ -185,7 +187,12 @@ impl BlockState {
     const EXTENDED: u32 = 1 << 12;
 
     pub const fn new(kind: BlockKind) -> Self {
-        Self { kind, bits: 0 }
+        let bits = if matches!(kind, BlockKind::RedstoneTorch) {
+            Self::POWERED
+        } else {
+            0
+        };
+        Self { kind, bits }
     }
 
     pub const fn with_facing(mut self, facing: Direction) -> Self {

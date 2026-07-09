@@ -2,7 +2,7 @@ use std::path::PathBuf;
 
 use clap::{Parser, Subcommand};
 use redstone_rs::{
-    io::{StructureBlock, StructureInput}, BlockKind, BlockState, Position, SimulationSession,
+    io::{StructureBlock, StructureInput, TestVector}, BlockKind, BlockState, Position, SimulationSession,
 };
 use tracing::{info, Level};
 use tracing_subscriber::{fmt, EnvFilter};
@@ -33,6 +33,12 @@ enum Command {
         blocks: usize,
         #[arg(long, default_value_t = 1_000)]
         ticks: u64,
+    },
+    Vector {
+        #[arg(long)]
+        vector: PathBuf,
+        #[arg(long)]
+        output: PathBuf,
     },
 }
 
@@ -85,6 +91,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 scheduled = session.world().scheduled_count(),
                 "benchmark completed"
             );
+        }
+        Command::Vector { vector, output } => {
+            let trace = TestVector::run_from_path(&vector).await?;
+            let encoded = serde_json::to_vec_pretty(&trace)?;
+            tokio::fs::write(&output, encoded).await?;
+            info!(frames = trace.frames.len(), events = trace.events.len(), path = %output.display(), "test vector completed");
         }
     }
 

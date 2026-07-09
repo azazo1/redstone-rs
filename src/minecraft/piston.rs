@@ -1,6 +1,6 @@
 use std::collections::{BTreeSet, VecDeque};
 
-use crate::core::{BlockEvent, BlockKind, BlockState, Direction, Position, World};
+use crate::core::{BlockEvent, BlockKind, BlockState, Direction, PistonMotion, Position, World};
 
 use super::signal::{queue_piston_event, signal_from};
 
@@ -54,35 +54,75 @@ fn extend(world: &mut World, piston: Position, state: BlockState) {
     let Some(to_move) = resolve_push(world, piston, direction) else {
         return;
     };
-    for position in &to_move {
-        world.move_state_silent(*position, position.offset(direction), "piston_extend".to_owned());
+    let moved = to_move
+        .iter()
+        .map(|position| (*position, world.state(*position)))
+        .collect::<Vec<_>>();
+    for (position, moved_state) in moved {
+        let destination = position.offset(direction);
+        world.set_state_silent(
+            destination,
+            BlockState::new(BlockKind::MovingPiston).with_facing(direction),
+            "piston_start_extend".to_owned(),
+        );
+        world.start_piston_motion(
+            destination,
+            PistonMotion {
+                moved_state,
+                direction,
+                extending: true,
+                source: false,
+                progress: 0,
+            },
+        );
+        world.set_state_silent(position, BlockState::new(BlockKind::Air), "piston_start_extend".to_owned());
     }
     let head = piston.offset(direction);
     world.set_state_silent(
         head,
-        BlockState::new(BlockKind::PistonHead).with_facing(direction),
-        "piston_head_extend".to_owned(),
+        BlockState::new(BlockKind::MovingPiston).with_facing(direction),
+        "piston_head_start_extend".to_owned(),
+    );
+    world.start_piston_motion(
+        head,
+        PistonMotion {
+            moved_state: BlockState::new(BlockKind::PistonHead).with_facing(direction),
+            direction,
+            extending: true,
+            source: true,
+            progress: 0,
+        },
     );
     world.set_state_silent(piston, state.with_extended(true), "piston_extend".to_owned());
     world.update_neighbors_at(piston, state.kind);
-    world.update_neighbors_at(head, BlockKind::PistonHead);
+    world.update_neighbors_at(head, BlockKind::MovingPiston);
     for position in to_move {
         world.update_neighbors_at(position, BlockKind::Air);
-        world.update_neighbors_at(position.offset(direction), world.state(position.offset(direction)).kind);
+        world.update_neighbors_at(position.offset(direction), BlockKind::MovingPiston);
     }
 }
 
 fn retract(world: &mut World, piston: Position, state: BlockState) {
     let direction = state.facing();
     let arm = piston.offset(direction);
+    if world.state(arm).kind == BlockKind::MovingPiston {
+        world.complete_piston_motion(arm);
+    }
     world.set_state_silent(arm, BlockState::new(BlockKind::Air), "piston_head_retract".to_owned());
     if state.kind == BlockKind::StickyPiston {
         let pulled = piston.relative(direction, 2);
         let pulled_state = world.state(pulled);
-        if movable(pulled_state) {
+        let piston_piece = if pulled_state.kind == BlockKind::MovingPiston {
+            world
+                .complete_piston_motion(pulled)
+                .is_some_and(|motion| motion.extending && motion.direction == direction)
+        } else {
+            false
+        };
+        if !piston_piece && movable(world.state(pulled)) {
             world.move_state_silent(pulled, arm, "sticky_piston_retract".to_owned());
             world.update_neighbors_at(pulled, BlockKind::Air);
-            world.update_neighbors_at(arm, pulled_state.kind);
+            world.update_neighbors_at(arm, world.state(arm).kind);
         }
     }
     world.set_state_silent(piston, state.with_extended(false), "piston_retract".to_owned());
@@ -110,6 +150,9 @@ fn resolve_push(world: &World, piston: Position, direction: Direction) -> Option
         }
         if state.kind.is_sticky() {
             for neighbor_direction in Direction::ALL {
+                if same_axis(neighbor_direction, direction) {
+                    continue;
+                }
                 let neighbor = position.offset(neighbor_direction);
                 let neighbor_state = world.state(neighbor);
                 if sticks_to(state.kind, neighbor_state.kind) && neighbor_state.kind != BlockKind::Air {
@@ -133,7 +176,13 @@ fn movable(state: BlockState) -> bool {
 }
 
 fn sticks_to(left: BlockKind, right: BlockKind) -> bool {
-    left.is_sticky() && right.is_sticky() && left == right
+    !(matches!((left, right), (BlockKind::SlimeBlock, BlockKind::HoneyBlock) | (BlockKind::HoneyBlock, BlockKind::SlimeBlock)))
+}
+
+fn same_axis(left: Direction, right: Direction) -> bool {
+    (left.step_x() != 0 && right.step_x() != 0)
+        || (left.step_y() != 0 && right.step_y() != 0)
+        || (left.step_z() != 0 && right.step_z() != 0)
 }
 
 fn projection(position: Position, origin: Position, direction: Direction) -> i32 {

@@ -1,4 +1,4 @@
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
@@ -32,6 +32,16 @@ impl SectionPos {
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct BlockEntity {
     pub comparator_signal: u8,
+    pub piston_motion: Option<PistonMotion>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PistonMotion {
+    pub moved_state: BlockState,
+    pub direction: super::Direction,
+    pub extending: bool,
+    pub source: bool,
+    pub progress: u8,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -88,6 +98,8 @@ pub struct World {
     scheduler: Scheduler,
     neighbors: NeighborUpdater,
     trace: TraceRecorder,
+    torch_toggles: BTreeMap<Position, VecDeque<u64>>,
+    burned_torches: BTreeMap<Position, u64>,
     game_tick: u64,
 }
 
@@ -106,6 +118,8 @@ impl World {
             scheduler: Scheduler::default(),
             neighbors: NeighborUpdater::new(MAX_CHAINED_NEIGHBOR_UPDATES),
             trace: TraceRecorder::default(),
+            torch_toggles: BTreeMap::new(),
+            burned_torches: BTreeMap::new(),
             game_tick: 0,
         }
     }
@@ -142,6 +156,16 @@ impl World {
                 self.block_entities.remove(&position);
             }
         }
+    }
+
+    pub(crate) fn start_piston_motion(&mut self, position: Position, motion: PistonMotion) {
+        self.block_entities.insert(
+            position,
+            BlockEntity {
+                comparator_signal: 0,
+                piston_motion: Some(motion),
+            },
+        );
     }
 
     pub fn set_state(
@@ -204,6 +228,33 @@ impl World {
 
     pub fn has_scheduled_tick(&self, position: Position, block: BlockKind) -> bool {
         self.scheduler.has_scheduled(position, block)
+    }
+
+    pub(crate) fn record_torch_turn_off(&mut self, position: Position) -> bool {
+        let toggles = self.torch_toggles.entry(position).or_default();
+        while toggles
+            .front()
+            .is_some_and(|tick| self.game_tick.saturating_sub(*tick) > 60)
+        {
+            toggles.pop_front();
+        }
+        toggles.push_back(self.game_tick);
+        toggles.len() >= 8
+    }
+
+    pub(crate) fn burn_torch(&mut self, position: Position) {
+        self.burned_torches.insert(position, self.game_tick.saturating_add(160));
+    }
+
+    pub(crate) fn torch_is_burned(&mut self, position: Position) -> bool {
+        match self.burned_torches.get(&position).copied() {
+            Some(until) if self.game_tick < until => true,
+            Some(_) => {
+                self.burned_torches.remove(&position);
+                false
+            }
+            None => false,
+        }
     }
 
     pub fn enqueue_block_event(&mut self, event: BlockEvent) {
@@ -277,6 +328,8 @@ impl World {
             warn!(tick = self.game_tick, "scheduled tick cap reached");
         }
 
+        self.tick_moving_pistons();
+
         while let Some(event) = self.scheduler.pop_block_event() {
             if !self.is_loaded(event.position) || self.state(event.position).kind != event.block {
                 continue;
@@ -292,6 +345,44 @@ impl World {
             crate::minecraft::handle_block_event(self, event);
         }
         debug!(tick = self.game_tick, pending = self.scheduler.pending_len(), "world tick completed");
+    }
+
+    fn tick_moving_pistons(&mut self) {
+        let motions = self
+            .block_entities
+            .iter()
+            .filter_map(|(position, entity)| entity.piston_motion.map(|motion| (*position, motion)))
+            .collect::<Vec<_>>();
+        for (position, mut motion) in motions {
+            if self.state(position).kind != BlockKind::MovingPiston {
+                self.block_entities.remove(&position);
+                continue;
+            }
+            if motion.progress >= 2 {
+                self.complete_piston_motion(position);
+            } else {
+                motion.progress += 1;
+                self.start_piston_motion(position, motion);
+                self.trace.record(
+                    self.game_tick,
+                    TraceKind::PistonMotion,
+                    position,
+                    Some(self.state(position)),
+                    Some(self.state(position)),
+                    format!("piston_progress:{}", motion.progress),
+                );
+            }
+        }
+    }
+
+    pub(crate) fn complete_piston_motion(&mut self, position: Position) -> Option<PistonMotion> {
+        let motion = self.block_entities.get(&position)?.piston_motion?;
+        self.block_entities.remove(&position);
+        if self.state(position).kind == BlockKind::MovingPiston {
+            self.set_state_silent(position, motion.moved_state, "piston_motion_complete".to_owned());
+            self.update_neighbors_at(position, motion.moved_state.kind);
+        }
+        Some(motion)
     }
 
     pub fn snapshot(&self) -> Snapshot {

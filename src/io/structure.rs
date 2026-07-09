@@ -82,6 +82,9 @@ pub(crate) fn state_from_parts(
     if let Some(powered) = properties.get("powered") {
         state = state.with_powered(parse_bool(powered)?);
     }
+    if let Some(lit) = properties.get("lit") {
+        state = state.with_powered(parse_bool(lit)?);
+    }
     if let Some(power) = properties.get("power") {
         state = state.with_power(power.parse::<u8>().map_err(|_| StructureError::UnsupportedBlock(name.to_owned()))?);
     }
