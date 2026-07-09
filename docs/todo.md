@@ -4,4 +4,6 @@
 - [ ] 仿真器
 - [ ] 时序测试功能
 - [ ] 3D 编辑器
-- [ ] 存档支持, litematica 支持, world-edit 支持
+- [ ] 完整存档支持
+- [x] Litematica 结构导入
+- [x] WorldEdit Sponge schematic 导入

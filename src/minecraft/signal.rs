@@ -107,7 +107,7 @@ fn side_signal(world: &World, position: Position, facing: Direction) -> u8 {
 
 fn refresh_wire(world: &mut World, position: Position) {
     let state = world.state(position);
-    let direct = received_signal(world, position);
+    let direct = received_non_wire_signal(world, position);
     let incoming_wire = Direction::ALL
         .into_iter()
         .filter_map(|direction| {
@@ -121,6 +121,18 @@ fn refresh_wire(world: &mut World, position: Position) {
     if next != state {
         let _ = world.set_state(position, next, "wire_power");
     }
+}
+
+fn received_non_wire_signal(world: &World, position: Position) -> u8 {
+    Direction::ALL
+        .into_iter()
+        .filter_map(|direction| {
+            let source = position.offset(direction);
+            (world.state(source).kind != BlockKind::RedstoneWire)
+                .then_some(signal_from(world, source, direction.opposite()))
+        })
+        .max()
+        .unwrap_or(0)
 }
 
 fn schedule_torch_update(world: &mut World, position: Position, state: BlockState) {

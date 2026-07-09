@@ -1,8 +1,5 @@
-use std::collections::BTreeMap;
 use std::path::Path;
 
-use fastnbt::from_bytes;
-use serde::Deserialize;
 use thiserror::Error;
 
 use crate::core::{BlockKind, BlockState, ComparatorMode, Direction, Position};
@@ -26,60 +23,34 @@ pub enum StructureError {
     Nbt(String),
     #[error("structure block position is invalid")]
     InvalidPosition,
+    #[error("structure dimensions are invalid")]
+    InvalidDimensions,
+    #[error("structure block data is truncated")]
+    TruncatedBlockData,
     #[error("unsupported block in exact mode: {0}")]
     UnsupportedBlock(String),
 }
 
-#[derive(Debug, Deserialize)]
-struct RawStructure {
-    palette: Vec<RawPaletteEntry>,
-    blocks: Vec<RawBlock>,
-}
-
-#[derive(Debug, Deserialize)]
-struct RawPaletteEntry {
-    #[serde(rename = "Name")]
-    name: String,
-    #[serde(rename = "Properties", default)]
-    properties: BTreeMap<String, String>,
-}
-
-#[derive(Debug, Deserialize)]
-struct RawBlock {
-    pos: Vec<i32>,
-    state: usize,
-}
-
 impl StructureInput {
     pub async fn from_path(path: impl AsRef<Path>) -> Result<Self, StructureError> {
+        let path = path.as_ref();
         let bytes = tokio::fs::read(path).await?;
+        if path.extension().is_some_and(|extension| extension.eq_ignore_ascii_case("mca")) {
+            return super::format::decode_anvil_region(&bytes);
+        }
         Self::from_nbt(&bytes)
     }
 
     pub fn from_nbt(bytes: &[u8]) -> Result<Self, StructureError> {
-        let raw: RawStructure = from_bytes(bytes).map_err(|error| StructureError::Nbt(error.to_string()))?;
-        let palette = raw
-            .palette
-            .iter()
-            .map(state_from_palette)
-            .collect::<Result<Vec<_>, _>>()?;
-        let mut blocks = Vec::with_capacity(raw.blocks.len());
-        for block in raw.blocks {
-            let [x, y, z] = block.pos.as_slice() else {
-                return Err(StructureError::InvalidPosition);
-            };
-            let state = palette.get(block.state).copied().ok_or(StructureError::InvalidPosition)?;
-            blocks.push(StructureBlock {
-                position: Position::new(*x, *y, *z),
-                state,
-            });
-        }
-        Ok(Self { blocks })
+        super::format::decode(bytes)
     }
 }
 
-fn state_from_palette(entry: &RawPaletteEntry) -> Result<BlockState, StructureError> {
-    let kind = match entry.name.as_str() {
+pub(crate) fn state_from_parts(
+    name: &str,
+    properties: &std::collections::BTreeMap<String, String>,
+) -> Result<BlockState, StructureError> {
+    let kind = match name {
         "minecraft:air" | "minecraft:cave_air" | "minecraft:void_air" => BlockKind::Air,
         "minecraft:stone" | "minecraft:cobblestone" | "minecraft:dirt" | "minecraft:oak_planks" | "minecraft:iron_block" => BlockKind::Solid,
         "minecraft:glass" => BlockKind::Glass,
@@ -101,30 +72,30 @@ fn state_from_palette(entry: &RawPaletteEntry) -> Result<BlockState, StructureEr
         "minecraft:moving_piston" => BlockKind::MovingPiston,
         "minecraft:slime_block" => BlockKind::SlimeBlock,
         "minecraft:honey_block" => BlockKind::HoneyBlock,
-        _ => return Err(StructureError::UnsupportedBlock(entry.name.clone())),
+        _ => return Err(StructureError::UnsupportedBlock(name.to_owned())),
     };
 
     let mut state = BlockState::new(kind);
-    if let Some(facing) = entry.properties.get("facing") {
+    if let Some(facing) = properties.get("facing") {
         state = state.with_facing(parse_direction(facing)?);
     }
-    if let Some(powered) = entry.properties.get("powered") {
+    if let Some(powered) = properties.get("powered") {
         state = state.with_powered(parse_bool(powered)?);
     }
-    if let Some(power) = entry.properties.get("power") {
-        state = state.with_power(power.parse::<u8>().map_err(|_| StructureError::UnsupportedBlock(entry.name.clone()))?);
+    if let Some(power) = properties.get("power") {
+        state = state.with_power(power.parse::<u8>().map_err(|_| StructureError::UnsupportedBlock(name.to_owned()))?);
     }
-    if let Some(delay) = entry.properties.get("delay") {
-        state = state.with_delay(delay.parse::<u8>().map_err(|_| StructureError::UnsupportedBlock(entry.name.clone()))?);
+    if let Some(delay) = properties.get("delay") {
+        state = state.with_delay(delay.parse::<u8>().map_err(|_| StructureError::UnsupportedBlock(name.to_owned()))?);
     }
-    if let Some(mode) = entry.properties.get("mode") {
+    if let Some(mode) = properties.get("mode") {
         state = state.with_mode(match mode.as_str() {
             "compare" => ComparatorMode::Compare,
             "subtract" => ComparatorMode::Subtract,
-            _ => return Err(StructureError::UnsupportedBlock(entry.name.clone())),
+            _ => return Err(StructureError::UnsupportedBlock(name.to_owned())),
         });
     }
-    if let Some(extended) = entry.properties.get("extended") {
+    if let Some(extended) = properties.get("extended") {
         state = state.with_extended(parse_bool(extended)?);
     }
     Ok(state)
