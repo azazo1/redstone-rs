@@ -49,3 +49,16 @@ download-client version="26.1.2":
     fi
     echo "下载 client JAR: assets/client-{{ version }}.jar"
     curl -fL "$client_url" -o "assets/client-{{ version }}.jar"
+
+# 运行 Rust 静态检查.
+clippy:
+    cargo clippy --tests
+
+# 运行仿真器测试.
+test:
+    cargo test
+
+# just run benchmark --blocks 100000 --ticks 1000
+# 运行命令行仿真器.
+run *args:
+    cargo run -- {{args}}
