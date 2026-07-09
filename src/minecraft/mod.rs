@@ -37,7 +37,9 @@ impl BlockBehavior for VanillaBehavior {
     }
 
     fn on_block_event(&self, world: &mut World, event: BlockEvent) {
-        piston::handle_block_event(world, event);
+        if !signal::handle_block_event(world, event) {
+            piston::handle_block_event(world, event);
+        }
     }
 }
 

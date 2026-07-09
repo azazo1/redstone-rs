@@ -143,6 +143,42 @@ async fn target_block_signal_expires_after_twenty_game_ticks() {
 }
 
 #[tokio::test]
+async fn door_follows_redstone_power_and_tnt_is_consumed_on_rising_edge() {
+    let lever = Position::new(0, 0, 0);
+    let door = Position::new(1, 0, 0);
+    let tnt = Position::new(0, 0, 1);
+    let mut session = SimulationSession::load_structure(StructureInput {
+        blocks: vec![
+            StructureBlock {
+                position: lever,
+                state: BlockState::new(BlockKind::Lever),
+            },
+            StructureBlock {
+                position: door,
+                state: BlockState::new(BlockKind::Door),
+            },
+            StructureBlock {
+                position: tnt,
+                state: BlockState::new(BlockKind::Tnt),
+            },
+        ],
+    })
+    .await
+    .expect("structure should load");
+
+    session
+        .apply(InputAction {
+            tick: 1,
+            operation: InputOperation::UseBlock { position: lever },
+        })
+        .await;
+    session.step().await.expect("redstone receivers should activate");
+
+    assert!(session.world().state(door).powered());
+    assert_eq!(session.world().state(tnt).kind, BlockKind::Air);
+}
+
+#[tokio::test]
 async fn redstone_wire_loses_one_power_level_per_segment() {
     let source = Position::new(0, 0, 0);
     let first = Position::new(1, 0, 0);

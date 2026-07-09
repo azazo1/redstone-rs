@@ -25,6 +25,10 @@ pub(crate) fn handle_neighbor_changed(
         BlockKind::Piston | BlockKind::StickyPiston => piston::check_piston(world, position, state),
         BlockKind::Lamp => update_lamp_from_neighbor(world, position, state),
         BlockKind::CopperBulb => update_copper_bulb(world, position, state),
+        BlockKind::Door | BlockKind::Trapdoor | BlockKind::FenceGate => update_openable(world, position, state),
+        BlockKind::NoteBlock | BlockKind::Dropper | BlockKind::Dispenser | BlockKind::Crafter | BlockKind::Tnt => {
+            update_pulse_receiver(world, position, state)
+        }
         _ => {}
     }
 }
@@ -47,6 +51,14 @@ pub(crate) fn handle_scheduled_tick(world: &mut World, tick: ScheduledTick) {
         BlockKind::Target => reset_target(world, tick.position),
         _ => {}
     }
+}
+
+pub(crate) fn handle_block_event(world: &mut World, event: BlockEvent) -> bool {
+    if event.action == 1 && world.state(event.position).kind == BlockKind::Tnt {
+        let _ = world.set_state(event.position, BlockState::new(BlockKind::Air), "tnt_trigger".to_owned());
+        return true;
+    }
+    false
 }
 
 pub(crate) fn signal_from(world: &World, source: Position, toward: Direction) -> u8 {
@@ -330,6 +342,29 @@ fn update_copper_bulb(world: &mut World, position: Position, state: BlockState) 
         state.with_powered(false)
     };
     let _ = world.set_state(position, next, "copper_bulb_edge");
+}
+
+fn update_openable(world: &mut World, position: Position, state: BlockState) {
+    let powered = received_signal(world, position) > 0;
+    if powered != state.powered() {
+        set_powered(world, position, state, powered, "openable_power");
+    }
+}
+
+fn update_pulse_receiver(world: &mut World, position: Position, state: BlockState) {
+    let powered = received_signal(world, position) > 0;
+    if powered == state.powered() {
+        return;
+    }
+    set_powered(world, position, state, powered, "pulse_receiver_power");
+    if powered {
+        world.enqueue_block_event(BlockEvent {
+            position,
+            block: state.kind,
+            action: 1,
+            parameter: 0,
+        });
+    }
 }
 
 fn set_powered(world: &mut World, position: Position, state: BlockState, powered: bool, cause: &str) {

@@ -50,7 +50,14 @@ pub(crate) fn state_from_parts(
     name: &str,
     properties: &std::collections::BTreeMap<String, String>,
 ) -> Result<BlockState, StructureError> {
-    let kind = match name {
+    let kind = if name.ends_with("_trapdoor") {
+        BlockKind::Trapdoor
+    } else if name.ends_with("_door") {
+        BlockKind::Door
+    } else if name.ends_with("_fence_gate") {
+        BlockKind::FenceGate
+    } else {
+        match name {
         "minecraft:air" | "minecraft:cave_air" | "minecraft:void_air" => BlockKind::Air,
         "minecraft:stone" | "minecraft:cobblestone" | "minecraft:dirt" | "minecraft:oak_planks" | "minecraft:iron_block" => BlockKind::Solid,
         "minecraft:glass" => BlockKind::Glass,
@@ -68,6 +75,11 @@ pub(crate) fn state_from_parts(
         "minecraft:copper_bulb" | "minecraft:exposed_copper_bulb" | "minecraft:weathered_copper_bulb" | "minecraft:oxidized_copper_bulb" | "minecraft:waxed_copper_bulb" => BlockKind::CopperBulb,
         "minecraft:daylight_detector" => BlockKind::DaylightDetector,
         "minecraft:target" => BlockKind::Target,
+        "minecraft:note_block" => BlockKind::NoteBlock,
+        "minecraft:dropper" => BlockKind::Dropper,
+        "minecraft:dispenser" => BlockKind::Dispenser,
+        "minecraft:crafter" => BlockKind::Crafter,
+        "minecraft:tnt" => BlockKind::Tnt,
         "minecraft:barrel" | "minecraft:chest" | "minecraft:trapped_chest" => BlockKind::Container,
         "minecraft:piston" => BlockKind::Piston,
         "minecraft:sticky_piston" => BlockKind::StickyPiston,
@@ -76,6 +88,7 @@ pub(crate) fn state_from_parts(
         "minecraft:slime_block" => BlockKind::SlimeBlock,
         "minecraft:honey_block" => BlockKind::HoneyBlock,
         _ => return Err(StructureError::UnsupportedBlock(name.to_owned())),
+        }
     };
 
     let mut state = BlockState::new(kind);
@@ -108,6 +121,9 @@ pub(crate) fn state_from_parts(
     }
     if let Some(extended) = properties.get("extended") {
         state = state.with_extended(parse_bool(extended)?);
+    }
+    if let Some(open) = properties.get("open") {
+        state = state.with_powered(parse_bool(open)?);
     }
     Ok(state)
 }
