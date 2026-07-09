@@ -289,6 +289,72 @@ async fn hopper_pulls_from_above_then_pushes_to_its_facing_direction() {
 }
 
 #[tokio::test]
+async fn powered_hopper_pauses_transfer_until_redstone_is_removed() {
+    let hopper = Position::new(0, 0, 0);
+    let destination = Position::new(0, -1, 0);
+    let lock = Position::new(1, 0, 0);
+    let mut session = SimulationSession::load_structure(StructureInput {
+        blocks: vec![
+            StructureBlock {
+                position: hopper,
+                state: BlockState::new(BlockKind::Hopper),
+            },
+            StructureBlock {
+                position: destination,
+                state: BlockState::new(BlockKind::Container),
+            },
+            StructureBlock {
+                position: lock,
+                state: BlockState::new(BlockKind::RedstoneBlock),
+            },
+        ],
+    })
+    .await
+    .expect("structure should load");
+
+    session
+        .apply(InputAction {
+            tick: 1,
+            operation: InputOperation::SetInventory {
+                position: hopper,
+                items: 1,
+                capacity: 5,
+            },
+        })
+        .await;
+    session
+        .apply(InputAction {
+            tick: 1,
+            operation: InputOperation::SetInventory {
+                position: destination,
+                items: 0,
+                capacity: 64,
+            },
+        })
+        .await;
+    for _ in 0..8 {
+        session.step().await.expect("locked hopper tick should advance");
+    }
+    assert!(session.world().state(hopper).powered());
+    assert_eq!(session.world().inventory(destination).expect("destination inventory").items, 0);
+
+    session
+        .apply(InputAction {
+            tick: 9,
+            operation: InputOperation::SetBlock {
+                position: lock,
+                state: BlockState::new(BlockKind::Air),
+            },
+        })
+        .await;
+    for _ in 0..8 {
+        session.step().await.expect("unlocked hopper tick should advance");
+    }
+    assert!(!session.world().state(hopper).powered());
+    assert_eq!(session.world().inventory(destination).expect("destination inventory").items, 1);
+}
+
+#[tokio::test]
 async fn dropper_moves_one_inventory_unit_on_rising_edge() {
     let lever = Position::new(-1, 0, 0);
     let dropper = Position::new(0, 0, 0);
