@@ -56,17 +56,21 @@ pub(crate) fn state_from_parts(
         BlockKind::Door
     } else if name.ends_with("_fence_gate") {
         BlockKind::FenceGate
+    } else if name.ends_with("_button") {
+        BlockKind::Button
+    } else if is_supported_solid(name) {
+        BlockKind::Solid
+    } else if is_supported_non_conductor(name) {
+        BlockKind::Glass
+    } else if is_supported_immovable(name) {
+        BlockKind::Immovable
     } else {
         match name {
         "minecraft:air" | "minecraft:cave_air" | "minecraft:void_air" => BlockKind::Air,
-        "minecraft:stone" | "minecraft:cobblestone" | "minecraft:dirt" | "minecraft:oak_planks" | "minecraft:iron_block" => BlockKind::Solid,
-        "minecraft:glass" => BlockKind::Glass,
-        "minecraft:obsidian" | "minecraft:crying_obsidian" | "minecraft:reinforced_deepslate" => BlockKind::Immovable,
         "minecraft:redstone_block" => BlockKind::RedstoneBlock,
         "minecraft:redstone_wire" => BlockKind::RedstoneWire,
         "minecraft:redstone_torch" | "minecraft:redstone_wall_torch" => BlockKind::RedstoneTorch,
         "minecraft:lever" => BlockKind::Lever,
-        "minecraft:stone_button" | "minecraft:oak_button" | "minecraft:polished_blackstone_button" => BlockKind::Button,
         "minecraft:stone_pressure_plate" | "minecraft:light_weighted_pressure_plate" | "minecraft:heavy_weighted_pressure_plate" => BlockKind::PressurePlate,
         "minecraft:repeater" => BlockKind::Repeater,
         "minecraft:comparator" => BlockKind::Comparator,
@@ -93,6 +97,9 @@ pub(crate) fn state_from_parts(
     };
 
     let mut state = BlockState::new(kind);
+    if kind == BlockKind::Button && is_wooden_button(name) {
+        state = state.with_wooden_button(true);
+    }
     if let Some(facing) = properties.get("facing") {
         state = state.with_facing(parse_direction(facing)?);
     }
@@ -127,6 +134,143 @@ pub(crate) fn state_from_parts(
         state = state.with_powered(parse_bool(open)?);
     }
     Ok(state)
+}
+
+fn is_supported_solid(name: &str) -> bool {
+    matches!(
+        name,
+        "minecraft:stone"
+            | "minecraft:granite"
+            | "minecraft:diorite"
+            | "minecraft:andesite"
+            | "minecraft:deepslate"
+            | "minecraft:cobbled_deepslate"
+            | "minecraft:polished_deepslate"
+            | "minecraft:deepslate_bricks"
+            | "minecraft:deepslate_tiles"
+            | "minecraft:tuff"
+            | "minecraft:calcite"
+            | "minecraft:dripstone_block"
+            | "minecraft:cobblestone"
+            | "minecraft:mossy_cobblestone"
+            | "minecraft:stone_bricks"
+            | "minecraft:mossy_stone_bricks"
+            | "minecraft:cracked_stone_bricks"
+            | "minecraft:chiseled_stone_bricks"
+            | "minecraft:polished_blackstone"
+            | "minecraft:polished_blackstone_bricks"
+            | "minecraft:bricks"
+            | "minecraft:nether_bricks"
+            | "minecraft:red_nether_bricks"
+            | "minecraft:end_stone"
+            | "minecraft:end_stone_bricks"
+            | "minecraft:netherrack"
+            | "minecraft:basalt"
+            | "minecraft:smooth_basalt"
+            | "minecraft:blackstone"
+            | "minecraft:quartz_block"
+            | "minecraft:quartz_bricks"
+            | "minecraft:purpur_block"
+            | "minecraft:purpur_pillar"
+            | "minecraft:sandstone"
+            | "minecraft:cut_sandstone"
+            | "minecraft:smooth_sandstone"
+            | "minecraft:red_sandstone"
+            | "minecraft:cut_red_sandstone"
+            | "minecraft:smooth_red_sandstone"
+            | "minecraft:dirt"
+            | "minecraft:coarse_dirt"
+            | "minecraft:rooted_dirt"
+            | "minecraft:grass_block"
+            | "minecraft:podzol"
+            | "minecraft:mycelium"
+            | "minecraft:clay"
+            | "minecraft:packed_mud"
+            | "minecraft:mud_bricks"
+            | "minecraft:bone_block"
+            | "minecraft:snow_block"
+            | "minecraft:hay_block"
+            | "minecraft:bamboo_block"
+            | "minecraft:iron_block"
+            | "minecraft:gold_block"
+            | "minecraft:diamond_block"
+            | "minecraft:emerald_block"
+            | "minecraft:lapis_block"
+            | "minecraft:coal_block"
+            | "minecraft:raw_iron_block"
+            | "minecraft:raw_gold_block"
+            | "minecraft:raw_copper_block"
+            | "minecraft:copper_block"
+            | "minecraft:exposed_copper"
+            | "minecraft:weathered_copper"
+            | "minecraft:oxidized_copper"
+            | "minecraft:terracotta"
+            | "minecraft:white_terracotta"
+            | "minecraft:orange_terracotta"
+            | "minecraft:magenta_terracotta"
+            | "minecraft:light_blue_terracotta"
+            | "minecraft:yellow_terracotta"
+            | "minecraft:lime_terracotta"
+            | "minecraft:pink_terracotta"
+            | "minecraft:gray_terracotta"
+            | "minecraft:light_gray_terracotta"
+            | "minecraft:cyan_terracotta"
+            | "minecraft:purple_terracotta"
+            | "minecraft:blue_terracotta"
+            | "minecraft:brown_terracotta"
+            | "minecraft:green_terracotta"
+            | "minecraft:red_terracotta"
+            | "minecraft:black_terracotta"
+    ) || name.ends_with("_planks")
+        || name.ends_with("_log")
+        || name.ends_with("_wood")
+        || name.ends_with("_stem")
+        || name.ends_with("_hyphae")
+        || name.ends_with("_wool")
+        || name.ends_with("_concrete")
+        || name.ends_with("_concrete_powder")
+}
+
+fn is_supported_non_conductor(name: &str) -> bool {
+    matches!(name, "minecraft:glass" | "minecraft:glass_pane" | "minecraft:tinted_glass")
+        || name.ends_with("_stained_glass")
+        || name.ends_with("_stained_glass_pane")
+}
+
+fn is_supported_immovable(name: &str) -> bool {
+    matches!(
+        name,
+        "minecraft:obsidian"
+            | "minecraft:crying_obsidian"
+            | "minecraft:reinforced_deepslate"
+            | "minecraft:bedrock"
+            | "minecraft:barrier"
+            | "minecraft:end_portal_frame"
+            | "minecraft:command_block"
+            | "minecraft:chain_command_block"
+            | "minecraft:repeating_command_block"
+            | "minecraft:structure_block"
+            | "minecraft:jigsaw"
+            | "minecraft:spawner"
+    )
+}
+
+fn is_wooden_button(name: &str) -> bool {
+    matches!(
+        name,
+        "minecraft:oak_button"
+            | "minecraft:spruce_button"
+            | "minecraft:birch_button"
+            | "minecraft:jungle_button"
+            | "minecraft:acacia_button"
+            | "minecraft:dark_oak_button"
+            | "minecraft:mangrove_button"
+            | "minecraft:cherry_button"
+            | "minecraft:pale_oak_button"
+            | "minecraft:bamboo_button"
+            | "minecraft:crimson_button"
+            | "minecraft:warped_button"
+    )
 }
 
 fn parse_direction(value: &str) -> Result<Direction, StructureError> {

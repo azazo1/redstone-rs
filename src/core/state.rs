@@ -205,6 +205,7 @@ impl BlockState {
     const SUBTRACT: u32 = 1 << 11;
     const EXTENDED: u32 = 1 << 12;
     const LIT: u32 = 1 << 13;
+    const WOODEN_BUTTON: u32 = 1 << 14;
 
     pub const fn new(kind: BlockKind) -> Self {
         let bits = match kind {
@@ -268,6 +269,19 @@ impl BlockState {
 
     pub const fn delay(self) -> u8 {
         ((self.bits & Self::DELAY_MASK) >> Self::DELAY_SHIFT) as u8 + 1
+    }
+
+    pub const fn with_wooden_button(mut self, wooden: bool) -> Self {
+        if wooden {
+            self.bits |= Self::WOODEN_BUTTON;
+        } else {
+            self.bits &= !Self::WOODEN_BUTTON;
+        }
+        self
+    }
+
+    pub const fn button_ticks(self) -> u64 {
+        if self.bits & Self::WOODEN_BUTTON != 0 { 30 } else { 20 }
     }
 
     pub const fn with_locked(mut self, locked: bool) -> Self {

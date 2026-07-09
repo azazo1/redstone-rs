@@ -377,7 +377,7 @@ pub(crate) fn trigger_button(world: &mut World, position: Position) {
     }
     set_powered(world, position, state, true, "button_use");
     notify_attached_conductors(world, position, BlockKind::Button);
-    world.schedule_tick(position, BlockKind::Button, 20, TickPriority::Normal);
+    world.schedule_tick(position, BlockKind::Button, state.button_ticks(), TickPriority::Normal);
 }
 
 pub(crate) fn toggle_lever(world: &mut World, position: Position) {
@@ -398,7 +398,7 @@ pub(crate) fn set_external_power(world: &mut World, position: Position, powered:
         notify_attached_conductors(world, position, state.kind);
     }
     if state.kind == BlockKind::Button && powered {
-        world.schedule_tick(position, BlockKind::Button, 20, TickPriority::Normal);
+        world.schedule_tick(position, BlockKind::Button, state.button_ticks(), TickPriority::Normal);
     }
     Ok(())
 }

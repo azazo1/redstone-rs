@@ -98,6 +98,49 @@ fn imports_sponge_schematic_varint_block_data() {
 }
 
 #[test]
+fn imports_common_building_blocks_with_redstone_relevant_behavior() {
+    let mut palette = BTreeMap::new();
+    palette.insert("minecraft:air".to_owned(), 0);
+    palette.insert("minecraft:polished_deepslate".to_owned(), 1);
+    palette.insert("minecraft:lime_concrete".to_owned(), 2);
+    palette.insert("minecraft:oak_log".to_owned(), 3);
+    palette.insert("minecraft:blue_stained_glass".to_owned(), 4);
+    palette.insert("minecraft:bedrock".to_owned(), 5);
+    let bytes = to_bytes(&SpongeFixture {
+        width: 6,
+        height: 1,
+        length: 1,
+        palette,
+        block_data: ByteArray::new(vec![0, 1, 2, 3, 4, 5]),
+    })
+    .expect("fixture should serialize");
+
+    let structure = StructureInput::from_nbt(&bytes).expect("common blocks should decode");
+    let kinds = structure.blocks.into_iter().map(|block| block.state.kind).collect::<Vec<_>>();
+
+    assert_eq!(kinds, vec![BlockKind::Solid, BlockKind::Solid, BlockKind::Solid, BlockKind::Glass, BlockKind::Immovable]);
+}
+
+#[test]
+fn imports_wooden_button_with_its_longer_pulse_duration() {
+    let mut palette = BTreeMap::new();
+    palette.insert("minecraft:air".to_owned(), 0);
+    palette.insert("minecraft:oak_button".to_owned(), 1);
+    let bytes = to_bytes(&SpongeFixture {
+        width: 2,
+        height: 1,
+        length: 1,
+        palette,
+        block_data: ByteArray::new(vec![0, 1]),
+    })
+    .expect("fixture should serialize");
+
+    let structure = StructureInput::from_nbt(&bytes).expect("button should decode");
+    assert_eq!(structure.blocks[0].state.kind, BlockKind::Button);
+    assert_eq!(structure.blocks[0].state.button_ticks(), 30);
+}
+
+#[test]
 fn imports_gzip_litematic_with_negative_region_size() {
     let mut lever_properties = BTreeMap::new();
     lever_properties.insert("facing".to_owned(), "east".to_owned());

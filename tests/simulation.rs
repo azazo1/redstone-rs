@@ -37,6 +37,33 @@ async fn lever_drives_wire_on_the_next_game_tick() {
 }
 
 #[tokio::test]
+async fn wooden_button_stays_powered_for_thirty_game_ticks() {
+    let button = Position::new(0, 0, 0);
+    let mut session = SimulationSession::load_structure(StructureInput {
+        blocks: vec![StructureBlock {
+            position: button,
+            state: BlockState::new(BlockKind::Button).with_wooden_button(true),
+        }],
+    })
+    .await
+    .expect("structure should load");
+
+    session
+        .apply(InputAction {
+            tick: 1,
+            operation: InputOperation::UseBlock { position: button },
+        })
+        .await;
+    for _ in 0..29 {
+        session.step().await.expect("wooden button pulse should advance");
+    }
+    assert!(session.world().state(button).powered());
+
+    session.step().await.expect("wooden button should release on tick thirty");
+    assert!(!session.world().state(button).powered());
+}
+
+#[tokio::test]
 async fn external_power_operation_drives_and_releases_pressure_plate_signal() {
     let plate = Position::new(0, 0, 0);
     let wire = Position::new(1, 0, 0);
