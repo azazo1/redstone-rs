@@ -2,6 +2,7 @@ VINEFLOWER := "tools/vineflower-1.12.0.jar"
 CLIENT_JAR := "assets/client-26.1.2.jar"
 OUT_DIR := "decompiled/client-26.1.2"
 
+[private]
 default:
     @just --list
 
