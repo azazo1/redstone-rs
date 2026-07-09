@@ -206,6 +206,9 @@ impl BlockState {
     const EXTENDED: u32 = 1 << 12;
     const LIT: u32 = 1 << 13;
     const WOODEN_BUTTON: u32 = 1 << 14;
+    const WALL_MOUNTED: u32 = 1 << 15;
+    const OPEN: u32 = 1 << 16;
+    const ANALOG_OUTPUT: u32 = 1 << 17;
 
     pub const fn new(kind: BlockKind) -> Self {
         let bits = match kind {
@@ -282,6 +285,49 @@ impl BlockState {
 
     pub const fn button_ticks(self) -> u64 {
         if self.bits & Self::WOODEN_BUTTON != 0 { 30 } else { 20 }
+    }
+
+    pub const fn with_wall_mounted(mut self, wall_mounted: bool) -> Self {
+        if wall_mounted {
+            self.bits |= Self::WALL_MOUNTED;
+        } else {
+            self.bits &= !Self::WALL_MOUNTED;
+        }
+        self
+    }
+
+    pub const fn support_direction(self) -> Direction {
+        if self.bits & Self::WALL_MOUNTED != 0 {
+            self.facing().opposite()
+        } else {
+            Direction::Down
+        }
+    }
+
+    pub const fn with_open(mut self, open: bool) -> Self {
+        if open {
+            self.bits |= Self::OPEN;
+        } else {
+            self.bits &= !Self::OPEN;
+        }
+        self
+    }
+
+    pub const fn open(self) -> bool {
+        self.bits & Self::OPEN != 0
+    }
+
+    pub const fn with_analog_output(mut self, analog_output: bool) -> Self {
+        if analog_output {
+            self.bits |= Self::ANALOG_OUTPUT;
+        } else {
+            self.bits &= !Self::ANALOG_OUTPUT;
+        }
+        self
+    }
+
+    pub const fn analog_output(self) -> bool {
+        self.bits & Self::ANALOG_OUTPUT != 0
     }
 
     pub const fn with_locked(mut self, locked: bool) -> Self {

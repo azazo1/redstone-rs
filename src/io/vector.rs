@@ -38,6 +38,25 @@ pub struct SnapshotDifference {
     pub actual: Option<SnapshotBlock>,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TraceEventDifference {
+    pub index: usize,
+    pub expected: Option<TraceEvent>,
+    pub actual: Option<TraceEvent>,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SimulationDifference {
+    pub snapshots: Vec<SnapshotDifference>,
+    pub events: Vec<TraceEventDifference>,
+}
+
+impl SimulationDifference {
+    pub fn is_empty(&self) -> bool {
+        self.snapshots.is_empty() && self.events.is_empty()
+    }
+}
+
 #[derive(Debug, Error)]
 pub enum VectorError {
     #[error("failed to read test vector: {0}")]
@@ -76,9 +95,15 @@ impl TestVector {
             frame.blocks.retain(|block| in_observation_area(block.position, self.observe_min, self.observe_max));
             frames.push(frame);
         }
+        let events = session
+            .trace()
+            .await
+            .into_iter()
+            .filter(|event| in_observation_area(event.position, self.observe_min, self.observe_max))
+            .collect();
         Ok(SimulationTrace {
             frames,
-            events: session.trace().await,
+            events,
         })
     }
 }
@@ -109,6 +134,25 @@ pub fn diff_snapshots(expected: &[Snapshot], actual: &[Snapshot]) -> Vec<Snapsho
         }
     }
     differences
+}
+
+pub fn diff_traces(expected: &SimulationTrace, actual: &SimulationTrace) -> SimulationDifference {
+    let event_count = expected.events.len().max(actual.events.len());
+    let events = (0..event_count)
+        .filter_map(|index| {
+            let expected_event = expected.events.get(index).cloned();
+            let actual_event = actual.events.get(index).cloned();
+            (expected_event != actual_event).then_some(TraceEventDifference {
+                index,
+                expected: expected_event,
+                actual: actual_event,
+            })
+        })
+        .collect();
+    SimulationDifference {
+        snapshots: diff_snapshots(&expected.frames, &actual.frames),
+        events,
+    }
 }
 
 fn indexed_blocks(snapshot: &Snapshot) -> BTreeMap<Position, SnapshotBlock> {

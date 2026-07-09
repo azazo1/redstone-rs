@@ -2,9 +2,11 @@ use std::collections::BTreeMap;
 
 use fastnbt::to_bytes;
 use redstone_rs::{
-    core::{BlockKind, BlockState, Position, Snapshot, SnapshotBlock},
-    io::{diff_snapshots, TestVector},
+    core::{BlockKind, BlockState, Position, Snapshot, SnapshotBlock, TraceEvent, TraceKind},
+    io::{diff_snapshots, diff_traces, SimulationTrace, TestVector},
+    InputAction,
 };
+use redstone_rs::api::InputOperation;
 use serde::Serialize;
 
 fn snapshot(tick: u64, blocks: Vec<SnapshotBlock>) -> Snapshot {
@@ -54,6 +56,40 @@ fn snapshot_diff_reports_missing_and_changed_blocks_at_the_correct_tick() {
     assert_eq!(differences[0].actual, None);
 }
 
+#[test]
+fn trace_diff_reports_event_order_even_when_snapshots_match() {
+    let position = Position::new(1, 2, 3);
+    let frame = snapshot(1, vec![block(position, BlockKind::Solid)]);
+    let event = TraceEvent {
+        tick: 1,
+        sequence: 0,
+        kind: TraceKind::NeighborUpdate,
+        position,
+        before: None,
+        after: Some(BlockState::new(BlockKind::Solid)),
+        cause: "neighbor:RedstoneWire".to_owned(),
+    };
+    let expected = SimulationTrace {
+        frames: vec![frame.clone()],
+        events: vec![event.clone()],
+    };
+    let actual = SimulationTrace {
+        frames: vec![frame],
+        events: vec![TraceEvent {
+            kind: TraceKind::BlockEvent,
+            ..event
+        }],
+    };
+
+    let difference = diff_traces(&expected, &actual);
+
+    assert!(difference.snapshots.is_empty());
+    assert_eq!(difference.events.len(), 1);
+    assert_eq!(difference.events[0].index, 0);
+    assert_eq!(difference.events[0].expected.as_ref().map(|event| event.kind), Some(TraceKind::NeighborUpdate));
+    assert_eq!(difference.events[0].actual.as_ref().map(|event| event.kind), Some(TraceKind::BlockEvent));
+}
+
 #[tokio::test]
 async fn test_vector_runs_relative_structure_and_filters_observation_area() {
     let root = std::env::temp_dir().join(format!("redstone-rs-vector-{}", std::process::id()));
@@ -61,7 +97,7 @@ async fn test_vector_runs_relative_structure_and_filters_observation_area() {
     let structure = StructureFixture {
         palette: vec![
             PaletteFixture {
-                name: "minecraft:redstone_block".to_owned(),
+                name: "minecraft:lever".to_owned(),
                 properties: BTreeMap::new(),
             },
             PaletteFixture {
@@ -84,7 +120,14 @@ async fn test_vector_runs_relative_structure_and_filters_observation_area() {
         .expect("structure fixture should write");
     let vector = TestVector {
         structure: "machine.nbt".to_owned(),
-        actions: vec![],
+        actions: vec![redstone_rs::io::TimedAction {
+            action: InputAction {
+                tick: 1,
+                operation: InputOperation::UseBlock {
+                    position: Position::new(0, 0, 0),
+                },
+            },
+        }],
         observe_min: Position::new(1, 0, 0),
         observe_max: Position::new(1, 0, 0),
         ticks: 1,
@@ -100,4 +143,6 @@ async fn test_vector_runs_relative_structure_and_filters_observation_area() {
     assert_eq!(trace.frames.len(), 1);
     assert_eq!(trace.frames[0].blocks.len(), 1);
     assert_eq!(trace.frames[0].blocks[0].state.power(), 15);
+    assert!(!trace.events.is_empty());
+    assert!(trace.events.iter().all(|event| event.position == Position::new(1, 0, 0)));
 }

@@ -141,6 +141,63 @@ fn imports_wooden_button_with_its_longer_pulse_duration() {
 }
 
 #[test]
+fn imports_redstone_wall_torch_with_horizontal_support_direction() {
+    let mut palette = BTreeMap::new();
+    palette.insert("minecraft:air".to_owned(), 0);
+    palette.insert("minecraft:redstone_wall_torch[facing=east]".to_owned(), 1);
+    let bytes = to_bytes(&SpongeFixture {
+        width: 2,
+        height: 1,
+        length: 1,
+        palette,
+        block_data: ByteArray::new(vec![0, 1]),
+    })
+    .expect("fixture should serialize");
+
+    let structure = StructureInput::from_nbt(&bytes).expect("wall torch should decode");
+    let state = structure.blocks[0].state;
+    assert_eq!(state.support_direction(), redstone_rs::Direction::West);
+}
+
+#[test]
+fn imports_open_door_without_marking_it_as_redstone_powered() {
+    let mut palette = BTreeMap::new();
+    palette.insert("minecraft:air".to_owned(), 0);
+    palette.insert("minecraft:oak_door[open=true,powered=false]".to_owned(), 1);
+    let bytes = to_bytes(&SpongeFixture {
+        width: 2,
+        height: 1,
+        length: 1,
+        palette,
+        block_data: ByteArray::new(vec![0, 1]),
+    })
+    .expect("fixture should serialize");
+
+    let structure = StructureInput::from_nbt(&bytes).expect("door should decode");
+    let state = structure.blocks[0].state;
+    assert!(state.open());
+    assert!(!state.powered());
+}
+
+#[test]
+fn imports_weighted_pressure_plate_as_analog_output() {
+    let mut palette = BTreeMap::new();
+    palette.insert("minecraft:air".to_owned(), 0);
+    palette.insert("minecraft:light_weighted_pressure_plate".to_owned(), 1);
+    let bytes = to_bytes(&SpongeFixture {
+        width: 2,
+        height: 1,
+        length: 1,
+        palette,
+        block_data: ByteArray::new(vec![0, 1]),
+    })
+    .expect("fixture should serialize");
+
+    let structure = StructureInput::from_nbt(&bytes).expect("weighted plate should decode");
+    assert!(structure.blocks[0].state.analog_output());
+}
+
+#[test]
 fn imports_gzip_litematic_with_negative_region_size() {
     let mut lever_properties = BTreeMap::new();
     lever_properties.insert("facing".to_owned(), "east".to_owned());

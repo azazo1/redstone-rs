@@ -6,4 +6,5 @@
 - [ ] 3D 编辑器
 - [ ] 完整存档支持
 - [x] Litematica 结构导入
-- [x] WorldEdit Sponge schematic 导入
+- [x] WorldEdit Sponge schematic 导出
+- [x] GameTest just 下载 recipe

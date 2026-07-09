@@ -50,6 +50,41 @@ download-client version="26.1.2":
     echo "下载 client JAR: assets/client-{{ version }}.jar"
     curl -fL "$client_url" -o "assets/client-{{ version }}.jar"
 
+# just download-server 26.1.2
+# 下载并校验指定版本的 Minecraft dedicated server JAR.
+download-server version="26.1.2":
+    #!/usr/bin/env sh
+    set -eu
+    mkdir -p assets
+    manifest="$(mktemp)"
+    version_json="$(mktemp)"
+    trap 'rm -f "$manifest" "$version_json"' EXIT
+    echo "读取 Mojang 版本清单"
+    curl -fsSL https://piston-meta.mojang.com/mc/game/version_manifest_v2.json -o "$manifest"
+    version_url="$(jq -r --arg version "{{ version }}" '.versions[] | select(.id == $version) | .url // empty' "$manifest")"
+    if [ -z "$version_url" ]; then
+      echo "未找到版本: {{ version }}" >&2
+      exit 1
+    fi
+    echo "读取版本信息: {{ version }}"
+    curl -fsSL "$version_url" -o "$version_json"
+    server_url="$(jq -r '.downloads.server.url // empty' "$version_json")"
+    server_sha1="$(jq -r '.downloads.server.sha1 // empty' "$version_json")"
+    if [ -z "$server_url" ] || [ -z "$server_sha1" ]; then
+      echo "版本缺少 server 下载信息: {{ version }}" >&2
+      exit 1
+    fi
+    output="assets/server-{{ version }}.jar"
+    echo "下载 server JAR: $output"
+    curl -fL "$server_url" -o "$output"
+    actual_sha1="$(shasum -a 1 "$output" | awk '{print $1}')"
+    if [ "$actual_sha1" != "$server_sha1" ]; then
+      echo "server JAR SHA-1 校验失败" >&2
+      rm -f "$output"
+      exit 1
+    fi
+    echo "server JAR 校验完成"
+
 # 运行 Rust 静态检查.
 clippy:
     cargo clippy --tests

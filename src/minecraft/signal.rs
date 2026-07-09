@@ -14,7 +14,13 @@ pub(crate) fn handle_neighbor_changed(
     let state = world.state(position);
     match state.kind {
         BlockKind::RedstoneWire => refresh_wire(world, position),
-        BlockKind::RedstoneTorch => schedule_torch_update(world, position, state),
+        BlockKind::RedstoneTorch => {
+            if torch_has_support(world, position, state) {
+                schedule_torch_update(world, position, state);
+            } else {
+                let _ = world.set_state(position, BlockState::new(BlockKind::Air), "torch_support_removed");
+            }
+        }
         BlockKind::Repeater => schedule_repeater_update(world, position, state),
         BlockKind::Comparator => schedule_comparator_update(world, position, state),
         BlockKind::Observer => {
@@ -83,13 +89,15 @@ fn direct_signal_from(state: BlockState, toward: Direction) -> u8 {
             if toward == Direction::Up { 0 } else { state.power() }
         }
         BlockKind::RedstoneTorch => {
-            if state.powered() && toward != Direction::Down {
+            if state.powered() && toward != state.support_direction() {
                 15
             } else {
                 0
             }
         }
-        BlockKind::Lever | BlockKind::Button | BlockKind::PressurePlate => u8::from(state.powered()) * 15,
+        BlockKind::Lever | BlockKind::Button => u8::from(state.powered()) * 15,
+        BlockKind::PressurePlate if state.analog_output() => state.power(),
+        BlockKind::PressurePlate => u8::from(state.powered()) * 15,
         BlockKind::Repeater => {
             if state.powered() && toward == state.facing() {
                 15
@@ -207,15 +215,19 @@ fn received_non_wire_signal(world: &World, position: Position) -> u8 {
 }
 
 fn schedule_torch_update(world: &mut World, position: Position, state: BlockState) {
-    let desired = received_signal(world, position.offset(Direction::Down)) == 0;
+    let desired = received_signal(world, position.offset(state.support_direction())) == 0;
     if desired != state.powered() && !world.has_scheduled_tick(position, BlockKind::RedstoneTorch) {
         world.schedule_tick(position, BlockKind::RedstoneTorch, 2, TickPriority::Normal);
     }
 }
 
+fn torch_has_support(world: &World, position: Position, state: BlockState) -> bool {
+    world.state(position.offset(state.support_direction())).kind.is_conductor()
+}
+
 fn update_torch(world: &mut World, position: Position) {
     let state = world.state(position);
-    let has_neighbor_signal = received_signal(world, position.offset(Direction::Down)) > 0;
+    let has_neighbor_signal = received_signal(world, position.offset(state.support_direction())) > 0;
     if state.powered() && has_neighbor_signal {
         set_powered(world, position, state, false, "torch_turn_off");
         if world.record_torch_turn_off(position) {
@@ -343,7 +355,18 @@ fn update_copper_bulb(world: &mut World, position: Position, state: BlockState) 
 fn update_openable(world: &mut World, position: Position, state: BlockState) {
     let powered = received_signal(world, position) > 0;
     if powered != state.powered() {
-        set_powered(world, position, state, powered, "openable_power");
+        let _ = world.set_state(
+            position,
+            state.with_powered(powered).with_open(powered),
+            "openable_power",
+        );
+    }
+}
+
+pub(crate) fn toggle_openable(world: &mut World, position: Position) {
+    let state = world.state(position);
+    if matches!(state.kind, BlockKind::Door | BlockKind::Trapdoor | BlockKind::FenceGate) && !state.powered() {
+        let _ = world.set_state(position, state.with_open(!state.open()), "openable_use");
     }
 }
 
@@ -390,9 +413,14 @@ pub(crate) fn toggle_lever(world: &mut World, position: Position) {
 
 pub(crate) fn set_external_power(world: &mut World, position: Position, powered: bool) -> Result<(), WorldError> {
     let state = world.state(position);
+    let power = if state.kind == BlockKind::RedstoneWire || (state.kind == BlockKind::PressurePlate && state.analog_output()) {
+        if powered { 15 } else { 0 }
+    } else {
+        state.power()
+    };
     let next = state
         .with_powered(powered)
-        .with_power(if powered && state.kind == BlockKind::RedstoneWire { 15 } else { state.power() });
+        .with_power(power);
     world.set_state(position, next, "external_power")?;
     if matches!(state.kind, BlockKind::Lever | BlockKind::Button | BlockKind::PressurePlate) {
         notify_attached_conductors(world, position, state.kind);

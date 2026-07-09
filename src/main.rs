@@ -2,7 +2,7 @@ use std::path::PathBuf;
 
 use clap::{Parser, Subcommand};
 use redstone_rs::{
-    io::{diff_snapshots, SimulationTrace, StructureBlock, StructureInput, TestVector}, BlockKind, BlockState,
+    io::{diff_traces, SimulationTrace, StructureBlock, StructureInput, TestVector}, BlockKind, BlockState,
     Position, SimulationSession,
 };
 use tracing::{info, Level};
@@ -119,10 +119,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         } => {
             let expected_trace: SimulationTrace = serde_json::from_slice(&tokio::fs::read(&expected).await?)?;
             let actual_trace: SimulationTrace = serde_json::from_slice(&tokio::fs::read(&actual).await?)?;
-            let differences = diff_snapshots(&expected_trace.frames, &actual_trace.frames);
+            let differences = diff_traces(&expected_trace, &actual_trace);
             tokio::fs::write(&output, serde_json::to_vec_pretty(&differences)?).await?;
             info!(
-                differences = differences.len(),
+                snapshots = differences.snapshots.len(),
+                events = differences.events.len(),
+                matched = differences.is_empty(),
                 path = %output.display(),
                 "simulation traces compared"
             );

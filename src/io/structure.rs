@@ -97,6 +97,12 @@ pub(crate) fn state_from_parts(
     };
 
     let mut state = BlockState::new(kind);
+    if matches!(name, "minecraft:light_weighted_pressure_plate" | "minecraft:heavy_weighted_pressure_plate") {
+        state = state.with_analog_output(true);
+    }
+    if name == "minecraft:redstone_wall_torch" {
+        state = state.with_wall_mounted(true);
+    }
     if kind == BlockKind::Button && is_wooden_button(name) {
         state = state.with_wooden_button(true);
     }
@@ -131,7 +137,7 @@ pub(crate) fn state_from_parts(
         state = state.with_extended(parse_bool(extended)?);
     }
     if let Some(open) = properties.get("open") {
-        state = state.with_powered(parse_bool(open)?);
+        state = state.with_open(parse_bool(open)?);
     }
     Ok(state)
 }

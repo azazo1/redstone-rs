@@ -10,7 +10,7 @@ use crate::{
         TraceKind, World, WorldError,
     },
     io::StructureInput,
-    minecraft::{toggle_lever, trigger_button},
+    minecraft::{toggle_lever, toggle_openable, trigger_button},
 };
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -150,6 +150,9 @@ impl SimulationSession {
             InputOperation::UseBlock { position } => match self.world.state(position).kind {
                 BlockKind::Lever => toggle_lever(&mut self.world, position),
                 BlockKind::Button => trigger_button(&mut self.world, position),
+                BlockKind::Door | BlockKind::Trapdoor | BlockKind::FenceGate => {
+                    toggle_openable(&mut self.world, position)
+                }
                 _ => {}
             },
             InputOperation::SetComparatorSignal { position, signal } => {

@@ -108,6 +108,39 @@ async fn external_power_operation_drives_and_releases_pressure_plate_signal() {
 }
 
 #[tokio::test]
+async fn weighted_pressure_plate_preserves_its_analog_signal_strength() {
+    let plate = Position::new(0, 0, 0);
+    let wire = Position::new(1, 0, 0);
+    let mut session = SimulationSession::load_structure(StructureInput {
+        blocks: vec![
+            StructureBlock {
+                position: plate,
+                state: BlockState::new(BlockKind::PressurePlate).with_analog_output(true),
+            },
+            StructureBlock {
+                position: wire,
+                state: BlockState::new(BlockKind::RedstoneWire),
+            },
+        ],
+    })
+    .await
+    .expect("structure should load");
+
+    session
+        .apply(InputAction {
+            tick: 1,
+            operation: InputOperation::SetSignal {
+                position: plate,
+                signal: 7,
+            },
+        })
+        .await;
+    session.step().await.expect("weighted plate should update wire");
+
+    assert_eq!(session.world().state(wire).power(), 7);
+}
+
+#[tokio::test]
 async fn external_signal_preserves_daylight_detector_power_level() {
     let detector = Position::new(0, 0, 0);
     let wire = Position::new(1, 0, 0);
@@ -203,6 +236,31 @@ async fn door_follows_redstone_power_and_tnt_is_consumed_on_rising_edge() {
 
     assert!(session.world().state(door).powered());
     assert_eq!(session.world().state(tnt).kind, BlockKind::Air);
+}
+
+#[tokio::test]
+async fn manually_opened_door_remains_unpowered_until_redstone_changes() {
+    let door = Position::new(0, 0, 0);
+    let mut session = SimulationSession::load_structure(StructureInput {
+        blocks: vec![StructureBlock {
+            position: door,
+            state: BlockState::new(BlockKind::Door),
+        }],
+    })
+    .await
+    .expect("structure should load");
+
+    session
+        .apply(InputAction {
+            tick: 1,
+            operation: InputOperation::UseBlock { position: door },
+        })
+        .await;
+    session.step().await.expect("manual door use should advance");
+
+    let state = session.world().state(door);
+    assert!(state.open());
+    assert!(!state.powered());
 }
 
 #[tokio::test]
@@ -813,6 +871,93 @@ async fn redstone_torch_inverts_support_power_after_two_game_ticks() {
     assert!(!session.world().state(torch).powered());
     session.step().await.expect("torch should turn on");
     assert!(session.world().state(torch).powered());
+}
+
+#[tokio::test]
+async fn redstone_wall_torch_uses_its_horizontal_support_block() {
+    let source = Position::new(-2, 0, 0);
+    let support = Position::new(-1, 0, 0);
+    let torch = Position::new(0, 0, 0);
+    let mut session = SimulationSession::load_structure(StructureInput {
+        blocks: vec![
+            StructureBlock {
+                position: source,
+                state: BlockState::new(BlockKind::RedstoneBlock),
+            },
+            StructureBlock {
+                position: support,
+                state: BlockState::new(BlockKind::Solid),
+            },
+            StructureBlock {
+                position: torch,
+                state: BlockState::new(BlockKind::RedstoneTorch)
+                    .with_wall_mounted(true)
+                    .with_facing(Direction::East),
+            },
+        ],
+    })
+    .await
+    .expect("structure should load");
+
+    session.step().await.expect("wall torch delay should advance");
+    assert!(session.world().state(torch).powered());
+    session.step().await.expect("wall torch should observe horizontal support power");
+    assert!(!session.world().state(torch).powered());
+}
+
+#[tokio::test]
+async fn redstone_torches_break_when_their_support_is_removed() {
+    let floor_support = Position::new(0, 0, 0);
+    let floor_torch = Position::new(0, 1, 0);
+    let wall_support = Position::new(2, 0, 0);
+    let wall_torch = Position::new(3, 0, 0);
+    let mut session = SimulationSession::load_structure(StructureInput {
+        blocks: vec![
+            StructureBlock {
+                position: floor_support,
+                state: BlockState::new(BlockKind::Solid),
+            },
+            StructureBlock {
+                position: floor_torch,
+                state: BlockState::new(BlockKind::RedstoneTorch),
+            },
+            StructureBlock {
+                position: wall_support,
+                state: BlockState::new(BlockKind::Solid),
+            },
+            StructureBlock {
+                position: wall_torch,
+                state: BlockState::new(BlockKind::RedstoneTorch)
+                    .with_wall_mounted(true)
+                    .with_facing(Direction::East),
+            },
+        ],
+    })
+    .await
+    .expect("structure should load");
+
+    session
+        .apply(InputAction {
+            tick: 1,
+            operation: InputOperation::SetBlock {
+                position: floor_support,
+                state: BlockState::new(BlockKind::Air),
+            },
+        })
+        .await;
+    session
+        .apply(InputAction {
+            tick: 1,
+            operation: InputOperation::SetBlock {
+                position: wall_support,
+                state: BlockState::new(BlockKind::Air),
+            },
+        })
+        .await;
+    session.step().await.expect("support removal should update torches");
+
+    assert_eq!(session.world().state(floor_torch).kind, BlockKind::Air);
+    assert_eq!(session.world().state(wall_torch).kind, BlockKind::Air);
 }
 
 #[tokio::test]
