@@ -2,7 +2,7 @@ use std::path::PathBuf;
 
 use clap::{Parser, Subcommand};
 use redstone_rs::{
-    io::{diff_traces, SimulationTrace, StructureBlock, StructureInput, TestVector}, BlockKind, BlockState,
+    io::{diff_traces, write_smoke_datapack, write_structure_template, SimulationTrace, StructureBlock, StructureInput, TestVector}, BlockKind, BlockState,
     Position, SimulationSession,
 };
 use tracing::{info, Level};
@@ -46,6 +46,16 @@ enum Command {
         expected: PathBuf,
         #[arg(long)]
         actual: PathBuf,
+        #[arg(long)]
+        output: PathBuf,
+    },
+    OracleInit {
+        #[arg(long)]
+        output: PathBuf,
+    },
+    OracleStructure {
+        #[arg(long)]
+        structure: PathBuf,
         #[arg(long)]
         output: PathBuf,
     },
@@ -128,6 +138,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 path = %output.display(),
                 "simulation traces compared"
             );
+        }
+        Command::OracleInit { output } => {
+            write_smoke_datapack(&output).await?;
+            info!(path = %output.display(), "GameTest oracle datapack written");
+        }
+        Command::OracleStructure { structure, output } => {
+            let input = StructureInput::from_path(&structure).await?;
+            write_structure_template(&output, &input).await?;
+            info!(blocks = input.blocks.len(), path = %output.display(), "GameTest structure template written");
         }
     }
 

@@ -24,7 +24,10 @@ cargo run -- benchmark --blocks 100000 --ticks 1000
 
 ```shell
 just download-server 26.1.2
-just gametest-oracle 26.1.2 --help
+just oracle-init
+just gametest-oracle 26.1.2 --packs .gametest --tests redstone_oracle:smoke --report .gametest/26.1.2/smoke.xml
+just oracle-structure machine.nbt .gametest/oracle-pack/data/redstone_oracle/structure/machine.nbt
+just gametest-oracle 26.1.2 --tests minecraft:always_pass --report .gametest/26.1.2/always-pass.xml
 redstone-rs vector --vector case.json --output rust-trace.json
 redstone-rs diff --expected vanilla-trace.json --actual rust-trace.json --output differences.json
 ```

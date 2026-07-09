@@ -108,6 +108,15 @@ gametest-oracle version="26.1.2" *args: (download-server version)
       --universe "$runtime_dir/world" \
       {{args}}
 
+# 生成最小的 block-based GameTest oracle datapack.
+oracle-init output=".gametest/oracle-pack":
+    cargo run -- oracle-init --output {{ output }}
+
+# just oracle-structure machine.nbt .gametest/oracle-pack/data/redstone_oracle/structure/machine.nbt
+# 导出结构为 Java GameTest 可读取的 gzip NBT 模板.
+oracle-structure structure output:
+    cargo run -- oracle-structure --structure {{ structure }} --output {{ output }}
+
 # 运行 Rust 静态检查.
 clippy:
     cargo clippy --tests

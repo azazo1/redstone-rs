@@ -3,6 +3,7 @@
 /assets/client-*.jar
 /assets/server-*.jar
 /.gametest/
+/logs/
 /tools/*.jar
 /vendors/
 *.log
