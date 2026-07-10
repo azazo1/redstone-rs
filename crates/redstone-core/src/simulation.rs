@@ -428,6 +428,17 @@ impl<R: BlockRules> Simulation<R> {
                     }
                     continue;
                 }
+                NeighborTask::RunRuleTaskAfterNeighbors(task) => {
+                    let nested = self.with_context_and_changes(
+                        phase,
+                        changes,
+                        |rules, ctx| rules.on_deferred_task(ctx, task),
+                    )?;
+                    for task in nested.into_iter().rev() {
+                        stack.push(task);
+                    }
+                    continue;
+                }
                 task => task,
             };
             count += 1;
@@ -480,6 +491,7 @@ impl<R: BlockRules> Simulation<R> {
                 NeighborTask::ScheduleTickAfterNeighbors { .. } => unreachable!(),
                 NeighborTask::SetBlockAndUpdateNeighborsAfterNeighbors { .. } => unreachable!(),
                 NeighborTask::ApplyBlockChangesAfterNeighbors { .. } => unreachable!(),
+                NeighborTask::RunRuleTaskAfterNeighbors(_) => unreachable!(),
             };
 
             self.push_trace(

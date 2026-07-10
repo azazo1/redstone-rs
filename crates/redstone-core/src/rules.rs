@@ -4,8 +4,9 @@ use thiserror::Error;
 
 use crate::{
     Action, BlockChange, BlockEvent, BlockKindId, BlockPos, BlockStateId, DeferredBlockChange,
-    Direction, GameTick, MicroStep, NeighborTask, NeighborUpdate, Probe, ProbeValue, RedstoneMode,
-    ScheduledTick, SimulationPhase, SparseWorld, TickPriority, TraceEvent, TraceKind, WorldError,
+    DeferredRuleTask, Direction, GameTick, MicroStep, NeighborTask, NeighborUpdate, Probe,
+    ProbeValue, RedstoneMode, ScheduledTick, SimulationPhase, SparseWorld, TickPriority,
+    TraceEvent, TraceKind, WorldError,
 };
 
 pub trait BlockRules: Send {
@@ -54,6 +55,17 @@ pub trait BlockRules: Send {
         ctx: &mut EventContext<'_>,
         event: BlockEvent,
     ) -> Result<(), RulesError>;
+
+    fn on_deferred_task(
+        &mut self,
+        _ctx: &mut EventContext<'_>,
+        task: DeferredRuleTask,
+    ) -> Result<(), RulesError> {
+        Err(RulesError::Message(format!(
+            "unknown deferred rule task: {}",
+            task.kind
+        )))
+    }
 
     fn tick_entities(&mut self, _ctx: &mut EventContext<'_>) -> Result<(), RulesError> {
         Ok(())
@@ -218,6 +230,11 @@ impl<'a> EventContext<'a> {
     ) {
         self.neighbor_tasks
             .push(NeighborTask::ApplyBlockChangesAfterNeighbors { changes, follow_up });
+    }
+
+    pub fn run_rule_task_after_neighbors(&mut self, task: DeferredRuleTask) {
+        self.neighbor_tasks
+            .push(NeighborTask::RunRuleTaskAfterNeighbors(task));
     }
 
     pub fn queue_block_event(&mut self, event: BlockEvent) -> bool {

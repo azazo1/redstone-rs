@@ -2,8 +2,8 @@ use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
 use redstone_core::{
     BlockEntityData, BlockEvent, BlockPos, BlockStateId, DeferredBlockChange,
-    DeferredBlockEntityUpdate, Direction, EventContext, NeighborTask, NeighborUpdate,
-    RedstoneMode, RulesError, SparseWorld,
+    DeferredBlockEntityUpdate, DeferredRuleTask, Direction, EventContext, NeighborTask,
+    NeighborUpdate, RedstoneMode, RulesError, SparseWorld,
 };
 
 use crate::orientation::{Orientation, SideBias};
@@ -11,6 +11,9 @@ use crate::orientation::{Orientation, SideBias};
 use super::{
     BlockBehavior, Java26Rules, PushReaction, StateDefinition, direction_index, direction_name,
 };
+
+pub(super) const CONTINUE_PISTON_RETRACTION: &str = "continue_piston_retraction";
+pub(super) const SETTLE_MOVING_PISTON: &str = "settle_moving_piston";
 
 impl Java26Rules {
     pub(super) fn refresh_piston_head(
@@ -239,124 +242,145 @@ impl Java26Rules {
             }
             let head_pos = pos.relative(facing);
             let head_finalized = self.settle_moving_piston(ctx, head_pos, true)?;
-            if event == 2 && head_finalized {
-                ctx.queue_block_event(BlockEvent {
+            if head_finalized {
+                ctx.run_rule_task_after_neighbors(DeferredRuleTask {
+                    kind: CONTINUE_PISTON_RETRACTION,
                     pos,
-                    block: state.kind,
-                    param_a: 2,
+                    param_a: event,
                     param_b: direction_index(facing) as i32,
                 });
+                return Ok(());
             }
-            let head_propagates = self
-                .state(ctx.world.get_block(head_pos))
-                .is_ok_and(|head| head.name == "minecraft:piston_head");
-            let retracted = self.changed_state(state_id, "extended", "false")?;
-            let moving_base = self
-                .registry
-                .state_by_name(
-                    "minecraft:moving_piston",
-                    [
-                        ("facing", direction_name(facing)),
-                        ("type", if sticky { "sticky" } else { "normal" }),
-                    ],
-                )
-                .map_err(|error| RulesError::Message(error.to_string()))?;
-            self.set_piston_state_silent(ctx, pos, moving_base, "piston_retracting_base")?;
-            ctx.world.set_block_entity(
-                pos,
-                moving_block_entity(
-                    retracted,
-                    facing,
-                    ctx.tick.0.saturating_add(2),
-                    false,
-                    true,
-                    None,
-                ),
-            );
-            let moving_kind = self.state(moving_base)?.kind;
-            for direction in Direction::UPDATE_ORDER {
+            self.continue_piston_retraction(ctx, pos, state_id, event)?;
+        }
+        Ok(())
+    }
+
+    pub(super) fn continue_piston_retraction(
+        &mut self,
+        ctx: &mut EventContext<'_>,
+        pos: BlockPos,
+        state_id: BlockStateId,
+        event: i32,
+    ) -> Result<(), RulesError> {
+        let state = self.state(state_id)?.clone();
+        let facing = state.direction_property("facing").unwrap_or(Direction::North);
+        let sticky = matches!(state.behavior, BlockBehavior::Piston { sticky: true });
+        let head_pos = pos.relative(facing);
+        let head_propagates = self
+            .state(ctx.world.get_block(head_pos))
+            .is_ok_and(|head| head.name == "minecraft:piston_head");
+        let retracted = self.changed_state(state_id, "extended", "false")?;
+        let moving_base = self
+            .registry
+            .state_by_name(
+                "minecraft:moving_piston",
+                [
+                    ("facing", direction_name(facing)),
+                    ("type", if sticky { "sticky" } else { "normal" }),
+                ],
+            )
+            .map_err(|error| RulesError::Message(error.to_string()))?;
+        self.set_piston_state_silent(ctx, pos, moving_base, "piston_retracting_base")?;
+        ctx.world.set_block_entity(
+            pos,
+            moving_block_entity(
+                retracted,
+                facing,
+                ctx.tick.0.saturating_add(2),
+                false,
+                true,
+                None,
+            ),
+        );
+        let moving_kind = self.state(moving_base)?.kind;
+        for direction in Direction::UPDATE_ORDER {
+            ctx.neighbor_changed(NeighborUpdate {
+                pos: pos.relative(direction),
+                source_pos: pos,
+                source_block: moving_kind,
+                orientation: None,
+                moved_by_piston: false,
+            });
+            if head_propagates && direction == facing {
                 ctx.neighbor_changed(NeighborUpdate {
-                    pos: pos.relative(direction),
-                    source_pos: pos,
+                    pos,
+                    source_pos: head_pos,
                     source_block: moving_kind,
                     orientation: None,
                     moved_by_piston: false,
                 });
-                if head_propagates && direction == facing {
-                    ctx.neighbor_changed(NeighborUpdate {
-                        pos,
-                        source_pos: head_pos,
-                        source_block: moving_kind,
-                        orientation: None,
-                        moved_by_piston: false,
-                    });
-                }
             }
-            let mut pulled = false;
-            if sticky && event == 2 {
-                let source = head_pos.relative(facing);
-                self.settle_moving_piston(ctx, source, true)?;
-            } else if sticky {
-                let source = pos.relative(facing).relative(facing);
-                let source_state = ctx.world.get_block(source);
-                let definition = self.state(source_state)?.clone();
-                if source_state != self.registry.air_state()
-                    && definition.push_reaction == PushReaction::Normal
-                {
-                    let moved_block_entity = ctx.world.block_entity(source).cloned();
-                    let moving = self
-                        .registry
-                        .state_by_name(
-                            "minecraft:moving_piston",
-                            [("facing", direction_name(facing)), ("type", "normal")],
-                        )
-                        .map_err(|error| RulesError::Message(error.to_string()))?;
-                    let orientation = piston_update_orientation(ctx, facing.opposite());
-                    let moving_block_entity = moving_block_entity(
-                        source_state,
-                        facing,
-                        ctx.tick.0.saturating_add(2),
-                        false,
-                        false,
-                        moved_block_entity,
-                    );
-                    ctx.apply_block_changes_after_neighbors(
-                        vec![
-                            DeferredBlockChange {
-                                pos: head_pos,
-                                state: self.registry.air_state(),
-                                cause: "sticky_piston_head_clear".to_owned(),
-                                block_entity: DeferredBlockEntityUpdate::Remove,
-                            },
-                            DeferredBlockChange {
-                                pos: head_pos,
-                                state: moving,
-                                cause: "sticky_piston_moving_pull".to_owned(),
-                                block_entity: DeferredBlockEntityUpdate::Set(moving_block_entity),
-                            },
-                            DeferredBlockChange {
-                                pos: source,
-                                state: self.registry.air_state(),
-                                cause: "sticky_piston_pull_clear".to_owned(),
-                                block_entity: DeferredBlockEntityUpdate::Remove,
-                            },
-                        ],
-                        vec![NeighborTask::Multi {
-                            source_pos: source,
-                            source_block: definition.kind,
-                            skip_direction: None,
-                            orientation,
-                            next_index: 0,
-                        }],
-                    );
-                    pulled = true;
-                }
+        }
+        let mut pulled = false;
+        if sticky && event == 2 {
+            let source = head_pos.relative(facing);
+            ctx.run_rule_task_after_neighbors(DeferredRuleTask {
+                kind: SETTLE_MOVING_PISTON,
+                pos: source,
+                param_a: 1,
+                param_b: 0,
+            });
+        } else if sticky {
+            let source = pos.relative(facing).relative(facing);
+            let source_state = ctx.world.get_block(source);
+            let definition = self.state(source_state)?.clone();
+            if source_state != self.registry.air_state()
+                && definition.push_reaction == PushReaction::Normal
+            {
+                let moved_block_entity = ctx.world.block_entity(source).cloned();
+                let moving = self
+                    .registry
+                    .state_by_name(
+                        "minecraft:moving_piston",
+                        [("facing", direction_name(facing)), ("type", "normal")],
+                    )
+                    .map_err(|error| RulesError::Message(error.to_string()))?;
+                let orientation = piston_update_orientation(ctx, facing.opposite());
+                let moving_block_entity = moving_block_entity(
+                    source_state,
+                    facing,
+                    ctx.tick.0.saturating_add(2),
+                    false,
+                    false,
+                    moved_block_entity,
+                );
+                ctx.apply_block_changes_after_neighbors(
+                    vec![
+                        DeferredBlockChange {
+                            pos: head_pos,
+                            state: self.registry.air_state(),
+                            cause: "sticky_piston_head_clear".to_owned(),
+                            block_entity: DeferredBlockEntityUpdate::Remove,
+                        },
+                        DeferredBlockChange {
+                            pos: head_pos,
+                            state: moving,
+                            cause: "sticky_piston_moving_pull".to_owned(),
+                            block_entity: DeferredBlockEntityUpdate::Set(moving_block_entity),
+                        },
+                        DeferredBlockChange {
+                            pos: source,
+                            state: self.registry.air_state(),
+                            cause: "sticky_piston_pull_clear".to_owned(),
+                            block_entity: DeferredBlockEntityUpdate::Remove,
+                        },
+                    ],
+                    vec![NeighborTask::Multi {
+                        source_pos: source,
+                        source_block: definition.kind,
+                        skip_direction: None,
+                        orientation,
+                        next_index: 0,
+                    }],
+                );
+                pulled = true;
             }
-            if !pulled && ctx.world.get_block(head_pos) != self.registry.air_state() {
-                let old = ctx.set_block(head_pos, self.registry.air_state(), "piston_head_remove")?;
-                self.sync_entity_sensor(head_pos, old, self.registry.air_state());
-                ctx.update_neighbors(head_pos, self.state(old)?.kind, None, None);
-            }
+        }
+        if !pulled && ctx.world.get_block(head_pos) != self.registry.air_state() {
+            let old = ctx.set_block(head_pos, self.registry.air_state(), "piston_head_remove")?;
+            self.sync_entity_sensor(head_pos, old, self.registry.air_state());
+            ctx.update_neighbors(head_pos, self.state(old)?.kind, None, None);
         }
         Ok(())
     }

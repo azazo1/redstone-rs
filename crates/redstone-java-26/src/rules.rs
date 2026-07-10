@@ -2,9 +2,9 @@ use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
 use indexmap::IndexSet;
 use redstone_core::{
-    Action, BlockEvent, BlockKindId, BlockPos, BlockRules, BlockStateId, Direction, EntityId,
-    EventContext, NeighborUpdate, Probe, ProbeValue, RedstoneMode, RulesError, ScheduledTick,
-    SparseWorld, TickPriority,
+    Action, BlockEvent, BlockKindId, BlockPos, BlockRules, BlockStateId, DeferredRuleTask,
+    Direction, EntityId, EventContext, NeighborUpdate, Probe, ProbeValue, RedstoneMode, RulesError,
+    ScheduledTick, SparseWorld, TickPriority,
 };
 use tracing::debug;
 
@@ -981,7 +981,13 @@ impl BlockRules for Java26Rules {
         ctx: &mut EventContext<'_>,
         update: NeighborUpdate,
     ) -> Result<(), RulesError> {
-        let state_id = self.repair_shape(ctx, update.pos, true)?;
+        let current_state_id = ctx.world.get_block(update.pos);
+        let current_state = self.state(current_state_id)?;
+        let state_id = if matches!(current_state.behavior, BlockBehavior::Wire) {
+            current_state_id
+        } else {
+            self.repair_shape(ctx, update.pos, true)?
+        };
         let state = self.state(state_id)?.clone();
         if state.name == "minecraft:piston_head" {
             self.refresh_piston_head(ctx, update.pos, &state, update)?;
@@ -1147,6 +1153,32 @@ impl BlockRules for Java26Rules {
             && let Err(error) = self.move_piston(ctx, event.pos, state_id, event.param_a)
         {
             debug!(?error, pos = ?event.pos, "活塞事件未执行");
+        }
+        Ok(())
+    }
+
+    fn on_deferred_task(
+        &mut self,
+        ctx: &mut EventContext<'_>,
+        task: DeferredRuleTask,
+    ) -> Result<(), RulesError> {
+        match task.kind {
+            piston::CONTINUE_PISTON_RETRACTION => {
+                let state_id = ctx.world.get_block(task.pos);
+                let state = self.state(state_id)?;
+                if matches!(state.behavior, BlockBehavior::Piston { .. }) {
+                    self.continue_piston_retraction(ctx, task.pos, state_id, task.param_a)?;
+                }
+            }
+            piston::SETTLE_MOVING_PISTON => {
+                self.settle_moving_piston(ctx, task.pos, task.param_a != 0)?;
+            }
+            _ => {
+                return Err(RulesError::Message(format!(
+                    "unknown Java 26 deferred task: {}",
+                    task.kind
+                )));
+            }
         }
         Ok(())
     }

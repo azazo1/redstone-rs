@@ -92,6 +92,14 @@ pub struct DeferredBlockChange {
     pub block_entity: DeferredBlockEntityUpdate,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct DeferredRuleTask {
+    pub kind: &'static str,
+    pub pos: BlockPos,
+    pub param_a: i32,
+    pub param_b: i32,
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum NeighborTask {
     Single(NeighborUpdate),
@@ -118,4 +126,5 @@ pub enum NeighborTask {
         changes: Vec<DeferredBlockChange>,
         follow_up: Vec<NeighborTask>,
     },
+    RunRuleTaskAfterNeighbors(DeferredRuleTask),
 }
