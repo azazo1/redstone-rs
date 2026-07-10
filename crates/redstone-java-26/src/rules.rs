@@ -155,7 +155,7 @@ impl Java26Rules {
                 }
             }
         }
-        self.queue_observer_shape_updates(ctx, pos);
+        self.queue_neighbor_shape_updates(ctx, pos);
         if self
             .registry
             .state(old)
@@ -213,12 +213,12 @@ impl Java26Rules {
         let state = self.apply_observer_lifecycle(ctx, pos, old, state, false, true)?;
         self.sync_entity_sensor(pos, old, state);
         let definition = self.state(state)?.clone();
-        self.notify_observers_of_shape_change(ctx, pos)?;
+        self.update_neighbor_shapes(ctx, pos)?;
         self.update_diode_output_neighbors(ctx, pos, &definition);
         Ok(true)
     }
 
-    fn set_state_and_notify_observers(
+    fn set_state_and_update_shapes(
         &mut self,
         ctx: &mut EventContext<'_>,
         pos: BlockPos,
@@ -231,7 +231,7 @@ impl Java26Rules {
         }
         let state = self.apply_observer_lifecycle(ctx, pos, old, state, false, true)?;
         self.sync_entity_sensor(pos, old, state);
-        self.notify_observers_of_shape_change(ctx, pos)?;
+        self.update_neighbor_shapes(ctx, pos)?;
         Ok(true)
     }
 
@@ -535,7 +535,7 @@ impl Java26Rules {
                 let new_state = self.changed_state(state_id, "power", new_power.to_string())?;
                 let old_state = ctx.set_block(initial_pos, new_state, "default_wire")?;
                 self.sync_entity_sensor(initial_pos, old_state, new_state);
-                self.notify_observers_of_shape_change(ctx, initial_pos)?;
+                self.update_neighbor_shapes(ctx, initial_pos)?;
                 for candidate in default_wire_update_positions(initial_pos) {
                     ctx.update_neighbors(candidate, state.kind, None, None);
                 }
@@ -796,14 +796,14 @@ impl Java26Rules {
             let next = self.changed_state(state.id, "triggered", "true")?;
             ctx.schedule_tick(pos, state.kind, 4, TickPriority::Normal);
             if notify_observers {
-                self.set_state_and_notify_observers(ctx, pos, next, "container_trigger")?;
+                self.set_state_and_update_shapes(ctx, pos, next, "container_trigger")?;
             } else {
                 ctx.set_block(pos, next, "container_trigger")?;
             }
         } else if !powered && triggered {
             let next = self.changed_state(state.id, "triggered", "false")?;
             if notify_observers {
-                self.set_state_and_notify_observers(ctx, pos, next, "container_untrigger")?;
+                self.set_state_and_update_shapes(ctx, pos, next, "container_untrigger")?;
             } else {
                 ctx.set_block(pos, next, "container_untrigger")?;
             }
@@ -1042,12 +1042,6 @@ impl BlockRules for Java26Rules {
             Action::SetBlock { pos, state } => {
                 self.set_state_and_notify(ctx, *pos, *state, "action_set_block", None)?;
                 self.repair_shape(ctx, *pos, true)?;
-                ctx.run_rule_task_after_neighbors(DeferredRuleTask {
-                    kind: shape::REPAIR_NEIGHBOR_SHAPES,
-                    pos: *pos,
-                    param_a: 0,
-                    param_b: 0,
-                });
             }
             Action::BreakBlock { pos } => {
                 self.set_state_and_notify(
@@ -1057,12 +1051,6 @@ impl BlockRules for Java26Rules {
                     "action_break_block",
                     None,
                 )?;
-                ctx.run_rule_task_after_neighbors(DeferredRuleTask {
-                    kind: shape::REPAIR_NEIGHBOR_SHAPES,
-                    pos: *pos,
-                    param_a: 0,
-                    param_b: 0,
-                });
             }
             Action::UseBlock { pos } => self.use_block(ctx, *pos, false, false)?,
             Action::PressButton { pos } => self.use_block(ctx, *pos, true, false)?,
@@ -1130,7 +1118,10 @@ impl BlockRules for Java26Rules {
         let state_id = if matches!(current_state.behavior, BlockBehavior::Wire) {
             current_state_id
         } else {
-            self.repair_shape(ctx, update.pos, true)?
+            let direction = Direction::UPDATE_ORDER
+                .into_iter()
+                .find(|direction| update.pos.relative(*direction) == update.source_pos);
+            self.repair_shape_from(ctx, update.pos, true, direction)?
         };
         let state = self.state(state_id)?.clone();
         if state.name == "minecraft:piston_head" {
@@ -1339,11 +1330,8 @@ impl BlockRules for Java26Rules {
             piston::MOVE_RETRACTED_STRUCTURE => {
                 self.move_retracted_piston_structure(ctx, task.pos)?;
             }
-            observer::NOTIFY_SHAPE_UPDATES => {
-                self.notify_observers_of_shape_change(ctx, task.pos)?;
-            }
-            shape::REPAIR_NEIGHBOR_SHAPES => {
-                self.repair_neighbor_shapes(ctx, task.pos)?;
+            shape::UPDATE_NEIGHBOR_SHAPES => {
+                self.update_neighbor_shapes(ctx, task.pos)?;
             }
             _ => {
                 return Err(RulesError::Message(format!(

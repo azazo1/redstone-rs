@@ -1,45 +1,18 @@
 use redstone_core::{
-    BlockPos, BlockStateId, DeferredRuleTask, Direction, EventContext, RulesError, TickPriority,
+    BlockPos, BlockStateId, Direction, EventContext, RulesError, TickPriority,
 };
 
 use super::{BlockBehavior, Java26Rules};
 
-pub(super) const NOTIFY_SHAPE_UPDATES: &str = "notify_observer_shape_updates";
-
-const UPDATE_SHAPE_ORDER: [Direction; 6] = [
-    Direction::West,
-    Direction::East,
-    Direction::North,
-    Direction::South,
-    Direction::Down,
-    Direction::Up,
-];
-
 impl Java26Rules {
-    pub(super) fn queue_observer_shape_updates(
+    pub(super) fn update_observer_shape(
         &mut self,
         ctx: &mut EventContext<'_>,
-        source_pos: BlockPos,
-    ) {
-        ctx.run_rule_task_after_neighbors(DeferredRuleTask {
-            kind: NOTIFY_SHAPE_UPDATES,
-            pos: source_pos,
-            param_a: 0,
-            param_b: 0,
-        });
-    }
-
-    pub(super) fn notify_observers_of_shape_change(
-        &mut self,
-        ctx: &mut EventContext<'_>,
+        pos: BlockPos,
         source_pos: BlockPos,
     ) -> Result<(), RulesError> {
-        for direction in UPDATE_SHAPE_ORDER {
-            let observer_pos = source_pos.relative(direction);
-            let observer_state = ctx.world.get_block(observer_pos);
-            self.refresh_observer(ctx, observer_pos, observer_state, source_pos)?;
-        }
-        Ok(())
+        let state_id = ctx.world.get_block(pos);
+        self.refresh_observer(ctx, pos, state_id, source_pos)
     }
 
     pub(super) fn update_moved_observer_from_neighbor_shapes(

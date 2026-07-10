@@ -175,10 +175,14 @@ oracle scenario output="/tmp/redstone-oracle.jsonl": oracle-build
     sh {{ ORACLE_DIR }}/run.sh "{{ scenario }}" "{{ output }}"
 
 # 使用 Rust 仿真器执行全部原理图场景并与 Java oracle 对比.
-test-schematic-scenarios: oracle-build
+test-schematic-scenarios parallel="1": oracle-build
     #!/usr/bin/env sh
     set -eu
-    for scenario in assets/scenarios/*.toml; do
-      echo "测试原理图场景: $scenario"
-      cargo run -p redstone-cli -- test "$scenario" --oracle
-    done
+    if [ {{ parallel }} -le 1 ]; then
+      for scenario in assets/scenarios/*.toml; do
+        echo "测试原理图场景: $scenario"
+        cargo run -p redstone-cli -- test "$scenario" --oracle
+      done
+    else
+      cargo run -p redstone-cli -- test "assets/scenarios" --oracle # todo 限制并发上限
+    fi

@@ -9,6 +9,7 @@ use crate::orientation::{Orientation, SideBias};
 
 use super::{
     BlockBehavior, Java26Rules, PushReaction, StateDefinition, direction_index, direction_name,
+    update_attached_power_neighbors, update_torch_output_neighbors,
 };
 
 pub(super) const CONTINUE_PISTON_RETRACTION: &str = "continue_piston_retraction";
@@ -166,7 +167,7 @@ impl Java26Rules {
                 "piston_extend",
                 state.kind,
             );
-            self.queue_observer_shape_updates(ctx, pos);
+            self.queue_neighbor_shape_updates(ctx, pos);
         } else {
             if self.is_quasi_powered(ctx.world, pos, facing) {
                 return Ok(false);
@@ -345,9 +346,18 @@ impl Java26Rules {
             )?;
         }
         for source in cleared_sources {
-            self.notify_observers_of_shape_change(ctx, source)?;
+            self.update_neighbor_shapes(ctx, source)?;
         }
         let orientation = piston_update_orientation(ctx, movement.push_direction);
+        for (source, reaction, source_state, _) in snapshots.iter().rev() {
+            if *reaction != PushReaction::Destroy {
+                continue;
+            }
+            let state = self.state(*source_state)?.clone();
+            self.affect_neighbors_after_piston_destroy(ctx, *source, &state)?;
+            self.update_indirect_neighbor_shapes(ctx, *source, &state)?;
+            ctx.update_neighbors(*source, state.kind, None, orientation);
+        }
         for (source, reaction, source_state, _) in snapshots.iter().rev() {
             if *reaction == PushReaction::Destroy {
                 continue;
@@ -424,7 +434,7 @@ impl Java26Rules {
                 });
             }
         }
-        self.queue_observer_shape_updates(ctx, pos);
+        self.queue_neighbor_shape_updates(ctx, pos);
         let mut pulled = false;
         if sticky && event == 2 {
             let source = head_pos.relative(facing);
@@ -455,6 +465,57 @@ impl Java26Rules {
             let old = ctx.set_block(head_pos, self.registry.air_state(), "piston_head_remove")?;
             self.sync_entity_sensor(head_pos, old, self.registry.air_state());
             ctx.update_neighbors(head_pos, self.state(old)?.kind, None, None);
+            self.queue_neighbor_shape_updates(ctx, head_pos);
+        }
+        Ok(())
+    }
+
+    fn affect_neighbors_after_piston_destroy(
+        &mut self,
+        ctx: &mut EventContext<'_>,
+        pos: BlockPos,
+        state: &StateDefinition,
+    ) -> Result<(), RulesError> {
+        match state.behavior {
+            BlockBehavior::Wire => {
+                for direction in [
+                    Direction::Down,
+                    Direction::Up,
+                    Direction::North,
+                    Direction::South,
+                    Direction::West,
+                    Direction::East,
+                ] {
+                    ctx.update_neighbors(pos.relative(direction), state.kind, None, None);
+                }
+            }
+            BlockBehavior::Torch { .. } if state.bool_property("lit") => {
+                update_torch_output_neighbors(ctx, pos, state);
+            }
+            BlockBehavior::Repeater | BlockBehavior::Comparator => {
+                self.update_diode_output_neighbors(ctx, pos, state);
+            }
+            BlockBehavior::Lever | BlockBehavior::Button { .. }
+                if state.bool_property("powered") =>
+            {
+                update_attached_power_neighbors(ctx, pos, state);
+            }
+            BlockBehavior::PressurePlate { .. }
+                if state.bool_property("powered")
+                    || state.int_property("power").unwrap_or(0) > 0 =>
+            {
+                ctx.update_neighbors(pos, state.kind, None, None);
+                ctx.update_neighbors(pos.relative(Direction::Down), state.kind, None, None);
+            }
+            BlockBehavior::TripwireHook if state.bool_property("powered") => {
+                let front = state
+                    .direction_property("facing")
+                    .unwrap_or(Direction::North)
+                    .opposite();
+                ctx.update_neighbors(pos, state.kind, None, None);
+                ctx.update_neighbors(pos.relative(front), state.kind, None, None);
+            }
+            _ => {}
         }
         Ok(())
     }
@@ -542,7 +603,7 @@ impl Java26Rules {
         )?;
         self.sync_entity_sensor(pos, old, final_state);
         ctx.update_neighbors(pos, self.state(old)?.kind, None, None);
-        self.queue_observer_shape_updates(ctx, pos);
+        self.queue_neighbor_shape_updates(ctx, pos);
         let push_direction = if extending {
             direction
         } else {
@@ -587,7 +648,7 @@ impl Java26Rules {
         )?;
         self.sync_entity_sensor(pos, old, state);
         if update_shapes {
-            self.notify_observers_of_shape_change(ctx, pos)?;
+            self.update_neighbor_shapes(ctx, pos)?;
         }
         Ok(true)
     }

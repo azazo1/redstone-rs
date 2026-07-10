@@ -496,6 +496,200 @@ async fn observer_detects_piston_base_retraction() {
 }
 
 #[tokio::test]
+async fn observer_detects_piston_head_removal() {
+    let mut registry = Java26Registry::new();
+    let piston = state(
+        &mut registry,
+        "minecraft:piston",
+        &[("extended", "true"), ("facing", "east")],
+    );
+    let piston_head = state(
+        &mut registry,
+        "minecraft:piston_head",
+        &[("facing", "east"), ("short", "false"), ("type", "normal")],
+    );
+    let observer = state(
+        &mut registry,
+        "minecraft:observer",
+        &[("facing", "south"), ("powered", "false")],
+    );
+    let source = state(&mut registry, "minecraft:redstone_block", &[]);
+    let source_pos = BlockPos::new(-1, 0, 0);
+    let observer_pos = BlockPos::new(1, 0, -1);
+    let mut world = SparseWorld::new(registry.air_state());
+    world.set_block(BlockPos::ZERO, piston).unwrap();
+    world.set_block(BlockPos::new(1, 0, 0), piston_head).unwrap();
+    world.set_block(observer_pos, observer).unwrap();
+    world.set_block(source_pos, source).unwrap();
+    let rules = Java26Rules::new(registry);
+    let mut simulation = Simulation::load(rules, world, SimulationConfig::default())
+        .await
+        .unwrap();
+    simulation.initialize().await.unwrap();
+
+    simulation
+        .step_with_actions(&[Action::BreakBlock { pos: source_pos }])
+        .await
+        .unwrap();
+
+    assert!(simulation.trace().events().iter().any(|event| {
+        matches!(
+            event.kind,
+            TraceKind::ScheduledTickQueued {
+                pos,
+                trigger_tick,
+                ..
+            } if pos == observer_pos && trigger_tick == redstone_core::GameTick(3)
+        )
+    }));
+}
+
+#[tokio::test]
+async fn piston_destroyed_repeater_notifies_with_the_removed_block_kind() {
+    let mut registry = Java26Registry::new();
+    let piston = state(
+        &mut registry,
+        "minecraft:piston",
+        &[("extended", "false"), ("facing", "east")],
+    );
+    let repeater = state(
+        &mut registry,
+        "minecraft:repeater",
+        &[
+            ("delay", "1"),
+            ("facing", "east"),
+            ("locked", "false"),
+            ("powered", "false"),
+        ],
+    );
+    let repeater_kind = registry.state(repeater).unwrap().kind;
+    let source = state(&mut registry, "minecraft:redstone_block", &[]);
+    let stone = state(&mut registry, "minecraft:stone", &[]);
+    let repeater_pos = BlockPos::new(1, 0, 0);
+    let mut world = SparseWorld::new(registry.air_state());
+    world.set_block(BlockPos::ZERO, piston).unwrap();
+    world.set_block(BlockPos::new(-1, 0, 0), source).unwrap();
+    world.set_block(repeater_pos, repeater).unwrap();
+    world.set_block(BlockPos::new(1, -1, 0), stone).unwrap();
+    let rules = Java26Rules::new(registry);
+    let mut simulation = Simulation::load(rules, world, SimulationConfig::default())
+        .await
+        .unwrap();
+
+    simulation.initialize().await.unwrap();
+    simulation.step().await.unwrap();
+
+    assert!(simulation.trace().events().iter().any(|event| {
+        matches!(
+            event.kind,
+            TraceKind::NeighborUpdate {
+                source_pos,
+                source_block,
+                ..
+            } if source_pos == repeater_pos && source_block == repeater_kind
+        )
+    }));
+    assert_eq!(
+        simulation.world().get_block(BlockPos::new(2, 0, 0)),
+        simulation.rules().registry().air_state()
+    );
+}
+
+#[tokio::test]
+async fn piston_destroying_a_door_repairs_the_other_half() {
+    let mut registry = Java26Registry::new();
+    let piston = state(
+        &mut registry,
+        "minecraft:piston",
+        &[("extended", "false"), ("facing", "east")],
+    );
+    let lower = state(
+        &mut registry,
+        "minecraft:oak_door",
+        &[
+            ("facing", "north"),
+            ("half", "lower"),
+            ("hinge", "left"),
+            ("open", "false"),
+            ("powered", "false"),
+        ],
+    );
+    let upper = state(
+        &mut registry,
+        "minecraft:oak_door",
+        &[
+            ("facing", "north"),
+            ("half", "upper"),
+            ("hinge", "left"),
+            ("open", "false"),
+            ("powered", "false"),
+        ],
+    );
+    let source = state(&mut registry, "minecraft:redstone_block", &[]);
+    let stone = state(&mut registry, "minecraft:stone", &[]);
+    let lower_pos = BlockPos::new(1, 0, 0);
+    let upper_pos = BlockPos::new(1, 1, 0);
+    let mut world = SparseWorld::new(registry.air_state());
+    world.set_block(BlockPos::ZERO, piston).unwrap();
+    world.set_block(BlockPos::new(-1, 0, 0), source).unwrap();
+    world.set_block(lower_pos, lower).unwrap();
+    world.set_block(upper_pos, upper).unwrap();
+    world.set_block(BlockPos::new(1, -1, 0), stone).unwrap();
+    let rules = Java26Rules::new(registry);
+    let mut simulation = Simulation::load(rules, world, SimulationConfig::default())
+        .await
+        .unwrap();
+
+    simulation.initialize().await.unwrap();
+    simulation.step().await.unwrap();
+
+    assert_eq!(
+        simulation.world().get_block(upper_pos),
+        simulation.rules().registry().air_state()
+    );
+}
+
+#[tokio::test]
+async fn sticky_piston_does_not_pull_glazed_terracotta() {
+    let mut registry = Java26Registry::new();
+    let piston = state(
+        &mut registry,
+        "minecraft:sticky_piston",
+        &[("extended", "true"), ("facing", "east")],
+    );
+    let piston_head = state(
+        &mut registry,
+        "minecraft:piston_head",
+        &[("facing", "east"), ("short", "false"), ("type", "sticky")],
+    );
+    let glazed = state(
+        &mut registry,
+        "minecraft:white_glazed_terracotta",
+        &[("facing", "north")],
+    );
+    let source = state(&mut registry, "minecraft:redstone_block", &[]);
+    let source_pos = BlockPos::new(-1, 0, 0);
+    let glazed_pos = BlockPos::new(2, 0, 0);
+    let mut world = SparseWorld::new(registry.air_state());
+    world.set_block(BlockPos::ZERO, piston).unwrap();
+    world.set_block(BlockPos::new(1, 0, 0), piston_head).unwrap();
+    world.set_block(glazed_pos, glazed).unwrap();
+    world.set_block(source_pos, source).unwrap();
+    let rules = Java26Rules::new(registry);
+    let mut simulation = Simulation::load(rules, world, SimulationConfig::default())
+        .await
+        .unwrap();
+    simulation.initialize().await.unwrap();
+
+    simulation
+        .step_with_actions(&[Action::BreakBlock { pos: source_pos }])
+        .await
+        .unwrap();
+
+    assert_eq!(simulation.world().get_block(glazed_pos), glazed);
+}
+
+#[tokio::test]
 async fn powered_observer_resets_when_placed() {
     let mut registry = Java26Registry::new();
     let observer = state(

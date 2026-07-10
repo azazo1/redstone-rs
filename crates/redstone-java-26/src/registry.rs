@@ -480,7 +480,20 @@ fn classify(name: &str, properties: &BTreeMap<String, String>) -> BlockTraits {
     let sturdy = !non_solid || path == "hopper";
     let extended_piston = matches!(path, "piston" | "sticky_piston")
         && properties.get("extended").is_some_and(|value| value == "true");
-    let push_reaction = if extended_piston
+    let push_reaction = piston_push_reaction(path, extended_piston);
+    let supported = !matches!(behavior, BlockBehavior::UnsupportedActive);
+
+    BlockTraits {
+        behavior,
+        redstone_conductor,
+        sturdy_faces: [sturdy; 6],
+        push_reaction,
+        supported,
+    }
+}
+
+fn piston_push_reaction(path: &str, extended_piston: bool) -> PushReaction {
+    if extended_piston
         || matches!(
             path,
             "bedrock"
@@ -491,27 +504,77 @@ fn classify(name: &str, properties: &BTreeMap<String, String>) -> BlockTraits {
                 | "end_portal_frame"
                 | "moving_piston"
                 | "piston_head"
+                | "barrier"
+                | "light"
+                | "nether_portal"
+                | "end_portal"
+                | "end_gateway"
+                | "anvil"
+                | "chipped_anvil"
+                | "damaged_anvil"
+                | "grindstone"
+                | "lodestone"
         )
     {
         PushReaction::Block
+    } else if path.ends_with("_glazed_terracotta") {
+        PushReaction::PushOnly
     } else if path.ends_with("_torch")
         || path == "redstone_wire"
         || path.ends_with("_button")
-        || path == "lever"
-        || path == "tripwire"
+        || path.ends_with("_pressure_plate")
+        || path.ends_with("_door") && !path.ends_with("_trapdoor")
+        || matches!(
+            path,
+            "lever"
+                | "repeater"
+                | "comparator"
+                | "tripwire"
+                | "tripwire_hook"
+                | "structure_void"
+                | "decorated_pot"
+        )
     {
         PushReaction::Destroy
     } else {
         PushReaction::Normal
-    };
-    let supported = !matches!(behavior, BlockBehavior::UnsupportedActive);
+    }
+}
 
-    BlockTraits {
-        behavior,
-        redstone_conductor,
-        sturdy_faces: [sturdy; 6],
-        push_reaction,
-        supported,
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn piston_push_reactions_match_vanilla_categories() {
+        for path in [
+            "repeater",
+            "comparator",
+            "stone_pressure_plate",
+            "tripwire_hook",
+            "oak_door",
+            "structure_void",
+            "decorated_pot",
+        ] {
+            assert_eq!(piston_push_reaction(path, false), PushReaction::Destroy, "{path}");
+        }
+        for path in [
+            "barrier",
+            "light",
+            "nether_portal",
+            "end_portal",
+            "end_gateway",
+            "anvil",
+            "grindstone",
+            "lodestone",
+        ] {
+            assert_eq!(piston_push_reaction(path, false), PushReaction::Block, "{path}");
+        }
+        assert_eq!(
+            piston_push_reaction("white_glazed_terracotta", false),
+            PushReaction::PushOnly
+        );
+        assert_eq!(piston_push_reaction("sticky_piston", true), PushReaction::Block);
     }
 }
 

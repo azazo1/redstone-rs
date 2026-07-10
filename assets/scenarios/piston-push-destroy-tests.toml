@@ -1,0 +1,145 @@
+version = "26.1.2"
+mode = "default"
+seed = 0
+max_ticks = 40
+strict = true
+oracle_micro_trace = true
+
+[source]
+path = "../schematics/piston-push-destroy-tests.nbt"
+initialization = "raw"
+
+[[actions]]
+tick = 1
+type = "pull_lever"
+pos = { x = 0, y = 1, z = 3 }
+
+[[actions]]
+tick = 1
+type = "pull_lever"
+pos = { x = 1, y = 1, z = 3 }
+
+[[actions]]
+tick = 1
+type = "pull_lever"
+pos = { x = 2, y = 1, z = 3 }
+
+[[actions]]
+tick = 1
+type = "pull_lever"
+pos = { x = 3, y = 1, z = 3 }
+
+[[actions]]
+tick = 10
+type = "pull_lever"
+pos = { x = 3, y = 1, z = 3 }
+
+[[actions]]
+tick = 1
+type = "pull_lever"
+pos = { x = 4, y = 1, z = 3 }
+
+[[probes]]
+name = "lever_destination"
+type = "block_state"
+pos = { x = 0, y = 1, z = 0 }
+
+[[probes]]
+name = "torch_destination"
+type = "block_state"
+pos = { x = 1, y = 1, z = 0 }
+
+[[probes]]
+name = "comparator_destination"
+type = "block_state"
+pos = { x = 2, y = 1, z = 0 }
+
+[[probes]]
+name = "chained_lever_destination"
+type = "block_state"
+pos = { x = 3, y = 1, z = 0 }
+
+[[probes]]
+name = "wire_destination"
+type = "block_state"
+pos = { x = 4, y = 1, z = 0 }
+
+[[probes]]
+name = "lever_piston_extended"
+type = "property"
+pos = { x = 0, y = 1, z = 2 }
+property = "extended"
+
+[[probes]]
+name = "torch_piston_extended"
+type = "property"
+pos = { x = 1, y = 1, z = 2 }
+property = "extended"
+
+[[probes]]
+name = "comparator_piston_extended"
+type = "property"
+pos = { x = 2, y = 1, z = 2 }
+property = "extended"
+
+[[probes]]
+name = "chained_lever_piston_extended"
+type = "property"
+pos = { x = 3, y = 1, z = 2 }
+property = "extended"
+
+[[probes]]
+name = "wire_piston_extended"
+type = "property"
+pos = { x = 4, y = 1, z = 2 }
+property = "extended"
+
+[[expectations]]
+tick = 4
+probe = "lever_destination"
+equals = { state = 0 }
+
+[[expectations]]
+tick = 4
+probe = "torch_destination"
+equals = { state = 0 }
+
+[[expectations]]
+tick = 4
+probe = "comparator_destination"
+equals = { state = 0 }
+
+[[expectations]]
+tick = 4
+probe = "chained_lever_destination"
+equals = { state = 13405 }
+
+[[expectations]]
+tick = 4
+probe = "wire_destination"
+equals = { state = 0 }
+
+[[expectations]]
+tick = 4
+probe = "lever_piston_extended"
+equals = "true"
+
+[[expectations]]
+tick = 4
+probe = "torch_piston_extended"
+equals = "true"
+
+[[expectations]]
+tick = 4
+probe = "comparator_piston_extended"
+equals = "true"
+
+[[expectations]]
+tick = 4
+probe = "chained_lever_piston_extended"
+equals = "true"
+
+[[expectations]]
+tick = 4
+probe = "wire_piston_extended"
+equals = "true"

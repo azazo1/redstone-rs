@@ -1,4 +1,6 @@
-use redstone_core::{BlockPos, BlockStateId, Direction, EventContext, RulesError, SparseWorld};
+use redstone_core::{
+    BlockPos, BlockStateId, DeferredRuleTask, Direction, EventContext, RulesError, SparseWorld,
+};
 
 use super::{BlockBehavior, Java26Rules, StateDefinition};
 
@@ -10,18 +12,43 @@ enum ShapeFamily {
     Pane,
     Wall,
     Rail { straight: bool },
+    Door,
 }
 
-pub(super) const REPAIR_NEIGHBOR_SHAPES: &str = "repair_neighbor_shapes";
+pub(super) const UPDATE_NEIGHBOR_SHAPES: &str = "update_neighbor_shapes";
+
+const UPDATE_SHAPE_ORDER: [Direction; 6] = [
+    Direction::West,
+    Direction::East,
+    Direction::North,
+    Direction::South,
+    Direction::Down,
+    Direction::Up,
+];
 
 impl Java26Rules {
-    pub(super) fn repair_neighbor_shapes(
+    pub(super) fn queue_neighbor_shape_updates(
         &mut self,
         ctx: &mut EventContext<'_>,
-        pos: BlockPos,
+        source_pos: BlockPos,
+    ) {
+        ctx.run_rule_task_after_neighbors(DeferredRuleTask {
+            kind: UPDATE_NEIGHBOR_SHAPES,
+            pos: source_pos,
+            param_a: 0,
+            param_b: 0,
+        });
+    }
+
+    pub(super) fn update_neighbor_shapes(
+        &mut self,
+        ctx: &mut EventContext<'_>,
+        source_pos: BlockPos,
     ) -> Result<(), RulesError> {
-        for direction in Direction::UPDATE_ORDER {
-            self.repair_shape(ctx, pos.relative(direction), true)?;
+        for direction in UPDATE_SHAPE_ORDER {
+            let neighbor_pos = source_pos.relative(direction);
+            self.repair_shape_from(ctx, neighbor_pos, true, Some(direction.opposite()))?;
+            self.update_observer_shape(ctx, neighbor_pos, source_pos)?;
         }
         Ok(())
     }
@@ -31,6 +58,16 @@ impl Java26Rules {
         ctx: &mut EventContext<'_>,
         pos: BlockPos,
         notify: bool,
+    ) -> Result<BlockStateId, RulesError> {
+        self.repair_shape_from(ctx, pos, notify, None)
+    }
+
+    pub(super) fn repair_shape_from(
+        &mut self,
+        ctx: &mut EventContext<'_>,
+        pos: BlockPos,
+        notify: bool,
+        direction_to_neighbor: Option<Direction>,
     ) -> Result<BlockStateId, RulesError> {
         let state_id = ctx.world.get_block(pos);
         let state = self.state(state_id)?.clone();
@@ -48,6 +85,9 @@ impl Java26Rules {
             }
             ShapeFamily::Pane => self.cross_shape(ctx.world, pos, &state, CrossKind::Pane)?,
             ShapeFamily::Wall => self.wall_shape(ctx.world, pos, &state)?,
+            ShapeFamily::Door => {
+                self.door_shape(ctx.world, pos, &state, direction_to_neighbor)?
+            }
             ShapeFamily::Rail { .. } => unreachable!("rail shapes return above"),
         };
         if repaired == state_id {
@@ -63,7 +103,7 @@ impl Java26Rules {
             };
             let old = ctx.set_block(pos, repaired, cause)?;
             if notify && old != repaired {
-                self.notify_observers_of_shape_change(ctx, pos)?;
+                self.update_neighbor_shapes(ctx, pos)?;
             }
         }
         Ok(repaired)
@@ -480,6 +520,71 @@ impl Java26Rules {
         Ok(next)
     }
 
+    fn door_shape(
+        &mut self,
+        world: &SparseWorld,
+        pos: BlockPos,
+        state: &StateDefinition,
+        direction_to_neighbor: Option<Direction>,
+    ) -> Result<BlockStateId, RulesError> {
+        let half = state.property("half").unwrap_or("lower");
+        let Some(direction) = direction_to_neighbor else {
+            return Ok(state.id);
+        };
+        let pair_direction = half == "lower" && direction == Direction::Up
+            || half == "upper" && direction == Direction::Down;
+        if pair_direction {
+            let other = self
+                .state_or_air(world, pos.relative(direction))
+                .clone();
+            if other.name == state.name && other.property("half") != Some(half) {
+                return self.changed_state(other.id, "half", half);
+            }
+            return Ok(self.registry.air_state());
+        }
+        if half == "lower"
+            && direction == Direction::Down
+            && !self
+                .state_or_air(world, pos.relative(Direction::Down))
+                .sturdy(Direction::Up)
+        {
+            return Ok(self.registry.air_state());
+        }
+        Ok(state.id)
+    }
+
+    pub(super) fn update_indirect_neighbor_shapes(
+        &mut self,
+        ctx: &mut EventContext<'_>,
+        pos: BlockPos,
+        state: &StateDefinition,
+    ) -> Result<(), RulesError> {
+        if !matches!(state.behavior, BlockBehavior::Wire) {
+            return Ok(());
+        }
+        for direction in Direction::HORIZONTAL {
+            if state.property(direction_name(direction)) == Some("none") {
+                continue;
+            }
+            let side = pos.relative(direction);
+            if matches!(
+                self.state_or_air(ctx.world, side).behavior,
+                BlockBehavior::Wire
+            ) {
+                continue;
+            }
+            for candidate in [side.relative(Direction::Down), side.relative(Direction::Up)] {
+                if matches!(
+                    self.state_or_air(ctx.world, candidate).behavior,
+                    BlockBehavior::Wire
+                ) {
+                    self.repair_shape(ctx, candidate, true)?;
+                }
+            }
+        }
+        Ok(())
+    }
+
     fn with_horizontal_properties(
         &mut self,
         state: BlockStateId,
@@ -525,6 +630,8 @@ fn shape_family(name: &str) -> Option<ShapeFamily> {
         Some(ShapeFamily::Rail {
             straight: path != "rail",
         })
+    } else if path.ends_with("_door") && !path.ends_with("_trapdoor") {
+        Some(ShapeFamily::Door)
     } else {
         None
     }
