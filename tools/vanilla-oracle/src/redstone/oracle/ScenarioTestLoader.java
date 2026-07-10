@@ -15,10 +15,12 @@ final class ScenarioTestLoader extends TestFunctionLoader {
 
     private final Scenario scenario;
     private final Path output;
+    private final FrameGeometry frame;
 
-    ScenarioTestLoader(Scenario scenario, Path output) {
+    ScenarioTestLoader(Scenario scenario, Path output, FrameGeometry frame) {
         this.scenario = scenario;
         this.output = output;
+        this.frame = frame;
     }
 
     static ScenarioTestLoader fromEnvironment() throws Exception {
@@ -29,7 +31,11 @@ final class ScenarioTestLoader extends TestFunctionLoader {
         }
         Scenario scenario = Scenario.load(Path.of(scenarioPath));
         scenario.validateSupported();
-        return new ScenarioTestLoader(scenario, Path.of(outputPath).toAbsolutePath().normalize());
+        return new ScenarioTestLoader(
+            scenario,
+            Path.of(outputPath).toAbsolutePath().normalize(),
+            FrameGeometry.fromEnvironment()
+        );
     }
 
     @Override
@@ -38,6 +44,10 @@ final class ScenarioTestLoader extends TestFunctionLoader {
             Registries.TEST_FUNCTION,
             Identifier.parse("redstone:scenario")
         );
-        register.accept(key, helper -> new ScenarioTest(scenario, output).run(helper));
+        register.accept(key, helper -> new ScenarioTest(scenario, output, frame).run(helper));
+    }
+
+    Scenario scenario() {
+        return scenario;
     }
 }

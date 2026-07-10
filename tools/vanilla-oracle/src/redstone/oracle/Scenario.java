@@ -11,6 +11,8 @@ import org.tomlj.Toml;
 import org.tomlj.TomlArray;
 import org.tomlj.TomlParseResult;
 import org.tomlj.TomlTable;
+import net.minecraft.world.level.block.Mirror;
+import net.minecraft.world.level.block.Rotation;
 
 final class Scenario {
     static final String VERSION = "26.1.2";
@@ -88,16 +90,33 @@ final class Scenario {
                 Pos pos = requiredPos(action, "pos");
                 String blockName = null;
                 Map<String, String> properties = Map.of();
+                String face = null;
+                double[] location = null;
+                boolean arrow = false;
                 if (type.equals("set_block")) {
                     blockName = requiredString(action, "name");
                     properties = stringMap(action.getTable("properties"));
+                } else if (type.equals("hit_target")) {
+                    face = requiredString(action, "face");
+                    location = requiredDoubleArray(action, "location");
+                    arrow = optionalBoolean(action, "arrow", false);
                 } else if (!type.equals("break_block")
                     && !type.equals("use_block")
                     && !type.equals("press_button")
                     && !type.equals("pull_lever")) {
                     throw new IllegalArgumentException("Java oracle 尚不支持动作: " + type);
                 }
-                actions.add(new Action(tick, index, type, pos, blockName, properties));
+                actions.add(new Action(
+                    tick,
+                    index,
+                    type,
+                    pos,
+                    blockName,
+                    properties,
+                    face,
+                    location,
+                    arrow
+                ));
             }
         }
 
@@ -145,23 +164,10 @@ final class Scenario {
         if (!fileName.endsWith(".nbt") && !fileName.endsWith(".structure")) {
             throw new IllegalArgumentException("Java oracle 首批仅支持原版 structure NBT: " + source.path);
         }
-        if (!source.origin.equals(Pos.ZERO)) {
-            throw new IllegalArgumentException("Java oracle 尚不支持非零 origin");
-        }
-        if (!source.rotation.equals("none")) {
-            throw new IllegalArgumentException("Java oracle 尚不支持场景 rotation: " + source.rotation);
-        }
-        if (!source.mirror.equals("none")) {
-            throw new IllegalArgumentException("Java oracle 尚不支持场景 mirror: " + source.mirror);
-        }
-        if (mode.equals("experimental")) {
-            throw new IllegalArgumentException("GameTestServer 尚未启用 redstone_experiments feature flag");
-        }
-        if (seed != 0L) {
-            throw new IllegalArgumentException("Java oracle 首批仅支持 seed = 0");
-        }
-        if (!source.initialization.equals("raw")) {
-            throw new IllegalArgumentException("Java oracle 首批仅支持 raw 初始化");
+        source.rotationValue();
+        source.mirrorValue();
+        if (!source.initialization.equals("raw") && !source.initialization.equals("notify")) {
+            throw new IllegalArgumentException("不支持的初始化策略: " + source.initialization);
         }
         for (Action action : actions) {
             if (action.tick > maxTicks) {
@@ -204,6 +210,27 @@ final class Scenario {
         return value == null ? defaultValue : value;
     }
 
+    private static boolean optionalBoolean(TomlTable table, String key, boolean defaultValue) {
+        Boolean value = table.getBoolean(key);
+        return value == null ? defaultValue : value;
+    }
+
+    private static double[] requiredDoubleArray(TomlTable table, String key) {
+        TomlArray values = table.getArray(key);
+        if (values == null || values.size() != 3) {
+            throw new IllegalArgumentException("字段必须是 3 元数字数组: " + key);
+        }
+        double[] result = new double[3];
+        for (int index = 0; index < result.length; index++) {
+            Object value = values.get(index);
+            if (!(value instanceof Number number)) {
+                throw new IllegalArgumentException("数组元素必须是数字: " + key + "[" + index + "]");
+            }
+            result[index] = number.doubleValue();
+        }
+        return result;
+    }
+
     private static Pos requiredPos(TomlTable table, String key) {
         TomlTable value = table.getTable(key);
         if (value == null) {
@@ -233,6 +260,40 @@ final class Scenario {
     }
 
     record Source(Path path, Pos origin, String initialization, String rotation, String mirror) {
+        Rotation rotationValue() {
+            return switch (rotation) {
+                case "none" -> Rotation.NONE;
+                case "clockwise90" -> Rotation.CLOCKWISE_90;
+                case "clockwise180" -> Rotation.CLOCKWISE_180;
+                case "counterclockwise90" -> Rotation.COUNTERCLOCKWISE_90;
+                default -> throw new IllegalArgumentException("不支持的 rotation: " + rotation);
+            };
+        }
+
+        Mirror mirrorValue() {
+            return switch (mirror) {
+                case "none" -> Mirror.NONE;
+                case "left_right" -> Mirror.LEFT_RIGHT;
+                case "front_back" -> Mirror.FRONT_BACK;
+                default -> throw new IllegalArgumentException("不支持的 mirror: " + mirror);
+            };
+        }
+
+        Pos toFrame(Pos absolute, FrameGeometry frame) {
+            return new Pos(
+                Math.addExact(frame.offset().x(), Math.subtractExact(absolute.x(), origin.x())),
+                Math.addExact(frame.offset().y(), Math.subtractExact(absolute.y(), origin.y())),
+                Math.addExact(frame.offset().z(), Math.subtractExact(absolute.z(), origin.z()))
+            );
+        }
+
+        double[] toFrame(double[] absolute, FrameGeometry frame) {
+            return new double[] {
+                frame.offset().x() + absolute[0] - origin.x(),
+                frame.offset().y() + absolute[1] - origin.y(),
+                frame.offset().z() + absolute[2] - origin.z()
+            };
+        }
     }
 
     record Action(
@@ -241,7 +302,10 @@ final class Scenario {
         String type,
         Pos pos,
         String blockName,
-        Map<String, String> properties
+        Map<String, String> properties,
+        String face,
+        double[] location,
+        boolean arrow
     ) {
     }
 

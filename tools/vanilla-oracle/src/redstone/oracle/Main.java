@@ -65,7 +65,7 @@ public final class Main {
         try {
             Path packSource = work.resolve("packs");
             Path pack = packSource.resolve("redstone-oracle");
-            createPack(pack, scenario);
+            FrameGeometry frame = createPack(pack, scenario);
             Files.deleteIfExists(output);
 
             String java = Path.of(System.getProperty("java.home"), "bin", "java").toString();
@@ -82,16 +82,24 @@ public final class Main {
                 packSource.toString(),
                 "--tests",
                 "redstone:scenario"
-            ).inheritIO();
+            );
             processBuilder.environment().put(ScenarioTestLoader.SCENARIO_ENV, scenario.path.toString());
             processBuilder.environment().put(ScenarioTestLoader.OUTPUT_ENV, output.toString());
+            processBuilder.environment().put(FrameGeometry.ENV, frame.encode());
+            Path serverLog = work.resolve("gametest.log");
+            processBuilder.redirectErrorStream(true);
+            processBuilder.redirectOutput(serverLog.toFile());
+            System.out.println("启动 Java " + EXPECTED_VERSION + " GameTest 场景");
             int status = processBuilder.start().waitFor();
             if (status != 0) {
-                throw new IllegalStateException("GameTestServer 返回失败状态: " + status);
+                throw new IllegalStateException(
+                    "GameTestServer 返回失败状态: " + status + "\n" + Files.readString(serverLog)
+                );
             }
             if (!Files.isRegularFile(output)) {
                 throw new IllegalStateException("GameTestServer 未生成 oracle 输出: " + output);
             }
+            System.out.println("Java GameTest 场景执行完成");
         } finally {
             deleteTree(work);
         }
@@ -167,15 +175,17 @@ public final class Main {
 
     private static void runScenarioChild(String[] gameTestArgs) throws Exception {
         SharedConstants.tryDetectVersion();
-        TestFunctionLoader.registerLoader(ScenarioTestLoader.fromEnvironment());
+        ScenarioTestLoader loader = ScenarioTestLoader.fromEnvironment();
+        OracleServerOptions.apply(loader.scenario());
+        TestFunctionLoader.registerLoader(loader);
         GameTestMainUtil.runGameTestServer(gameTestArgs, ignored -> {
         });
     }
 
-    private static void createPack(Path pack, Scenario scenario) throws Exception {
+    private static FrameGeometry createPack(Path pack, Scenario scenario) throws Exception {
         Path testInstance = pack.resolve("data/redstone/test_instance/scenario.json");
         Path structure = pack.resolve("data/redstone/structure/scenario.nbt");
-        Path frame = pack.resolve("data/redstone/structure/scenario_frame.nbt");
+        Path framePath = pack.resolve("data/redstone/structure/scenario_frame.nbt");
         Files.createDirectories(testInstance.getParent());
         Files.createDirectories(structure.getParent());
 
@@ -204,12 +214,15 @@ public final class Main {
                 "结构 DataVersion " + dataVersion + " 高于 Java " + EXPECTED_DATA_VERSION
             );
         }
+        FrameGeometry frame = FrameGeometry.from(root, scenario);
         NbtIo.writeCompressed(root, structure);
         CompoundTag frameRoot = root.copy();
         frameRoot.put("palette", airPalette());
         frameRoot.put("blocks", new ListTag());
         frameRoot.put("entities", new ListTag());
-        NbtIo.writeCompressed(frameRoot, frame);
+        frameRoot.put("size", integerList(frame.size().x(), frame.size().y(), frame.size().z()));
+        NbtIo.writeCompressed(frameRoot, framePath);
+        return frame;
     }
 
     private static ListTag airPalette() {
@@ -218,6 +231,14 @@ public final class Main {
         ListTag palette = new ListTag();
         palette.add(air);
         return palette;
+    }
+
+    private static ListTag integerList(int... values) {
+        ListTag result = new ListTag();
+        for (int value : values) {
+            result.add(IntTag.valueOf(value));
+        }
+        return result;
     }
 
     private static com.google.gson.JsonArray formatVersion(int major, int minor) {

@@ -454,12 +454,15 @@ async fn execute_test_scenario(
         allow_static_fallback,
     )
     .await;
-    if let (Ok(_), Some(trace_path)) = (&result, trace_path.as_deref()) {
-        compare_with_oracle(scenario, trace_path)?;
-    }
+    let comparison = if let (Ok(_), Some(trace_path)) = (&result, trace_path.as_deref()) {
+        compare_with_oracle(scenario, trace_path)
+    } else {
+        Ok(())
+    };
     if let Some(trace_path) = trace_path {
         let _ = std::fs::remove_file(trace_path);
     }
+    comparison?;
     result
 }
 
@@ -485,24 +488,28 @@ fn compare_with_oracle(scenario: &Path, rust_trace: &Path) -> Result<()> {
     } else {
         ProcessCommand::new(&oracle)
     };
-    let status = command
-        .arg(scenario)
-        .arg(&oracle_trace)
-        .status()
-        .with_context(|| format!("启动 Java oracle 失败: {}", oracle.display()))?;
-    if !status.success() {
-        bail!("Java oracle 返回失败状态: {status}");
-    }
-    let rust = std::fs::read(rust_trace)?;
-    let java = std::fs::read(&oracle_trace)?;
+    let comparison = (|| {
+        let status = command
+            .arg(scenario)
+            .arg(&oracle_trace)
+            .status()
+            .with_context(|| format!("启动 Java oracle 失败: {}", oracle.display()))?;
+        if !status.success() {
+            bail!("Java oracle 返回失败状态: {status}");
+        }
+        let rust = std::fs::read(rust_trace)?;
+        let java = std::fs::read(&oracle_trace)?;
+        if is_probe_sample_oracle(&java)? {
+            compare_probe_samples(&rust, &java)
+        } else if rust != java {
+            let line = first_different_line(&rust, &java);
+            bail!("Rust 与 Java oracle 轨迹不一致, 首个差异位于第 {line} 行");
+        } else {
+            Ok(())
+        }
+    })();
     let _ = std::fs::remove_file(&oracle_trace);
-    if is_probe_sample_oracle(&java)? {
-        compare_probe_samples(&rust, &java)?;
-    } else if rust != java {
-        let line = first_different_line(&rust, &java);
-        bail!("Rust 与 Java oracle 轨迹不一致, 首个差异位于第 {line} 行");
-    }
-    Ok(())
+    comparison
 }
 
 #[derive(Debug, serde::Deserialize, Eq, PartialEq)]

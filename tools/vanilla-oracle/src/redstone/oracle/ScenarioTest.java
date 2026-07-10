@@ -6,6 +6,7 @@ import com.google.gson.JsonNull;
 import com.google.gson.JsonPrimitive;
 import java.io.BufferedWriter;
 import java.io.IOException;
+import java.lang.reflect.Field;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -21,24 +22,33 @@ import net.minecraft.nbt.CompoundTag;
 import net.minecraft.nbt.NbtUtils;
 import net.minecraft.resources.Identifier;
 import net.minecraft.world.Container;
+import net.minecraft.world.entity.EntitySpawnReason;
+import net.minecraft.world.entity.EntityType;
+import net.minecraft.world.entity.projectile.Projectile;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.block.state.properties.Property;
 import net.minecraft.world.level.levelgen.structure.templatesystem.StructurePlaceSettings;
+import net.minecraft.world.level.storage.ServerLevelData;
+import net.minecraft.world.flag.FeatureFlags;
+import net.minecraft.world.phys.BlockHitResult;
+import net.minecraft.world.phys.Vec3;
 
 final class ScenarioTest {
     private final Scenario scenario;
     private final Path output;
     private final List<Scenario.Action> actions;
+    private final FrameGeometry frame;
     private BufferedWriter writer;
     private int actionIndex;
 
-    ScenarioTest(Scenario scenario, Path output) {
+    ScenarioTest(Scenario scenario, Path output, FrameGeometry frame) {
         this.scenario = scenario;
         this.output = output;
         this.actions = new ArrayList<>(scenario.actions);
+        this.frame = frame;
     }
 
     void run(GameTestHelper helper) {
@@ -65,15 +75,34 @@ final class ScenarioTest {
         }
     }
 
-    private static void initialize(GameTestHelper helper) {
+    private void initialize(GameTestHelper helper) {
+        if (helper.getLevel().getSeed() != scenario.seed) {
+            throw new IllegalStateException(
+                "世界 seed 不匹配: expected " + scenario.seed + ", actual " + helper.getLevel().getSeed()
+            );
+        }
+        boolean expectedExperimental = scenario.mode.equals("experimental");
+        boolean actualExperimental = helper.getLevel()
+            .enabledFeatures()
+            .contains(FeatureFlags.REDSTONE_EXPERIMENTS);
+        if (expectedExperimental != actualExperimental) {
+            throw new IllegalStateException(
+                "redstone_experiments feature flag 不匹配: expected "
+                    + expectedExperimental
+                    + ", actual "
+                    + actualExperimental
+            );
+        }
         var template = helper.getLevel()
             .getStructureManager()
             .get(Identifier.parse("redstone:scenario"))
             .orElseThrow(() -> new IllegalStateException("缺少 redstone:scenario structure"));
-        BlockPos origin = helper.absolutePos(BlockPos.ZERO);
+        BlockPos origin = helper.absolutePos(blockPos(frame.offset()));
         StructurePlaceSettings settings = new StructurePlaceSettings()
             .setIgnoreEntities(false)
-            .setKnownShape(true);
+            .setKnownShape(scenario.source.initialization().equals("raw"))
+            .setMirror(scenario.source.mirrorValue())
+            .setRotation(scenario.source.rotationValue());
         if (!template.placeInWorld(helper.getLevel(), origin, origin, settings, helper.getLevel().getRandom(), 818)) {
             throw new IllegalStateException("放置 redstone:scenario structure 失败");
         }
@@ -91,9 +120,13 @@ final class ScenarioTest {
                 }
             }
             int nextTick = tick + 1;
-            while (actionIndex < actions.size() && actions.get(actionIndex).tick() == nextTick) {
-                applyAction(helper, actions.get(actionIndex));
-                actionIndex++;
+            if (actionIndex < actions.size() && actions.get(actionIndex).tick() == nextTick) {
+                withNextGameTime(helper, () -> {
+                    while (actionIndex < actions.size() && actions.get(actionIndex).tick() == nextTick) {
+                        applyAction(helper, actions.get(actionIndex));
+                        actionIndex++;
+                    }
+                });
             }
             writer.flush();
             if (tick >= scenario.maxTicks) {
@@ -107,15 +140,48 @@ final class ScenarioTest {
         }
     }
 
-    private static void applyAction(GameTestHelper helper, Scenario.Action action) {
-        BlockPos pos = blockPos(action.pos());
+    private void applyAction(GameTestHelper helper, Scenario.Action action) {
+        BlockPos pos = blockPos(scenario.source.toFrame(action.pos(), frame));
         switch (action.type()) {
             case "set_block" -> helper.setBlock(pos, resolveBlockState(helper, action));
             case "break_block" -> helper.destroyBlock(pos);
             case "use_block" -> helper.useBlock(pos);
             case "press_button" -> helper.pressButton(pos);
             case "pull_lever" -> helper.pullLever(pos);
+            case "hit_target" -> hitTarget(helper, pos, action);
             default -> throw new IllegalArgumentException("Java oracle 尚不支持动作: " + action.type());
+        }
+    }
+
+    private void hitTarget(GameTestHelper helper, BlockPos relativePos, Scenario.Action action) {
+        Projectile projectile = (action.arrow() ? EntityType.ARROW : EntityType.SNOWBALL)
+            .create(helper.getLevel(), EntitySpawnReason.STRUCTURE);
+        if (projectile == null) {
+            throw new IllegalStateException("无法创建 target projectile");
+        }
+        Vec3 location = new Vec3(action.location()[0], action.location()[1], action.location()[2]);
+        BlockPos absolutePos = helper.absolutePos(relativePos);
+        BlockHitResult hit = new BlockHitResult(
+            location,
+            parseDirection(action.face()),
+            absolutePos,
+            false
+        );
+        BlockState state = helper.getLevel().getBlockState(absolutePos);
+        state.onProjectileHit(helper.getLevel(), state, hit, projectile);
+        projectile.discard();
+    }
+
+    private static void withNextGameTime(GameTestHelper helper, Runnable action) throws Exception {
+        Field field = helper.getLevel().getClass().getDeclaredField("serverLevelData");
+        field.setAccessible(true);
+        ServerLevelData levelData = (ServerLevelData)field.get(helper.getLevel());
+        long current = levelData.getGameTime();
+        levelData.setGameTime(Math.addExact(current, 1L));
+        try {
+            action.run();
+        } finally {
+            levelData.setGameTime(current);
         }
     }
 
@@ -156,8 +222,8 @@ final class ScenarioTest {
         writer.newLine();
     }
 
-    private static JsonElement readProbe(GameTestHelper helper, Scenario.Probe probe) {
-        BlockPos relative = blockPos(probe.pos());
+    private JsonElement readProbe(GameTestHelper helper, Scenario.Probe probe) {
+        BlockPos relative = blockPos(scenario.source.toFrame(probe.pos(), frame));
         BlockPos absolute = helper.absolutePos(relative);
         BlockState state = helper.getBlockState(relative);
         return switch (probe.type()) {

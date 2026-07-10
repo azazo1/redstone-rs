@@ -38,8 +38,9 @@ cargo run -p redstone-cli -- test scenarios --oracle
 探针级场景执行首批支持:
 
 - 原版 structure NBT.
-- `raw` 初始化, `origin = 0`, 无旋转和镜像, `seed = 0`, 默认红石模式.
-- `set_block`, `break_block`, `use_block`, `press_button`, `pull_lever`.
+- `raw` 和 `notify` 初始化, 非零 `origin`, 旋转, 镜像和任意场景 seed.
+- 默认和实验性红石模式.
+- `set_block`, `break_block`, `use_block`, `press_button`, `pull_lever`, `hit_target`.
 - `signal`, `block_state`, `property`, `container_count`.
 
-不在上述范围内的场景会被明确拒绝. ASM 微时序轨迹采集和实验性红石 feature flag 仍在实现中.
+不在上述范围内的场景会被明确拒绝. ASM 微时序轨迹采集和实体场景差分仍在实现中.
