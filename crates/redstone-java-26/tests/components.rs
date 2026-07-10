@@ -38,6 +38,12 @@ fn wire(registry: &mut Java26Registry, power: u8) -> BlockStateId {
 }
 
 fn container(kind: &str, slots: &[(&str, i64)]) -> BlockEntityData {
+    let slot_count = match kind {
+        "minecraft:hopper" | "minecraft:brewing_stand" => 5,
+        "minecraft:furnace" | "minecraft:blast_furnace" | "minecraft:smoker" => 3,
+        "minecraft:chest" | "minecraft:trapped_chest" | "minecraft:barrel" => 27,
+        _ => 9,
+    };
     let inventory = slots
         .iter()
         .enumerate()
@@ -57,15 +63,26 @@ fn container(kind: &str, slots: &[(&str, i64)]) -> BlockEntityData {
                 "item_count".to_owned(),
                 serde_json::Value::from(slots.iter().map(|(_, count)| *count).sum::<i64>()),
             ),
-            ("slot_count".to_owned(), serde_json::Value::from(9)),
-            ("capacity".to_owned(), serde_json::Value::from(576)),
+            ("slot_count".to_owned(), serde_json::Value::from(slot_count)),
+            (
+                "capacity".to_owned(),
+                serde_json::Value::from(slot_count * 64),
+            ),
         ]),
     }
 }
 
 async fn comparator_output_for_source(
+    registry: Java26Registry,
+    source: BlockStateId,
+) -> ProbeValue {
+    comparator_output_for_source_with_data(registry, source, None).await
+}
+
+async fn comparator_output_for_source_with_data(
     mut registry: Java26Registry,
     source: BlockStateId,
+    data: Option<BlockEntityData>,
 ) -> ProbeValue {
     let comparator = state(
         &mut registry,
@@ -79,6 +96,9 @@ async fn comparator_output_for_source(
     let mut world = SparseWorld::new(registry.air_state());
     world.set_block(BlockPos::ZERO, comparator).unwrap();
     world.set_block(BlockPos::new(0, 0, -1), source).unwrap();
+    if let Some(data) = data {
+        world.set_block_entity(BlockPos::new(0, 0, -1), data);
+    }
     let rules = Java26Rules::new(registry);
     let mut simulation = Simulation::load(rules, world, SimulationConfig::default())
         .await
@@ -878,6 +898,22 @@ async fn state_backed_analog_sources_drive_comparators() {
             ),
             4,
         ),
+        (
+            state(
+                &mut registry,
+                "minecraft:waxed_oxidized_copper_bulb",
+                &[("lit", "true"), ("powered", "false")],
+            ),
+            15,
+        ),
+        (
+            state(
+                &mut registry,
+                "minecraft:red_candle_cake",
+                &[("lit", "false")],
+            ),
+            14,
+        ),
     ];
 
     for (source, expected) in sources {
@@ -886,6 +922,445 @@ async fn state_backed_analog_sources_drive_comparators() {
             ProbeValue::Integer(expected)
         );
     }
+}
+
+#[tokio::test]
+async fn block_entity_backed_analog_sources_drive_comparators() {
+    let mut registry = Java26Registry::new();
+    let sources = [
+        (
+            state(
+                &mut registry,
+                "minecraft:lectern",
+                &[("facing", "north"), ("has_book", "true"), ("powered", "false")],
+            ),
+            BlockEntityData {
+                kind: "minecraft:lectern".to_owned(),
+                fields: BTreeMap::from([
+                    ("Page".to_owned(), serde_json::Value::from(2)),
+                    (
+                        "Book".to_owned(),
+                        serde_json::json!({
+                            "id": "minecraft:written_book",
+                            "count": 1,
+                            "components": {
+                                "minecraft:written_book_content": {
+                                    "pages": ["a", "b", "c", "d", "e"]
+                                }
+                            }
+                        }),
+                    ),
+                ]),
+            },
+            8,
+        ),
+        (
+            state(&mut registry, "minecraft:jukebox", &[("has_record", "true")]),
+            BlockEntityData {
+                kind: "minecraft:jukebox".to_owned(),
+                fields: BTreeMap::from([(
+                    "RecordItem".to_owned(),
+                    serde_json::json!({
+                        "id": "minecraft:music_disc_5",
+                        "count": 1,
+                    }),
+                )]),
+            },
+            15,
+        ),
+        (
+            state(
+                &mut registry,
+                "minecraft:decorated_pot",
+                &[("cracked", "false"), ("facing", "north"), ("waterlogged", "false")],
+            ),
+            BlockEntityData {
+                kind: "minecraft:decorated_pot".to_owned(),
+                fields: BTreeMap::from([(
+                    "item".to_owned(),
+                    serde_json::json!({
+                        "id": "minecraft:diamond_sword",
+                        "count": 1,
+                    }),
+                )]),
+            },
+            15,
+        ),
+        (
+            state(
+                &mut registry,
+                "minecraft:chiseled_bookshelf",
+                &[
+                    ("facing", "north"),
+                    ("slot_0_occupied", "false"),
+                    ("slot_1_occupied", "true"),
+                    ("slot_2_occupied", "false"),
+                    ("slot_3_occupied", "false"),
+                    ("slot_4_occupied", "false"),
+                    ("slot_5_occupied", "false"),
+                ],
+            ),
+            BlockEntityData {
+                kind: "minecraft:chiseled_bookshelf".to_owned(),
+                fields: BTreeMap::from([(
+                    "last_interacted_slot".to_owned(),
+                    serde_json::Value::from(1),
+                )]),
+            },
+            2,
+        ),
+    ];
+
+    for (source, data, expected) in sources {
+        assert_eq!(
+            comparator_output_for_source_with_data(registry.clone(), source, Some(data)).await,
+            ProbeValue::Integer(expected)
+        );
+    }
+}
+
+#[tokio::test]
+async fn comparator_reads_combined_copper_chest_inventory() {
+    let mut registry = Java26Registry::new();
+    let comparator = state(
+        &mut registry,
+        "minecraft:comparator",
+        &[("facing", "north"), ("mode", "compare"), ("powered", "false")],
+    );
+    let left = state(
+        &mut registry,
+        "minecraft:copper_chest",
+        &[("facing", "north"), ("type", "left"), ("waterlogged", "false")],
+    );
+    let right = state(
+        &mut registry,
+        "minecraft:exposed_copper_chest",
+        &[("facing", "north"), ("type", "right"), ("waterlogged", "false")],
+    );
+    let source_pos = BlockPos::new(0, 0, -1);
+    let partner_pos = BlockPos::new(1, 0, -1);
+    let mut world = SparseWorld::new(registry.air_state());
+    world.set_block(BlockPos::ZERO, comparator).unwrap();
+    world.set_block(source_pos, left).unwrap();
+    world.set_block(partner_pos, right).unwrap();
+    world.set_block_entity(source_pos, container("minecraft:chest", &[]));
+    world.set_block_entity(partner_pos, container("minecraft:chest", &[("minecraft:stone", 64)]));
+    let rules = Java26Rules::new(registry);
+    let mut simulation = Simulation::load(rules, world, SimulationConfig::default())
+        .await
+        .unwrap();
+    simulation.add_probe(
+        "output",
+        Probe::Signal {
+            pos: BlockPos::ZERO,
+            direction: Some(Direction::North),
+        },
+    );
+    simulation.initialize().await.unwrap();
+    simulation.step().await.unwrap();
+    let delta = simulation.step().await.unwrap();
+
+    assert_eq!(delta.probes[0].value, ProbeValue::Integer(1));
+}
+
+#[tokio::test]
+async fn remaining_analog_source_categories_drive_comparators() {
+    let mut registry = Java26Registry::new();
+    let sources = [
+        (
+            state(
+                &mut registry,
+                "minecraft:furnace",
+                &[("facing", "north"), ("lit", "false")],
+            ),
+            container("minecraft:furnace", &[("minecraft:diamond_sword", 1)]),
+            5,
+        ),
+        (
+            state(
+                &mut registry,
+                "minecraft:crafter",
+                &[("crafting", "false"), ("orientation", "north_up"), ("triggered", "false")],
+            ),
+            BlockEntityData {
+                kind: "minecraft:crafter".to_owned(),
+                fields: BTreeMap::from([
+                    ("inventory".to_owned(), serde_json::Value::Array(Vec::new())),
+                    ("disabled_slots".to_owned(), serde_json::json!([0, 4, 8])),
+                ]),
+            },
+            3,
+        ),
+        (
+            state(
+                &mut registry,
+                "minecraft:command_block",
+                &[("conditional", "false"), ("facing", "north")],
+            ),
+            BlockEntityData {
+                kind: "minecraft:command_block".to_owned(),
+                fields: BTreeMap::from([(
+                    "SuccessCount".to_owned(),
+                    serde_json::Value::from(9),
+                )]),
+            },
+            9,
+        ),
+        (
+            state(
+                &mut registry,
+                "minecraft:sculk_sensor",
+                &[("power", "4"), ("sculk_sensor_phase", "active"), ("waterlogged", "false")],
+            ),
+            BlockEntityData {
+                kind: "minecraft:sculk_sensor".to_owned(),
+                fields: BTreeMap::from([(
+                    "last_vibration_frequency".to_owned(),
+                    serde_json::Value::from(12),
+                )]),
+            },
+            12,
+        ),
+        (
+            state(
+                &mut registry,
+                "minecraft:creaking_heart",
+                &[("axis", "y"), ("creaking_heart_state", "awake"), ("natural", "true")],
+            ),
+            BlockEntityData {
+                kind: "minecraft:creaking_heart".to_owned(),
+                fields: BTreeMap::from([(
+                    "output_signal".to_owned(),
+                    serde_json::Value::from(6),
+                )]),
+            },
+            6,
+        ),
+    ];
+
+    for (source, data, expected) in sources {
+        assert_eq!(
+            comparator_output_for_source_with_data(registry.clone(), source, Some(data)).await,
+            ProbeValue::Integer(expected)
+        );
+    }
+}
+
+#[tokio::test]
+async fn shelf_output_depends_on_the_comparator_side() {
+    let mut registry = Java26Registry::new();
+    let comparator = state(
+        &mut registry,
+        "minecraft:comparator",
+        &[("facing", "north"), ("mode", "compare"), ("powered", "false")],
+    );
+    let shelf = state(
+        &mut registry,
+        "minecraft:oak_shelf",
+        &[
+            ("facing", "north"),
+            ("powered", "false"),
+            ("side_chain", "unconnected"),
+            ("waterlogged", "false"),
+        ],
+    );
+    let source_pos = BlockPos::new(0, 0, -1);
+    let mut world = SparseWorld::new(registry.air_state());
+    world.set_block(BlockPos::ZERO, comparator).unwrap();
+    world.set_block(source_pos, shelf).unwrap();
+    world.set_block_entity(
+        source_pos,
+        BlockEntityData {
+            kind: "minecraft:shelf".to_owned(),
+            fields: BTreeMap::from([(
+                "inventory".to_owned(),
+                serde_json::json!([
+                    {"slot": 0, "item_id": "minecraft:stone", "count": 1},
+                    {"slot": 2, "item_id": "minecraft:stone", "count": 1}
+                ]),
+            )]),
+        },
+    );
+    let rules = Java26Rules::new(registry);
+    let mut simulation = Simulation::load(rules, world, SimulationConfig::default())
+        .await
+        .unwrap();
+    simulation.add_probe(
+        "output",
+        Probe::Signal {
+            pos: BlockPos::ZERO,
+            direction: Some(Direction::North),
+        },
+    );
+    simulation.initialize().await.unwrap();
+    simulation.step().await.unwrap();
+    let delta = simulation.step().await.unwrap();
+
+    assert_eq!(delta.probes[0].value, ProbeValue::Integer(5));
+}
+
+#[tokio::test]
+async fn detector_rail_reads_command_and_container_minecarts() {
+    let mut registry = Java26Registry::new();
+    let comparator = state(
+        &mut registry,
+        "minecraft:comparator",
+        &[("facing", "north"), ("mode", "compare"), ("powered", "false")],
+    );
+    let detector = state(
+        &mut registry,
+        "minecraft:detector_rail",
+        &[("powered", "true"), ("shape", "north_south"), ("waterlogged", "false")],
+    );
+    let entities = [
+        (
+            EntityData {
+                kind: "minecraft:command_block_minecart".to_owned(),
+                position: [0.5, 0.1, -0.5],
+                fields: BTreeMap::from([(
+                    "SuccessCount".to_owned(),
+                    serde_json::Value::from(9),
+                )]),
+            },
+            9,
+        ),
+        (
+            EntityData {
+                kind: "minecraft:chest_minecart".to_owned(),
+                position: [0.5, 0.1, -0.5],
+                fields: BTreeMap::from([
+                    (
+                        "inventory".to_owned(),
+                        serde_json::json!([
+                            {"slot": 0, "item_id": "minecraft:diamond_sword", "count": 1}
+                        ]),
+                    ),
+                    ("slot_count".to_owned(), serde_json::Value::from(27)),
+                    ("capacity".to_owned(), serde_json::Value::from(1728)),
+                ]),
+            },
+            1,
+        ),
+    ];
+
+    for (entity, expected) in entities {
+        let mut world = SparseWorld::new(registry.air_state());
+        world.set_block(BlockPos::ZERO, comparator).unwrap();
+        world.set_block(BlockPos::new(0, 0, -1), detector).unwrap();
+        world.spawn_entity(entity);
+        let rules = Java26Rules::new(registry.clone());
+        let mut simulation = Simulation::load(rules, world, SimulationConfig::default())
+            .await
+            .unwrap();
+        simulation.add_probe(
+            "output",
+            Probe::Signal {
+                pos: BlockPos::ZERO,
+                direction: Some(Direction::North),
+            },
+        );
+        simulation.initialize().await.unwrap();
+        simulation.step().await.unwrap();
+        let delta = simulation.step().await.unwrap();
+
+        assert_eq!(delta.probes[0].value, ProbeValue::Integer(expected));
+    }
+}
+
+#[tokio::test]
+async fn comparator_refreshes_when_a_direct_or_blocked_source_changes() {
+    for blocked in [false, true] {
+        let mut registry = Java26Registry::new();
+        let comparator = state(
+            &mut registry,
+            "minecraft:comparator",
+            &[("facing", "north"), ("mode", "compare"), ("powered", "false")],
+        );
+        let empty = state(&mut registry, "minecraft:cauldron", &[]);
+        let full = state(
+            &mut registry,
+            "minecraft:water_cauldron",
+            &[("level", "3")],
+        );
+        let stone = state(&mut registry, "minecraft:stone", &[]);
+        let comparator_pos = BlockPos::ZERO;
+        let source_pos = BlockPos::new(0, 0, if blocked { -2 } else { -1 });
+        let mut world = SparseWorld::new(registry.air_state());
+        world.set_block(comparator_pos, comparator).unwrap();
+        world.set_block(source_pos, empty).unwrap();
+        if blocked {
+            world.set_block(BlockPos::new(0, 0, -1), stone).unwrap();
+        }
+        let rules = Java26Rules::new(registry);
+        let mut simulation = Simulation::load(rules, world, SimulationConfig::default())
+            .await
+            .unwrap();
+        simulation.add_probe(
+            "output",
+            Probe::Signal {
+                pos: comparator_pos,
+                direction: Some(Direction::North),
+            },
+        );
+        simulation.initialize().await.unwrap();
+        simulation.run_until(redstone_core::GameTick(3)).await.unwrap();
+
+        simulation
+            .step_with_actions(&[Action::SetBlock {
+                pos: source_pos,
+                state: full,
+            }])
+            .await
+            .unwrap();
+        simulation.step().await.unwrap();
+        let delta = simulation.step().await.unwrap();
+
+        assert_eq!(delta.probes[0].value, ProbeValue::Integer(3));
+    }
+}
+
+#[tokio::test]
+async fn comparator_refreshes_after_a_hopper_transfer() {
+    let mut registry = Java26Registry::new();
+    let hopper = state(
+        &mut registry,
+        "minecraft:hopper",
+        &[("enabled", "true"), ("facing", "down")],
+    );
+    let comparator = state(
+        &mut registry,
+        "minecraft:comparator",
+        &[("facing", "west"), ("mode", "compare"), ("powered", "false")],
+    );
+    let chest = state(
+        &mut registry,
+        "minecraft:chest",
+        &[("facing", "north"), ("type", "single"), ("waterlogged", "false")],
+    );
+    let hopper_pos = BlockPos::ZERO;
+    let source_pos = BlockPos::new(0, 1, 0);
+    let comparator_pos = BlockPos::new(1, 0, 0);
+    let mut world = SparseWorld::new(registry.air_state());
+    world.set_block(hopper_pos, hopper).unwrap();
+    world.set_block(source_pos, chest).unwrap();
+    world.set_block(comparator_pos, comparator).unwrap();
+    world.set_block_entity(hopper_pos, container("minecraft:hopper", &[]));
+    world.set_block_entity(source_pos, container("minecraft:chest", &[("minecraft:stone", 1)]));
+    let rules = Java26Rules::new(registry);
+    let mut simulation = Simulation::load(rules, world, SimulationConfig::default())
+        .await
+        .unwrap();
+    simulation.add_probe(
+        "output",
+        Probe::Signal {
+            pos: comparator_pos,
+            direction: Some(Direction::West),
+        },
+    );
+    simulation.initialize().await.unwrap();
+    let deltas = simulation.run_until(redstone_core::GameTick(3)).await.unwrap();
+
+    assert_eq!(deltas.last().unwrap().probes[0].value, ProbeValue::Integer(1));
 }
 
 #[tokio::test]

@@ -560,6 +560,8 @@ fn container_slot_count(
         "minecraft:dispenser" | "minecraft:dropper" | "minecraft:crafter" => Some(9),
         "minecraft:furnace" | "minecraft:blast_furnace" | "minecraft:smoker" => Some(3),
         "minecraft:chest" | "minecraft:trapped_chest" | "minecraft:barrel" => Some(27),
+        value if value.ends_with("copper_chest") => Some(27),
+        "minecraft:decorated_pot" => Some(1),
         "minecraft:chest_minecart" => Some(27),
         "minecraft:hopper_minecart" => Some(5),
         value if value.ends_with("_shulker_box") || value == "minecraft:shulker_box" => Some(27),

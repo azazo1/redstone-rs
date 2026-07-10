@@ -52,6 +52,9 @@ impl Java26Rules {
                 || absorb_item_entity(ctx, pos);
             if moved {
                 set_block_entity_i64(ctx, pos, "cooldown", 8);
+                self.refresh_comparators_near(ctx, pos)?;
+                self.refresh_comparators_near(ctx, target)?;
+                self.refresh_comparators_near(ctx, pos.relative(Direction::Up))?;
                 *self.event_counts.entry("hopper_transfer".to_owned()).or_default() += 1;
             }
         }
@@ -66,7 +69,7 @@ impl Java26Rules {
     ) -> Result<(), RulesError> {
         match state.behavior {
             BlockBehavior::Dropper => self.execute_dropper(ctx, pos, state)?,
-            BlockBehavior::Dispenser => self.execute_dispenser(ctx, pos, state),
+            BlockBehavior::Dispenser => self.execute_dispenser(ctx, pos, state)?,
             BlockBehavior::Crafter => self.execute_crafter(ctx, pos, state)?,
             _ => {}
         }
@@ -105,9 +108,9 @@ impl Java26Rules {
         ctx: &mut EventContext<'_>,
         pos: BlockPos,
         state: &StateDefinition,
-    ) {
+    ) -> Result<(), RulesError> {
         let Some(index) = random_stack_index(ctx, pos) else {
-            return;
+            return Ok(());
         };
         let item = inventory(ctx.world, pos)[index].item_id.clone();
         let facing = state.direction_property("facing").unwrap_or(Direction::North);
@@ -174,6 +177,8 @@ impl Java26Rules {
             }
             None => ctx.unsupported(pos, format!("dispenser_item:{item}")),
         }
+        self.refresh_comparators_near(ctx, pos)?;
+        Ok(())
     }
 
     fn execute_crafter(
@@ -207,6 +212,8 @@ impl Java26Rules {
         }
         let crafting = self.changed_state(state.id, "crafting", "true")?;
         self.set_state_and_notify(ctx, pos, crafting, "crafter_craft", None)?;
+        self.refresh_comparators_near(ctx, pos)?;
+        self.refresh_comparators_near(ctx, target)?;
         ctx.schedule_tick(pos, state.kind, 1, TickPriority::Normal);
         *self.event_counts.entry("crafter_craft".to_owned()).or_default() += 1;
         Ok(())
@@ -233,23 +240,93 @@ fn set_block_entity_i64(ctx: &mut EventContext<'_>, pos: BlockPos, key: &str, va
 }
 
 pub(super) fn container_signal(world: &SparseWorld, pos: BlockPos) -> Option<u8> {
-    if !is_container(world, pos) {
+    container_signal_for_positions(world, &[pos])
+}
+
+pub(super) fn container_signal_for_positions(
+    world: &SparseWorld,
+    positions: &[BlockPos],
+) -> Option<u8> {
+    if positions.is_empty() {
         return None;
     }
-    let data = world.block_entity(pos)?;
-    let stacks = inventory(world, pos);
-    let capacity = data
-        .fields
+    let mut fill = 0.0f32;
+    let mut slot_count = 0u32;
+    for pos in positions {
+        if !is_container(world, *pos) {
+            return None;
+        }
+        let data = world.block_entity(*pos)?;
+        let capacity = data
+            .fields
+            .get("capacity")
+            .and_then(Value::as_i64)
+            .unwrap_or(DEFAULT_STACK_SIZE)
+            .max(1);
+        slot_count = slot_count.saturating_add(container_slot_count(world, *pos, capacity));
+        for stack in inventory(world, *pos) {
+            let max_stack_size = stack
+                .components
+                .as_ref()
+                .and_then(|components| components.get("minecraft:max_stack_size"))
+                .and_then(Value::as_i64)
+                .unwrap_or_else(|| {
+                    super::item::official_item_max_stack_size(&stack.item_id)
+                })
+                .max(1);
+            fill += stack.count.clamp(0, max_stack_size) as f32 / max_stack_size as f32;
+        }
+    }
+    Some(container_signal_from_fill(fill, slot_count))
+}
+
+pub(super) fn container_signal_from_fields(
+    kind: &str,
+    fields: &BTreeMap<String, Value>,
+) -> u8 {
+    let capacity = fields
         .get("capacity")
         .and_then(Value::as_i64)
         .unwrap_or(DEFAULT_STACK_SIZE)
         .max(1);
-    let count = stacks.iter().map(|stack| stack.count).sum::<i64>();
-    Some(if count == 0 {
+    let slot_count = fields
+        .get("slot_count")
+        .and_then(Value::as_u64)
+        .and_then(|value| u32::try_from(value).ok())
+        .filter(|value| *value > 0)
+        .unwrap_or_else(|| {
+            default_container_slot_count(kind).unwrap_or_else(|| {
+                ((capacity + DEFAULT_STACK_SIZE - 1) / DEFAULT_STACK_SIZE).max(1) as u32
+            })
+        });
+    let fill = fields
+        .get("inventory")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(|entry| {
+            let item_id = entry.get("item_id").and_then(Value::as_str)?;
+            let count = entry.get("count").and_then(Value::as_i64)?.max(0);
+            let max_stack_size = entry
+                .get("components")
+                .and_then(|components| components.get("minecraft:max_stack_size"))
+                .and_then(Value::as_i64)
+                .unwrap_or_else(|| {
+                    super::item::official_item_max_stack_size(item_id)
+                })
+                .max(1);
+            Some(count.clamp(0, max_stack_size) as f32 / max_stack_size as f32)
+        })
+        .sum::<f32>();
+    container_signal_from_fill(fill, slot_count)
+}
+
+fn container_signal_from_fill(fill: f32, slot_count: u32) -> u8 {
+    if fill == 0.0 || slot_count == 0 {
         0
     } else {
-        (1 + count * 14 / capacity).clamp(1, 15) as u8
-    })
+        ((fill / slot_count as f32 * 14.0).floor() as u8 + 1).min(15)
+    }
 }
 
 fn transfer_one_item(
@@ -583,12 +660,32 @@ fn can_take_from_slot(
 }
 
 fn slot_stack_limit(world: &SparseWorld, pos: BlockPos, slot: u32, item_id: &str) -> i64 {
-    if matches!(container_kind(world, pos), Some("minecraft:brewing_stand")) && slot <= 2
-        || is_unstackable_item(item_id)
-    {
+    item_stack_limit(container_kind(world, pos), slot, item_id)
+}
+
+fn item_stack_limit(kind: Option<&str>, slot: u32, item_id: &str) -> i64 {
+    if matches!(kind, Some("minecraft:brewing_stand")) && slot <= 2 {
         1
     } else {
-        DEFAULT_STACK_SIZE
+        super::item::official_item_max_stack_size(item_id)
+    }
+}
+
+fn default_container_slot_count(kind: &str) -> Option<u32> {
+    match kind {
+        "minecraft:hopper" | "minecraft:hopper_minecart" | "minecraft:brewing_stand" => {
+            Some(5)
+        }
+        "minecraft:dispenser" | "minecraft:dropper" | "minecraft:crafter" => Some(9),
+        "minecraft:furnace" | "minecraft:blast_furnace" | "minecraft:smoker" => Some(3),
+        "minecraft:chest"
+        | "minecraft:trapped_chest"
+        | "minecraft:barrel"
+        | "minecraft:chest_minecart" => Some(27),
+        value if value.ends_with("_shulker_box") || value == "minecraft:shulker_box" => {
+            Some(27)
+        }
+        _ => None,
     }
 }
 
@@ -776,12 +873,6 @@ fn is_shulker_box_container(kind: &str) -> bool {
 
 fn is_shulker_box_item(item_id: &str) -> bool {
     item_id == "minecraft:shulker_box" || item_id.ends_with("_shulker_box")
-}
-
-fn is_unstackable_item(item_id: &str) -> bool {
-    is_shulker_box_item(item_id)
-        || is_brewing_bottle(item_id) && item_id != "minecraft:glass_bottle"
-        || matches!(item_id, "minecraft:water_bucket" | "minecraft:lava_bucket")
 }
 
 fn is_container(world: &SparseWorld, pos: BlockPos) -> bool {

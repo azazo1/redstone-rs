@@ -12,6 +12,7 @@ use crate::{BlockBehavior, JAVA_VERSION, Java26Registry, PushReaction, StateDefi
 use crate::orientation::{Orientation, SideBias};
 
 mod inventory;
+mod item;
 mod piston;
 mod shape;
 mod consumer;
@@ -140,6 +141,17 @@ impl Java26Rules {
                     }
                 }
             }
+        }
+        if self
+            .registry
+            .state(old)
+            .is_some_and(comparator::has_analog_output)
+            || self
+                .registry
+                .state(state)
+                .is_some_and(comparator::has_analog_output)
+        {
+            self.refresh_comparators_near(ctx, pos)?;
         }
         Ok(true)
     }
@@ -722,16 +734,29 @@ impl Java26Rules {
     ) -> u8 {
         let facing = state.direction_property("facing").unwrap_or(Direction::North);
         let rear = pos.relative(facing);
-        if let Some(value) = self.analog_output(world, rear, facing.opposite()) {
-            return value;
+        let rear_state = self.state(world.get_block(rear)).ok();
+        if rear_state.is_some_and(comparator::has_analog_output) {
+            return self
+                .analog_output(world, rear, facing.opposite())
+                .unwrap_or(0);
         }
         let direct = self.signal(world, rear, facing);
-        let rear_state = self.state(world.get_block(rear)).ok();
         if direct < 15 && rear_state.is_some_and(|state| state.redstone_conductor) {
             let far = rear.relative(facing);
-            let far_output = self
-                .analog_output(world, far, facing.opposite())
-                .or_else(|| item_frame_output(world, far, facing));
+            let far_state = self.state(world.get_block(far)).ok();
+            let block_output = far_state
+                .filter(|state| comparator::has_analog_output(state))
+                .map(|_| {
+                    self.analog_output(world, far, facing.opposite())
+                        .unwrap_or(0)
+                });
+            let frame_output = item_frame_output(world, far, facing);
+            let far_output = match (block_output, frame_output) {
+                (Some(block), Some(frame)) => Some(block.max(frame)),
+                (Some(block), None) => Some(block),
+                (None, Some(frame)) => Some(frame),
+                (None, None) => None,
+            };
             if let Some(output) = far_output {
                 return output;
             }
@@ -1359,7 +1384,7 @@ impl BlockRules for Java26Rules {
     }
 
     fn tick_entities(&mut self, ctx: &mut EventContext<'_>) -> Result<(), RulesError> {
-        self.tick_minimal_entities(ctx);
+        self.tick_minimal_entities(ctx)?;
         let sensors = self.entity_sensors.iter().copied().collect::<Vec<_>>();
         for pos in sensors {
             let state = self.state(ctx.world.get_block(pos))?.clone();
@@ -1484,25 +1509,33 @@ impl Java26Rules {
         changed: BlockPos,
     ) -> Result<(), RulesError> {
         for direction in Direction::HORIZONTAL {
-            for distance in 1..=2 {
-                let pos = BlockPos::new(
-                    changed.x - direction.step().0 * distance,
-                    changed.y,
-                    changed.z - direction.step().2 * distance,
-                );
-                let state_id = ctx.world.get_block(pos);
-                let state = self.state(state_id)?.clone();
-                if matches!(state.behavior, BlockBehavior::Comparator)
-                    && state.direction_property("facing") == Some(direction)
-                {
-                    self.refresh_comparator(ctx, pos, state_id)?;
-                }
+            let direct = changed.relative(direction.opposite());
+            let direct_state_id = ctx.world.get_block(direct);
+            let direct_state = self.state(direct_state_id)?.clone();
+            if matches!(direct_state.behavior, BlockBehavior::Comparator)
+                && direct_state.direction_property("facing") == Some(direction)
+            {
+                self.refresh_comparator(ctx, direct, direct_state_id)?;
+            }
+
+            let conductor = changed.relative(direction.opposite());
+            let conductor_state = self.state(ctx.world.get_block(conductor))?;
+            if !conductor_state.redstone_conductor {
+                continue;
+            }
+            let far = conductor.relative(direction.opposite());
+            let far_state_id = ctx.world.get_block(far);
+            let far_state = self.state(far_state_id)?.clone();
+            if matches!(far_state.behavior, BlockBehavior::Comparator)
+                && far_state.direction_property("facing") == Some(direction)
+            {
+                self.refresh_comparator(ctx, far, far_state_id)?;
             }
         }
         Ok(())
     }
 
-    fn tick_minimal_entities(&mut self, ctx: &mut EventContext<'_>) {
+    fn tick_minimal_entities(&mut self, ctx: &mut EventContext<'_>) -> Result<(), RulesError> {
         let mut expired = Vec::<EntityId>::new();
         let entity_ids = ctx.world.entities().map(|(id, _)| *id).collect::<Vec<_>>();
         for id in entity_ids {
@@ -1556,6 +1589,13 @@ impl Java26Rules {
                     if minecart_enabled(ctx.world, id)
                         && absorb_into_hopper_minecart(ctx.world, id) =>
                 {
+                    if let Some(pos) = ctx
+                        .world
+                        .entity(id)
+                        .map(|entity| entity_block_pos(entity.position))
+                    {
+                        self.refresh_comparators_near(ctx, pos)?;
+                    }
                     *self
                         .event_counts
                         .entry("hopper_minecart_transfer".to_owned())
@@ -1578,6 +1618,7 @@ impl Java26Rules {
                 *self.event_counts.entry("item_despawn".to_owned()).or_default() += 1;
             }
         }
+        Ok(())
     }
 
     fn refresh_entity_sensor(

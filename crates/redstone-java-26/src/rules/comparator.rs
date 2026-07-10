@@ -5,7 +5,11 @@ use serde_json::Value;
 
 use crate::Java26Registry;
 
-use super::inventory::container_signal;
+use super::inventory::{
+    container_signal, container_signal_for_positions, container_signal_from_fields,
+};
+
+mod block_entity;
 
 pub(super) fn analog_output(
     registry: &Java26Registry,
@@ -63,11 +67,15 @@ pub(super) fn analog_output(
             pos,
             &["comparator_output", "ComparatorOutput"],
         )
-        .unwrap_or(0)
-        .clamp(0, 15) as i32,
+        .map_or_else(
+            || block_entity::jukebox_output(world, pos),
+            |output| output.clamp(0, 15) as i32,
+        ),
         "lectern" => block_entity_i64(world, pos, &["comparator_output"])
-            .unwrap_or(0)
-            .clamp(0, 15) as i32,
+            .map_or_else(
+                || block_entity::lectern_output(world, pos, state),
+                |output| output.clamp(0, 15) as i32,
+            ),
         "sculk_sensor" | "calibrated_sculk_sensor" => {
             if state.property("sculk_sensor_phase") == Some("active") {
                 block_entity_i64(
@@ -81,13 +89,52 @@ pub(super) fn analog_output(
                 0
             }
         }
-        value if value.ends_with("_shelf") => shelf_output(world, pos, state, direction),
+        value if value.ends_with("_shelf") && value != "chiseled_bookshelf" => {
+            shelf_output(world, pos, state, direction)
+        }
+        "decorated_pot" => block_entity::decorated_pot_output(world, pos),
+        value if is_chest(value) => chest_output(registry, world, pos, state),
         value if is_inventory_output_block(value) => {
             i32::from(container_signal(world, pos).unwrap_or(0))
         }
         _ => return None,
     };
     Some(clamp_signal(i64::from(output)))
+}
+
+pub(super) fn has_analog_output(state: &crate::StateDefinition) -> bool {
+    let path = state.name.strip_prefix("minecraft:").unwrap_or(&state.name);
+    matches!(
+        path,
+        "cauldron"
+            | "water_cauldron"
+            | "powder_snow_cauldron"
+            | "lava_cauldron"
+            | "composter"
+            | "cake"
+            | "bee_nest"
+            | "beehive"
+            | "end_portal_frame"
+            | "respawn_anchor"
+            | "chiseled_bookshelf"
+            | "command_block"
+            | "chain_command_block"
+            | "repeating_command_block"
+            | "crafter"
+            | "creaking_heart"
+            | "detector_rail"
+            | "jukebox"
+            | "lectern"
+            | "sculk_sensor"
+            | "calibrated_sculk_sensor"
+            | "decorated_pot"
+    ) || path == "candle_cake"
+        || path.ends_with("_candle_cake")
+        || path.ends_with("_bulb")
+        || path.ends_with("copper_golem_statue")
+        || path.ends_with("_shelf")
+        || is_chest(path)
+        || is_inventory_output_block(path)
 }
 
 fn copper_golem_pose_output(pose: &str) -> i32 {
@@ -137,6 +184,45 @@ fn shelf_output(
         .fold(0, |output, slot| output | 1 << slot)
 }
 
+fn chest_output(
+    registry: &Java26Registry,
+    world: &SparseWorld,
+    pos: BlockPos,
+    state: &crate::StateDefinition,
+) -> i32 {
+    if state.property("type").is_none_or(|kind| kind == "single") {
+        return i32::from(container_signal(world, pos).unwrap_or(0));
+    }
+    let Some(partner_direction) = chest_partner_direction(state) else {
+        return 0;
+    };
+    let partner_pos = pos.relative(partner_direction);
+    let Some(partner) = registry.state(world.get_block(partner_pos)) else {
+        return 0;
+    };
+    let path = state.name.strip_prefix("minecraft:").unwrap_or(&state.name);
+    let partner_path = partner
+        .name
+        .strip_prefix("minecraft:")
+        .unwrap_or(&partner.name);
+    if !chests_connect(path, partner_path)
+        || partner.direction_property("facing") != state.direction_property("facing")
+        || partner.property("type") == state.property("type")
+    {
+        return 0;
+    }
+    i32::from(container_signal_for_positions(world, &[pos, partner_pos]).unwrap_or(0))
+}
+
+fn chest_partner_direction(state: &crate::StateDefinition) -> Option<Direction> {
+    let facing = state.direction_property("facing")?;
+    match state.property("type")? {
+        "left" => Some(facing.clockwise()),
+        "right" => Some(facing.counter_clockwise()),
+        _ => None,
+    }
+}
+
 fn detector_rail_output(world: &SparseWorld, pos: BlockPos, powered: bool) -> i32 {
     if !powered {
         return 0;
@@ -170,27 +256,7 @@ fn entity_container_signal(entity: &EntityData) -> Option<u8> {
             entity.kind.as_str(),
             "minecraft:chest_minecart" | "minecraft:hopper_minecart"
         );
-    has_inventory.then(|| container_signal_from_fields(&entity.fields))
-}
-
-fn container_signal_from_fields(fields: &BTreeMap<String, Value>) -> u8 {
-    let count = fields
-        .get("inventory")
-        .and_then(Value::as_array)
-        .into_iter()
-        .flatten()
-        .filter_map(|entry| entry.get("count").and_then(Value::as_i64))
-        .sum::<i64>();
-    let capacity = fields
-        .get("capacity")
-        .and_then(Value::as_i64)
-        .unwrap_or(64)
-        .max(1);
-    if count == 0 {
-        0
-    } else {
-        (1 + count * 14 / capacity).clamp(1, 15) as u8
-    }
+    has_inventory.then(|| container_signal_from_fields(&entity.kind, &entity.fields))
 }
 
 fn inventory_slots(fields: &BTreeMap<String, Value>) -> BTreeSet<u64> {
@@ -224,14 +290,19 @@ fn is_inventory_output_block(path: &str) -> bool {
                 | "smoker"
                 | "barrel"
                 | "brewing_stand"
-                | "chest"
-                | "trapped_chest"
-                | "decorated_pot"
                 | "dropper"
                 | "dispenser"
                 | "hopper"
                 | "shulker_box"
         )
+}
+
+fn is_chest(path: &str) -> bool {
+    matches!(path, "chest" | "trapped_chest") || path.ends_with("copper_chest")
+}
+
+fn chests_connect(path: &str, partner: &str) -> bool {
+    path == partner || path.ends_with("copper_chest") && partner.ends_with("copper_chest")
 }
 
 fn clamp_signal(output: i64) -> u8 {
