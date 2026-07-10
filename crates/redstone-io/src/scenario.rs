@@ -3,8 +3,8 @@ use std::path::{Path, PathBuf};
 use std::collections::BTreeMap;
 
 use redstone_core::{
-    BlockEntityData, BlockPos, EntityData, EntityId, Expectation, GameTick, Probe, ProbeValue,
-    RedstoneMode,
+    BlockEntityData, BlockPos, BlockStateId, EntityData, EntityId, Expectation, GameTick, Probe,
+    ProbeValue, RedstoneMode,
 };
 use serde::Deserialize;
 use thiserror::Error;
@@ -143,7 +143,23 @@ pub struct ScenarioProbe {
 pub struct ScenarioExpectation {
     pub tick: GameTick,
     pub probe: String,
-    pub equals: ProbeValue,
+    pub equals: ScenarioExpectationValue,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(untagged)]
+pub enum ScenarioExpectationValue {
+    State { state: BlockStateId },
+    Value(ProbeValue),
+}
+
+impl ScenarioExpectationValue {
+    fn probe_value(&self) -> ProbeValue {
+        match self {
+            Self::State { state } => ProbeValue::State(*state),
+            Self::Value(value) => value.clone(),
+        }
+    }
 }
 
 impl Scenario {
@@ -164,7 +180,7 @@ impl Scenario {
             .map(|expectation| Expectation {
                 tick: expectation.tick,
                 probe: expectation.probe.clone(),
-                equals: expectation.equals.clone(),
+                equals: expectation.equals.probe_value(),
             })
             .collect()
     }
@@ -213,6 +229,30 @@ property = "powered"
             &scenario.probes[0].probe,
             Probe::Property { property, .. } if property == "powered"
         ));
+    }
+
+    #[test]
+    fn state_expectation_uses_an_explicit_state_value() {
+        let scenario = toml::from_str::<Scenario>(
+            r#"
+version = "26.1.2"
+mode = "default"
+
+[source]
+path = "machine.nbt"
+
+[[expectations]]
+tick = 1
+probe = "output"
+equals = { state = 11323 }
+"#,
+        )
+        .unwrap();
+
+        assert_eq!(
+            scenario.expectations()[0].equals,
+            ProbeValue::State(BlockStateId(11323))
+        );
     }
 
     #[test]

@@ -1,23 +1,275 @@
 version = "26.1.2"
 mode = "default"
 seed = 0
-max_ticks = 1000
+max_ticks = 1200
 
 [source]
 path = "../schematics/piston-gate-3x3.nbt"
-initialization = "notify"
-
-[[actions]]
-tick = 10
-type = "pull_lever"
-pos = { x = 3, y = 1, z = 0 }
+initialization = "raw"
 
 [[actions]]
 tick = 100
 type = "pull_lever"
 pos = { x = 3, y = 1, z = 0 }
 
+[[actions]]
+tick = 500
+type = "pull_lever"
+pos = { x = 3, y = 1, z = 0 }
+
 [[probes]]
-name = "quartz_rb"            # 右下角 (原点在更右下角)
+name = "door_left_bottom"
 type = "block_state"
 pos = { x = 3, y = 5, z = 1 }
+
+[[probes]]
+name = "door_center_bottom"
+type = "block_state"
+pos = { x = 4, y = 5, z = 1 }
+
+[[probes]]
+name = "door_right_bottom"
+type = "block_state"
+pos = { x = 5, y = 5, z = 1 }
+
+[[probes]]
+name = "door_left_middle"
+type = "block_state"
+pos = { x = 3, y = 6, z = 1 }
+
+[[probes]]
+name = "door_center_middle"
+type = "block_state"
+pos = { x = 4, y = 6, z = 1 }
+
+[[probes]]
+name = "door_right_middle"
+type = "block_state"
+pos = { x = 5, y = 6, z = 1 }
+
+[[probes]]
+name = "door_left_top"
+type = "block_state"
+pos = { x = 3, y = 7, z = 1 }
+
+[[probes]]
+name = "door_center_top"
+type = "block_state"
+pos = { x = 4, y = 7, z = 1 }
+
+[[probes]]
+name = "door_right_top"
+type = "block_state"
+pos = { x = 5, y = 7, z = 1 }
+
+[[probes]]
+name = "left_bottom_extended"
+type = "property"
+pos = { x = 1, y = 5, z = 1 }
+property = "extended"
+
+[[probes]]
+name = "left_middle_extended"
+type = "property"
+pos = { x = 1, y = 6, z = 1 }
+property = "extended"
+
+[[probes]]
+name = "left_top_extended"
+type = "property"
+pos = { x = 1, y = 7, z = 1 }
+property = "extended"
+
+[[probes]]
+name = "right_bottom_extended"
+type = "property"
+pos = { x = 7, y = 5, z = 1 }
+property = "extended"
+
+[[probes]]
+name = "right_middle_extended"
+type = "property"
+pos = { x = 7, y = 6, z = 1 }
+property = "extended"
+
+[[probes]]
+name = "right_top_extended"
+type = "property"
+pos = { x = 7, y = 7, z = 1 }
+property = "extended"
+
+[[probes]]
+name = "lever_powered"
+type = "property"
+pos = { x = 3, y = 1, z = 0 }
+property = "powered"
+
+[[probes]]
+name = "center_lower_actuator"
+type = "block_state"
+pos = { x = 4, y = 2, z = 1 }
+
+[[probes]]
+name = "center_upper_actuator"
+type = "block_state"
+pos = { x = 4, y = 3, z = 1 }
+
+[[probes]]
+name = "center_original_slot"
+type = "block_state"
+pos = { x = 4, y = 4, z = 1 }
+
+[[probes]]
+name = "center_shifted_slot"
+type = "block_state"
+pos = { x = 5, y = 4, z = 1 }
+
+[[probes]]
+name = "center_power_block"
+type = "block_state"
+pos = { x = 6, y = 4, z = 1 }
+
+[[probes]]
+name = "center_power_observer"
+type = "block_state"
+pos = { x = 7, y = 4, z = 1 }
+
+[[probes]]
+name = "top_actuator"
+type = "block_state"
+pos = { x = 4, y = 9, z = 1 }
+
+[[probes]]
+name = "top_payload"
+type = "block_state"
+pos = { x = 4, y = 8, z = 1 }
+
+[[probes]]
+name = "top_observer"
+type = "block_state"
+pos = { x = 5, y = 9, z = 1 }
+
+[[probes]]
+name = "top_repeater"
+type = "block_state"
+pos = { x = 6, y = 9, z = 1 }
+
+[[probes]]
+name = "top_wire_left"
+type = "block_state"
+pos = { x = 7, y = 9, z = 1 }
+
+[[probes]]
+name = "top_wire_right"
+type = "block_state"
+pos = { x = 8, y = 9, z = 1 }
+
+[[expectations]]
+tick = 1
+probe = "door_center_middle"
+equals = { state = 0 }
+
+[[expectations]]
+tick = 1
+probe = "lever_powered"
+equals = "true"
+
+[[expectations]]
+tick = 450
+probe = "door_left_bottom"
+equals = { state = 11323 }
+
+[[expectations]]
+tick = 450
+probe = "door_center_bottom"
+equals = { state = 11323 }
+
+[[expectations]]
+tick = 450
+probe = "door_right_bottom"
+equals = { state = 11323 }
+
+[[expectations]]
+tick = 450
+probe = "door_left_middle"
+equals = { state = 11323 }
+
+[[expectations]]
+tick = 450
+probe = "door_center_middle"
+equals = { state = 11323 }
+
+[[expectations]]
+tick = 450
+probe = "door_right_middle"
+equals = { state = 11323 }
+
+[[expectations]]
+tick = 450
+probe = "door_left_top"
+equals = { state = 11323 }
+
+[[expectations]]
+tick = 450
+probe = "door_center_top"
+equals = { state = 11323 }
+
+[[expectations]]
+tick = 450
+probe = "door_right_top"
+equals = { state = 11323 }
+
+[[expectations]]
+tick = 450
+probe = "lever_powered"
+equals = "false"
+
+[[expectations]]
+tick = 700
+probe = "door_left_bottom"
+equals = { state = 0 }
+
+[[expectations]]
+tick = 700
+probe = "door_center_bottom"
+equals = { state = 0 }
+
+[[expectations]]
+tick = 700
+probe = "door_right_bottom"
+equals = { state = 0 }
+
+[[expectations]]
+tick = 700
+probe = "door_left_middle"
+equals = { state = 0 }
+
+[[expectations]]
+tick = 700
+probe = "door_center_middle"
+equals = { state = 0 }
+
+[[expectations]]
+tick = 700
+probe = "door_right_middle"
+equals = { state = 0 }
+
+[[expectations]]
+tick = 700
+probe = "door_left_top"
+equals = { state = 0 }
+
+[[expectations]]
+tick = 700
+probe = "door_center_top"
+equals = { state = 0 }
+
+[[expectations]]
+tick = 700
+probe = "door_right_top"
+equals = { state = 0 }
+
+[[expectations]]
+tick = 700
+probe = "lever_powered"
+equals = "true"

@@ -63,6 +63,38 @@ fn container(kind: &str, slots: &[(&str, i64)]) -> BlockEntityData {
     }
 }
 
+async fn comparator_output_for_source(
+    mut registry: Java26Registry,
+    source: BlockStateId,
+) -> ProbeValue {
+    let comparator = state(
+        &mut registry,
+        "minecraft:comparator",
+        &[
+            ("facing", "north"),
+            ("mode", "compare"),
+            ("powered", "false"),
+        ],
+    );
+    let mut world = SparseWorld::new(registry.air_state());
+    world.set_block(BlockPos::ZERO, comparator).unwrap();
+    world.set_block(BlockPos::new(0, 0, -1), source).unwrap();
+    let rules = Java26Rules::new(registry);
+    let mut simulation = Simulation::load(rules, world, SimulationConfig::default())
+        .await
+        .unwrap();
+    simulation.add_probe(
+        "output",
+        Probe::Signal {
+            pos: BlockPos::ZERO,
+            direction: Some(Direction::North),
+        },
+    );
+    simulation.initialize().await.unwrap();
+    simulation.step().await.unwrap();
+    simulation.step().await.unwrap().probes[0].value.clone()
+}
+
 #[tokio::test]
 async fn redstone_block_powers_a_wire_in_both_modes() {
     for mode in [RedstoneMode::Default, RedstoneMode::Experimental] {
@@ -296,6 +328,92 @@ async fn observer_emits_a_two_tick_pulse_after_observed_change() {
     let unpowered = simulation.world().get_block(BlockPos::ZERO);
     assert_eq!(
         simulation.rules().registry().state(unpowered).unwrap().property("powered"),
+        Some("false")
+    );
+}
+
+#[tokio::test]
+async fn observers_detect_triggered_containers_and_observer_state_changes() {
+    let mut registry = Java26Registry::new();
+    let dropper = state(
+        &mut registry,
+        "minecraft:dropper",
+        &[("facing", "north"), ("triggered", "false")],
+    );
+    let vertical_observer = state(
+        &mut registry,
+        "minecraft:observer",
+        &[("facing", "down"), ("powered", "false")],
+    );
+    let horizontal_observer = state(
+        &mut registry,
+        "minecraft:observer",
+        &[("facing", "west"), ("powered", "false")],
+    );
+    let source = state(&mut registry, "minecraft:redstone_block", &[]);
+    let dropper_pos = BlockPos::ZERO;
+    let vertical_pos = BlockPos::new(0, 1, 0);
+    let horizontal_pos = BlockPos::new(1, 1, 0);
+    let mut world = SparseWorld::new(registry.air_state());
+    world.set_block(dropper_pos, dropper).unwrap();
+    world.set_block(vertical_pos, vertical_observer).unwrap();
+    world.set_block(horizontal_pos, horizontal_observer).unwrap();
+    world.set_block_entity(dropper_pos, container("minecraft:dropper", &[]));
+    let rules = Java26Rules::new(registry);
+    let mut simulation = Simulation::load(rules, world, SimulationConfig::default())
+        .await
+        .unwrap();
+
+    simulation.initialize().await.unwrap();
+    simulation
+        .step_with_actions(&[Action::SetBlock {
+            pos: BlockPos::new(-1, 0, 0),
+            state: source,
+        }])
+        .await
+        .unwrap();
+    simulation.run_until(redstone_core::GameTick(5)).await.unwrap();
+
+    let vertical = simulation.world().get_block(vertical_pos);
+    assert_eq!(
+        simulation.rules().registry().state(vertical).unwrap().property("powered"),
+        Some("false")
+    );
+    let horizontal = simulation.world().get_block(horizontal_pos);
+    assert_eq!(
+        simulation.rules().registry().state(horizontal).unwrap().property("powered"),
+        Some("true")
+    );
+}
+
+#[tokio::test]
+async fn observer_ignores_secondary_updates_from_an_unchanged_conductor() {
+    let mut registry = Java26Registry::new();
+    let source = state(&mut registry, "minecraft:redstone_block", &[]);
+    let wire = wire(&mut registry, 0);
+    let stone = state(&mut registry, "minecraft:stone", &[]);
+    let observer = state(
+        &mut registry,
+        "minecraft:observer",
+        &[("facing", "east"), ("powered", "false")],
+    );
+    let observer_pos = BlockPos::new(0, 1, 0);
+    let mut world = SparseWorld::new(registry.air_state());
+    world.set_block(observer_pos, observer).unwrap();
+    world.set_block(BlockPos::new(1, 1, 0), stone).unwrap();
+    world.set_block(BlockPos::new(1, 0, 0), wire).unwrap();
+    world.set_block(BlockPos::new(2, 0, 0), source).unwrap();
+    let rules = Java26Rules::new(registry);
+    let mut simulation = Simulation::load(rules, world, SimulationConfig::default())
+        .await
+        .unwrap();
+
+    simulation.initialize().await.unwrap();
+    simulation.run_until(redstone_core::GameTick(2)).await.unwrap();
+
+    let observer = simulation.world().get_block(observer_pos);
+    assert_eq!(
+        simulation.rules().registry().state(observer).unwrap().property("powered"),
         Some("false")
     );
 }
@@ -575,6 +693,197 @@ async fn floor_sources_strongly_power_the_block_below() {
         assert_eq!(
             simulation.rules().registry().state(lit).unwrap().property("lit"),
             Some("true")
+        );
+    }
+}
+
+#[tokio::test]
+async fn floor_torch_notifies_consumers_around_its_strongly_powered_block() {
+    let mut registry = Java26Registry::new();
+    let lever = state(
+        &mut registry,
+        "minecraft:lever",
+        &[("face", "wall"), ("facing", "north"), ("powered", "true")],
+    );
+    let torch = state(&mut registry, "minecraft:redstone_torch", &[("lit", "false")]);
+    let stone = state(&mut registry, "minecraft:stone", &[]);
+    let lamp = state(&mut registry, "minecraft:redstone_lamp", &[("lit", "false")]);
+    let lever_pos = BlockPos::new(0, 0, -1);
+    let support_pos = BlockPos::ZERO;
+    let torch_pos = BlockPos::new(0, 1, 0);
+    let powered_block_pos = BlockPos::new(0, 2, 0);
+    let lamp_pos = BlockPos::new(1, 2, 0);
+    let mut world = SparseWorld::new(registry.air_state());
+    world.set_block(lever_pos, lever).unwrap();
+    world.set_block(support_pos, stone).unwrap();
+    world.set_block(torch_pos, torch).unwrap();
+    world.set_block(powered_block_pos, stone).unwrap();
+    world.set_block(lamp_pos, lamp).unwrap();
+    let rules = Java26Rules::new(registry);
+    let mut simulation = Simulation::load(rules, world, SimulationConfig::default())
+        .await
+        .unwrap();
+
+    simulation
+        .step_with_actions(&[Action::PullLever { pos: lever_pos }])
+        .await
+        .unwrap();
+    simulation.run_until(redstone_core::GameTick(4)).await.unwrap();
+
+    let lit_torch = simulation.world().get_block(torch_pos);
+    assert_eq!(
+        simulation.rules().registry().state(lit_torch).unwrap().property("lit"),
+        Some("true")
+    );
+    let lit_lamp = simulation.world().get_block(lamp_pos);
+    assert_eq!(
+        simulation.rules().registry().state(lit_lamp).unwrap().property("lit"),
+        Some("true")
+    );
+}
+
+#[tokio::test]
+async fn copper_bulb_updates_a_comparator_and_its_output_conductor() {
+    let mut registry = Java26Registry::new();
+    let lever = state(
+        &mut registry,
+        "minecraft:lever",
+        &[("face", "floor"), ("facing", "north"), ("powered", "false")],
+    );
+    let copper_bulb = state(
+        &mut registry,
+        "minecraft:copper_bulb",
+        &[("lit", "false"), ("powered", "false")],
+    );
+    let comparator = state(
+        &mut registry,
+        "minecraft:comparator",
+        &[
+            ("facing", "west"),
+            ("mode", "compare"),
+            ("powered", "false"),
+        ],
+    );
+    let stone = state(&mut registry, "minecraft:stone", &[]);
+    let lamp = state(&mut registry, "minecraft:redstone_lamp", &[("lit", "false")]);
+    let bulb_pos = BlockPos::ZERO;
+    let lever_pos = BlockPos::new(0, 1, 0);
+    let comparator_pos = BlockPos::new(1, 0, 0);
+    let output_block_pos = BlockPos::new(2, 0, 0);
+    let lamp_pos = BlockPos::new(3, 0, 0);
+    let mut world = SparseWorld::new(registry.air_state());
+    world.set_block(bulb_pos, copper_bulb).unwrap();
+    world.set_block(lever_pos, lever).unwrap();
+    world.set_block(comparator_pos, comparator).unwrap();
+    world.set_block(output_block_pos, stone).unwrap();
+    world.set_block(lamp_pos, lamp).unwrap();
+    let rules = Java26Rules::new(registry);
+    let mut simulation = Simulation::load(rules, world, SimulationConfig::default())
+        .await
+        .unwrap();
+
+    simulation
+        .step_with_actions(&[Action::PullLever { pos: lever_pos }])
+        .await
+        .unwrap();
+    simulation.run_until(redstone_core::GameTick(3)).await.unwrap();
+
+    let lit_bulb = simulation.world().get_block(bulb_pos);
+    assert_eq!(
+        simulation.rules().registry().state(lit_bulb).unwrap().property("lit"),
+        Some("true")
+    );
+    let powered_comparator = simulation.world().get_block(comparator_pos);
+    assert_eq!(
+        simulation
+            .rules()
+            .registry()
+            .state(powered_comparator)
+            .unwrap()
+            .property("powered"),
+        Some("true")
+    );
+    let lit_lamp = simulation.world().get_block(lamp_pos);
+    assert_eq!(
+        simulation.rules().registry().state(lit_lamp).unwrap().property("lit"),
+        Some("true")
+    );
+}
+
+#[tokio::test]
+async fn state_backed_analog_sources_drive_comparators() {
+    let mut registry = Java26Registry::new();
+    let sources = [
+        (
+            state(
+                &mut registry,
+                "minecraft:water_cauldron",
+                &[("level", "3")],
+            ),
+            3,
+        ),
+        (
+            state(&mut registry, "minecraft:lava_cauldron", &[]),
+            3,
+        ),
+        (
+            state(
+                &mut registry,
+                "minecraft:powder_snow_cauldron",
+                &[("level", "2")],
+            ),
+            2,
+        ),
+        (
+            state(&mut registry, "minecraft:composter", &[("level", "8")]),
+            8,
+        ),
+        (
+            state(&mut registry, "minecraft:cake", &[("bites", "6")]),
+            2,
+        ),
+        (
+            state(
+                &mut registry,
+                "minecraft:beehive",
+                &[("facing", "north"), ("honey_level", "5")],
+            ),
+            5,
+        ),
+        (
+            state(
+                &mut registry,
+                "minecraft:end_portal_frame",
+                &[("eye", "true"), ("facing", "north")],
+            ),
+            15,
+        ),
+        (
+            state(
+                &mut registry,
+                "minecraft:respawn_anchor",
+                &[("charges", "3")],
+            ),
+            11,
+        ),
+        (
+            state(
+                &mut registry,
+                "minecraft:copper_golem_statue",
+                &[
+                    ("copper_golem_pose", "star"),
+                    ("facing", "north"),
+                    ("waterlogged", "false"),
+                ],
+            ),
+            4,
+        ),
+    ];
+
+    for (source, expected) in sources {
+        assert_eq!(
+            comparator_output_for_source(registry.clone(), source).await,
+            ProbeValue::Integer(expected)
         );
     }
 }

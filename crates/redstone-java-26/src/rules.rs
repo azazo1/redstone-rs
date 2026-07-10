@@ -15,8 +15,9 @@ mod inventory;
 mod piston;
 mod shape;
 mod consumer;
+mod comparator;
 
-use inventory::{block_entity_i64, container_signal};
+use inventory::block_entity_i64;
 
 pub struct Java26Rules {
     registry: Java26Registry,
@@ -76,9 +77,12 @@ impl Java26Rules {
             |state| Some(state.kind),
         );
         if let Some(source_block) = source_block {
+            let changed_state = self.state(state)?.clone();
+            if matches!(changed_state.behavior, BlockBehavior::Torch { .. }) {
+                update_torch_output_neighbors(ctx, pos, &changed_state);
+            }
             if let Some(orientation) = orientation {
                 let orientation = Orientation::from_index(orientation);
-                let changed_state = self.state(state)?.clone();
                 for direction in orientation.directions() {
                     if matches!(changed_state.behavior, BlockBehavior::Wire)
                         && !wire_connects_for_update(&changed_state, direction)
@@ -182,8 +186,54 @@ impl Java26Rules {
         }
         self.sync_entity_sensor(pos, old, state);
         let definition = self.state(state)?.clone();
+        let facing = definition
+            .direction_property("facing")
+            .unwrap_or(Direction::North);
+        self.notify_observers_of_shape_change(
+            ctx,
+            pos,
+            Some(pos.relative(facing.opposite())),
+        )?;
         self.update_diode_output_neighbors(ctx, pos, &definition);
         Ok(true)
+    }
+
+    fn set_state_and_notify_observers(
+        &mut self,
+        ctx: &mut EventContext<'_>,
+        pos: BlockPos,
+        state: BlockStateId,
+        cause: &str,
+    ) -> Result<bool, RulesError> {
+        let old = ctx.set_block(pos, state, cause)?;
+        if old == state {
+            return Ok(false);
+        }
+        self.sync_entity_sensor(pos, old, state);
+        self.notify_observers_of_shape_change(ctx, pos, None)?;
+        Ok(true)
+    }
+
+    fn notify_observers_of_shape_change(
+        &mut self,
+        ctx: &mut EventContext<'_>,
+        source_pos: BlockPos,
+        skip_pos: Option<BlockPos>,
+    ) -> Result<(), RulesError> {
+        for direction in Direction::UPDATE_ORDER {
+            let observer_pos = source_pos.relative(direction);
+            if Some(observer_pos) == skip_pos {
+                continue;
+            }
+            let observer_state_id = ctx.world.get_block(observer_pos);
+            if self
+                .state(observer_state_id)
+                .is_ok_and(|state| matches!(state.behavior, BlockBehavior::Observer))
+            {
+                self.refresh_observer(ctx, observer_pos, observer_state_id, source_pos)?;
+            }
+        }
+        Ok(())
     }
 
     fn sync_entity_sensor(
@@ -672,24 +722,30 @@ impl Java26Rules {
     ) -> u8 {
         let facing = state.direction_property("facing").unwrap_or(Direction::North);
         let rear = pos.relative(facing);
-        if let Some(value) = container_signal(world, rear) {
+        if let Some(value) = self.analog_output(world, rear, facing.opposite()) {
             return value;
-        }
-        if let Some(value) = block_entity_i64(world, rear, "comparator_output") {
-            return value.clamp(0, 15) as u8;
         }
         let direct = self.signal(world, rear, facing);
         let rear_state = self.state(world.get_block(rear)).ok();
         if direct < 15 && rear_state.is_some_and(|state| state.redstone_conductor) {
             let far = rear.relative(facing);
-            let far_output = container_signal(world, far)
-                .or_else(|| block_entity_i64(world, far, "comparator_output").map(|value| value.clamp(0, 15) as u8))
+            let far_output = self
+                .analog_output(world, far, facing.opposite())
                 .or_else(|| item_frame_output(world, far, facing));
             if let Some(output) = far_output {
                 return output;
             }
         }
         direct
+    }
+
+    fn analog_output(
+        &self,
+        world: &SparseWorld,
+        pos: BlockPos,
+        direction: Direction,
+    ) -> Option<u8> {
+        comparator::analog_output(&self.registry, world, pos, direction)
     }
 
     fn refresh_comparator(
@@ -733,6 +789,7 @@ impl Java26Rules {
         ctx: &mut EventContext<'_>,
         pos: BlockPos,
         state_id: BlockStateId,
+        notify_observers: bool,
     ) -> Result<(), RulesError> {
         let state = self.state(state_id)?.clone();
         let powered = self.is_powered(ctx.world, pos)
@@ -741,11 +798,19 @@ impl Java26Rules {
         let triggered = state.bool_property("triggered");
         if powered && !triggered {
             let next = self.changed_state(state.id, "triggered", "true")?;
-            ctx.set_block(pos, next, "container_trigger")?;
             ctx.schedule_tick(pos, state.kind, 4, TickPriority::Normal);
+            if notify_observers {
+                self.set_state_and_notify_observers(ctx, pos, next, "container_trigger")?;
+            } else {
+                ctx.set_block(pos, next, "container_trigger")?;
+            }
         } else if !powered && triggered {
             let next = self.changed_state(state.id, "triggered", "false")?;
-            ctx.set_block(pos, next, "container_untrigger")?;
+            if notify_observers {
+                self.set_state_and_notify_observers(ctx, pos, next, "container_untrigger")?;
+            } else {
+                ctx.set_block(pos, next, "container_untrigger")?;
+            }
         }
         Ok(())
     }
@@ -956,7 +1021,7 @@ impl BlockRules for Java26Rules {
                 BlockBehavior::Comparator => self.refresh_comparator(ctx, *pos, state_id)?,
                 BlockBehavior::Piston { .. } => self.refresh_piston(ctx, *pos, state_id)?,
                 BlockBehavior::Dropper | BlockBehavior::Dispenser | BlockBehavior::Crafter => {
-                    self.refresh_triggered_container(ctx, *pos, state_id)?
+                    self.refresh_triggered_container(ctx, *pos, state_id, false)?
                 }
                 BlockBehavior::Lamp
                 | BlockBehavior::CopperBulb
@@ -1081,10 +1146,16 @@ impl BlockRules for Java26Rules {
             BlockBehavior::Repeater => self.refresh_repeater(ctx, update.pos, state_id)?,
             BlockBehavior::Comparator => self.refresh_comparator(ctx, update.pos, state_id)?,
             BlockBehavior::Observer => {
-                self.refresh_observer(ctx, update.pos, state_id, update.source_pos)?
+                let source_matches = self
+                    .registry
+                    .state(ctx.world.get_block(update.source_pos))
+                    .is_some_and(|source| source.kind == update.source_block);
+                if source_matches {
+                    self.refresh_observer(ctx, update.pos, state_id, update.source_pos)?;
+                }
             }
             BlockBehavior::Dropper | BlockBehavior::Dispenser | BlockBehavior::Crafter => {
-                self.refresh_triggered_container(ctx, update.pos, state_id)?
+                self.refresh_triggered_container(ctx, update.pos, state_id, true)?
             }
             BlockBehavior::Piston { .. } => self.refresh_piston(ctx, update.pos, state_id)?,
             BlockBehavior::Lamp
@@ -1899,6 +1970,45 @@ fn update_attached_power_neighbors(
     let attached = pos.relative(attached_direction(state).opposite());
     ctx.update_neighbors(pos, state.kind, None, None);
     ctx.update_neighbors(attached, state.kind, None, None);
+}
+
+fn update_torch_output_neighbors(
+    ctx: &mut EventContext<'_>,
+    pos: BlockPos,
+    state: &StateDefinition,
+) {
+    let orientation = match ctx.mode {
+        RedstoneMode::Default => None,
+        RedstoneMode::Experimental => {
+            let orientation = Orientation::from_index(ctx.random_bounded(48) as u8)
+                .with_side_bias(SideBias::Left)
+                .with_up(Direction::Up);
+            Some(match state.behavior {
+                BlockBehavior::Torch { wall: true } => orientation.with_front(
+                    state
+                        .direction_property("facing")
+                        .unwrap_or(Direction::North)
+                        .opposite(),
+                ),
+                _ => orientation,
+            })
+        }
+    };
+    for direction in [
+        Direction::Down,
+        Direction::Up,
+        Direction::North,
+        Direction::South,
+        Direction::West,
+        Direction::East,
+    ] {
+        ctx.update_neighbors(
+            pos.relative(direction),
+            state.kind,
+            None,
+            orientation.map(|orientation| orientation.with_front(direction).index()),
+        );
+    }
 }
 
 fn torch_input_direction(state: &StateDefinition) -> Direction {
