@@ -33,7 +33,11 @@ impl BlockRules for MockRules {
     }
 
     fn block_name(&self, state: BlockStateId) -> &str {
-        if state == BLOCK { "test:block" } else { "test:air" }
+        if state == BLOCK {
+            "test:block"
+        } else {
+            "test:air"
+        }
     }
 
     fn is_supported(&self, _state: BlockStateId) -> bool {
@@ -123,9 +127,7 @@ impl BlockRules for MockRules {
             .world
             .block_entity(pos)
             .is_some_and(|data| data.kind == "test:mutable");
-        if directly_mutated
-            && let Some(data) = ctx.world.block_entity_mut(pos)
-        {
+        if directly_mutated && let Some(data) = ctx.world.block_entity_mut(pos) {
             let counter = data
                 .fields
                 .get("counter")
@@ -274,23 +276,18 @@ async fn direct_block_entity_mutation_is_recorded_as_an_update() {
             fields: BTreeMap::from([("counter".to_owned(), serde_json::Value::from(0))]),
         },
     );
-    let mut simulation = Simulation::load(
-        MockRules::default(),
-        world,
-        SimulationConfig::default(),
-    )
-    .await
-    .unwrap();
+    let mut simulation = Simulation::load(MockRules::default(), world, SimulationConfig::default())
+        .await
+        .unwrap();
 
     let delta = simulation.step().await.unwrap();
-    let [WorldEvent::BlockEntity {
-        change:
-            BlockEntityChange::Update {
-                old_data,
-                new_data,
-                ..
+    let [
+        WorldEvent::BlockEntity {
+            change: BlockEntityChange::Update {
+                old_data, new_data, ..
             },
-    }] = delta.events.as_slice()
+        },
+    ] = delta.events.as_slice()
     else {
         panic!("expected one block entity update: {:?}", delta.events);
     };
@@ -314,7 +311,9 @@ async fn scheduled_ticks_added_during_execution_wait_for_next_game_tick() {
     .unwrap();
 
     simulation
-        .step_with_actions(&[Action::UseBlock { pos: BlockPos::ZERO }])
+        .step_with_actions(&[Action::UseBlock {
+            pos: BlockPos::ZERO,
+        }])
         .await
         .unwrap();
     assert_eq!(simulation.rules().scheduled_executions, 1);
@@ -327,8 +326,7 @@ async fn scheduled_ticks_added_during_execution_wait_for_next_game_tick() {
         .events()
         .iter()
         .filter_map(|event| {
-            matches!(event.kind, TraceKind::ScheduledTickExecuted { .. })
-                .then_some(event.tick.0)
+            matches!(event.kind, TraceKind::ScheduledTickExecuted { .. }).then_some(event.tick.0)
         })
         .collect::<Vec<_>>();
     assert_eq!(executed_ticks, vec![1, 2]);
@@ -338,16 +336,14 @@ async fn scheduled_ticks_added_during_execution_wait_for_next_game_tick() {
 async fn nested_neighbor_update_preempts_multi_update_continuation() {
     let mut world = SparseWorld::new(AIR);
     world.set_block(BlockPos::ZERO, BLOCK).unwrap();
-    let mut simulation = Simulation::load(
-        MockRules::default(),
-        world,
-        SimulationConfig::default(),
-    )
-    .await
-    .unwrap();
+    let mut simulation = Simulation::load(MockRules::default(), world, SimulationConfig::default())
+        .await
+        .unwrap();
 
     simulation
-        .step_with_actions(&[Action::PullLever { pos: BlockPos::ZERO }])
+        .step_with_actions(&[Action::PullLever {
+            pos: BlockPos::ZERO,
+        }])
         .await
         .unwrap();
 
@@ -376,13 +372,9 @@ async fn block_entity_neighbor_updates_finish_before_the_next_registered_entity_
             },
         );
     }
-    let mut simulation = Simulation::load(
-        MockRules::default(),
-        world,
-        SimulationConfig::default(),
-    )
-    .await
-    .unwrap();
+    let mut simulation = Simulation::load(MockRules::default(), world, SimulationConfig::default())
+        .await
+        .unwrap();
 
     simulation.step().await.unwrap();
 
@@ -401,16 +393,14 @@ async fn block_entity_neighbor_updates_finish_before_the_next_registered_entity_
 async fn deferred_scheduled_tick_is_queued_after_synchronous_neighbor_updates() {
     let mut world = SparseWorld::new(AIR);
     world.set_block(BlockPos::ZERO, BLOCK).unwrap();
-    let mut simulation = Simulation::load(
-        MockRules::default(),
-        world,
-        SimulationConfig::default(),
-    )
-    .await
-    .unwrap();
+    let mut simulation = Simulation::load(MockRules::default(), world, SimulationConfig::default())
+        .await
+        .unwrap();
 
     simulation
-        .step_with_actions(&[Action::PressButton { pos: BlockPos::ZERO }])
+        .step_with_actions(&[Action::PressButton {
+            pos: BlockPos::ZERO,
+        }])
         .await
         .unwrap();
 
@@ -436,16 +426,14 @@ async fn deferred_block_changes_are_applied_after_synchronous_neighbor_updates()
         fields: BTreeMap::new(),
     };
     world.set_block_entity(BlockPos::ZERO, block_entity.clone());
-    let mut simulation = Simulation::load(
-        MockRules::default(),
-        world,
-        SimulationConfig::default(),
-    )
-    .await
-    .unwrap();
+    let mut simulation = Simulation::load(MockRules::default(), world, SimulationConfig::default())
+        .await
+        .unwrap();
 
     let delta = simulation
-        .step_with_actions(&[Action::BreakBlock { pos: BlockPos::ZERO }])
+        .step_with_actions(&[Action::BreakBlock {
+            pos: BlockPos::ZERO,
+        }])
         .await
         .unwrap();
 
@@ -499,9 +487,16 @@ async fn identical_runs_produce_byte_identical_jsonl_and_vcd() {
         )
         .await
         .unwrap();
-        simulation.add_probe("counter", Probe::EventCount { kind: "counter".to_owned() });
+        simulation.add_probe(
+            "counter",
+            Probe::EventCount {
+                kind: "counter".to_owned(),
+            },
+        );
         simulation
-            .step_with_actions(&[Action::UseBlock { pos: BlockPos::ZERO }])
+            .step_with_actions(&[Action::UseBlock {
+                pos: BlockPos::ZERO,
+            }])
             .await
             .unwrap();
         simulation.step().await.unwrap();

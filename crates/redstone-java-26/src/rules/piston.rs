@@ -1,8 +1,8 @@
 use std::collections::BTreeMap;
 
 use redstone_core::{
-    BlockEntityData, BlockEvent, BlockPos, BlockStateId, DeferredRuleTask, Direction,
-    EventContext, NeighborUpdate, RedstoneMode, RulesError, SparseWorld,
+    BlockEntityData, BlockEvent, BlockPos, BlockStateId, DeferredRuleTask, Direction, EventContext,
+    NeighborUpdate, RedstoneMode, RulesError, SparseWorld,
 };
 
 use crate::orientation::{Orientation, SideBias};
@@ -49,7 +49,9 @@ impl Java26Rules {
         state: &StateDefinition,
         update: NeighborUpdate,
     ) -> Result<(), RulesError> {
-        let facing = state.direction_property("facing").unwrap_or(Direction::North);
+        let facing = state
+            .direction_property("facing")
+            .unwrap_or(Direction::North);
         let base_pos = pos.relative(facing.opposite());
         let base = self.state(ctx.world.get_block(base_pos))?;
         let expected_sticky = state.property("type") == Some("sticky");
@@ -82,7 +84,9 @@ impl Java26Rules {
         state_id: BlockStateId,
     ) -> Result<(), RulesError> {
         let state = self.state(state_id)?.clone();
-        let facing = state.direction_property("facing").unwrap_or(Direction::North);
+        let facing = state
+            .direction_property("facing")
+            .unwrap_or(Direction::North);
         let should_extend = self.is_quasi_powered(ctx.world, pos, facing);
         let extended = state.bool_property("extended");
         if should_extend != extended {
@@ -140,7 +144,9 @@ impl Java26Rules {
         event: i32,
     ) -> Result<bool, RulesError> {
         let state = self.state(state_id)?.clone();
-        let facing = state.direction_property("facing").unwrap_or(Direction::North);
+        let facing = state
+            .direction_property("facing")
+            .unwrap_or(Direction::North);
         let sticky = matches!(state.behavior, BlockBehavior::Piston { sticky: true });
         if event == 0 {
             if !self.is_quasi_powered(ctx.world, pos, facing) {
@@ -265,14 +271,7 @@ impl Java26Rules {
                     ],
                 )
                 .map_err(|error| RulesError::Message(error.to_string()))?;
-            self.set_piston_state(
-                ctx,
-                destination,
-                moving,
-                "piston_moving_block",
-                true,
-                true,
-            )?;
+            self.set_piston_state(ctx, destination, moving, "piston_moving_block", true, true)?;
             ctx.set_block_entity(
                 destination,
                 moving_block_entity(
@@ -310,14 +309,7 @@ impl Java26Rules {
                 )
                 .map_err(|error| RulesError::Message(error.to_string()))?;
             let head_pos = movement.piston_pos.relative(movement.piston_facing);
-            self.set_piston_state(
-                ctx,
-                head_pos,
-                moving_head,
-                "piston_moving_head",
-                true,
-                true,
-            )?;
+            self.set_piston_state(ctx, head_pos, moving_head, "piston_moving_head", true, true)?;
             ctx.set_block_entity(
                 head_pos,
                 moving_block_entity(
@@ -378,7 +370,9 @@ impl Java26Rules {
         event: i32,
     ) -> Result<(), RulesError> {
         let state = self.state(state_id)?.clone();
-        let facing = state.direction_property("facing").unwrap_or(Direction::North);
+        let facing = state
+            .direction_property("facing")
+            .unwrap_or(Direction::North);
         let sticky = matches!(state.behavior, BlockBehavior::Piston { sticky: true });
         let head_pos = pos.relative(facing);
         let head_propagates = self
@@ -546,14 +540,7 @@ impl Java26Rules {
         self.update_moved_observer_from_neighbor_shapes(ctx, pos, final_state)?;
         ctx.remove_block_entity(pos);
         let old = ctx.set_block(pos, final_state, "piston_movement_settle")?;
-        let final_state = self.apply_observer_lifecycle(
-            ctx,
-            pos,
-            old,
-            final_state,
-            true,
-            true,
-        )?;
+        let final_state = self.apply_observer_lifecycle(ctx, pos, old, final_state, true, true)?;
         self.sync_entity_sensor(pos, old, final_state);
         ctx.update_neighbors(pos, self.state(old)?.kind, None, None);
         self.queue_neighbor_shape_updates(ctx, pos);
@@ -591,14 +578,7 @@ impl Java26Rules {
         if old == state {
             return Ok(false);
         }
-        let state = self.apply_observer_lifecycle(
-            ctx,
-            pos,
-            old,
-            state,
-            moved_by_piston,
-            true,
-        )?;
+        let state = self.apply_observer_lifecycle(ctx, pos, old, state, moved_by_piston, true)?;
         self.sync_entity_sensor(pos, old, state);
         if update_shapes {
             self.update_neighbor_shapes(ctx, pos)?;
@@ -630,8 +610,7 @@ impl Java26Rules {
             }
             return Err(RulesError::Message(format!(
                 "piston cannot push {} at {:?}",
-                first.name,
-                resolution.start
+                first.name, resolution.start
             )));
         }
         if !self.add_piston_block_line(
@@ -639,7 +618,9 @@ impl Java26Rules {
             resolution.start,
             resolution.push_direction,
         )? {
-            return Err(RulesError::Message("piston structure cannot move".to_owned()));
+            return Err(RulesError::Message(
+                "piston structure cannot move".to_owned(),
+            ));
         }
         let mut index = 0;
         while index < resolver.to_push.len() {
@@ -647,7 +628,9 @@ impl Java26Rules {
             if is_sticky_block(&self.state(resolver.world.get_block(pos))?.name)
                 && !self.add_piston_branches(&mut resolver, pos)?
             {
-                return Err(RulesError::Message("piston sticky branch cannot move".to_owned()));
+                return Err(RulesError::Message(
+                    "piston sticky branch cannot move".to_owned(),
+                ));
             }
             index += 1;
         }
@@ -659,10 +642,20 @@ impl Java26Rules {
         } = resolver;
         let mut result = to_push
             .into_iter()
-            .map(|pos| (pos, self.state(world.get_block(pos)).map(|state| state.push_reaction)))
+            .map(|pos| {
+                (
+                    pos,
+                    self.state(world.get_block(pos))
+                        .map(|state| state.push_reaction),
+                )
+            })
             .map(|(pos, reaction)| reaction.map(|reaction| (pos, reaction)))
             .collect::<Result<Vec<_>, _>>()?;
-        result.extend(to_destroy.into_iter().map(|pos| (pos, PushReaction::Destroy)));
+        result.extend(
+            to_destroy
+                .into_iter()
+                .map(|pos| (pos, PushReaction::Destroy)),
+        );
         Ok(result)
     }
 
@@ -674,12 +667,7 @@ impl Java26Rules {
     ) -> Result<bool, RulesError> {
         let mut next = self.state(resolver.world.get_block(start))?;
         if next.id == self.registry.air_state()
-            || !self.piston_can_push(
-                next,
-                resolver.push_direction,
-                false,
-                connection_direction,
-            )
+            || !self.piston_can_push(next, resolver.push_direction, false, connection_direction)
             || start == resolver.piston_pos
             || resolver.to_push.contains(&start)
         {
@@ -711,9 +699,11 @@ impl Java26Rules {
             }
         }
         for offset in (0..block_count).rev() {
-            resolver
-                .to_push
-                .push(relative_n(start, resolver.push_direction.opposite(), offset));
+            resolver.to_push.push(relative_n(
+                start,
+                resolver.push_direction.opposite(),
+                offset,
+            ));
         }
         let mut blocks_added = block_count;
         let mut offset = 1usize;
@@ -740,12 +730,8 @@ impl Java26Rules {
             if next.id == self.registry.air_state() {
                 return Ok(true);
             }
-            if !self.piston_can_push(
-                next,
-                resolver.push_direction,
-                true,
-                resolver.push_direction,
-            ) || pos == resolver.piston_pos
+            if !self.piston_can_push(next, resolver.push_direction, true, resolver.push_direction)
+                || pos == resolver.piston_pos
             {
                 return Ok(false);
             }
@@ -775,11 +761,7 @@ impl Java26Rules {
             let neighbor_pos = from_pos.relative(direction);
             let neighbor = self.state(resolver.world.get_block(neighbor_pos))?;
             if sticks_to(&neighbor.name, &from.name)
-                && !self.add_piston_block_line(
-                    resolver,
-                    neighbor_pos,
-                    direction,
-                )?
+                && !self.add_piston_block_line(resolver, neighbor_pos, direction)?
             {
                 return Ok(false);
             }
@@ -856,9 +838,7 @@ fn reorder_piston_blocks(to_push: &mut Vec<BlockPos>, blocks_added: usize, colli
 fn same_axis(left: Direction, right: Direction) -> bool {
     let (left_x, left_y, left_z) = left.step();
     let (right_x, right_y, right_z) = right.step();
-    (left_x != 0 && right_x != 0)
-        || (left_y != 0 && right_y != 0)
-        || (left_z != 0 && right_z != 0)
+    (left_x != 0 && right_x != 0) || (left_y != 0 && right_y != 0) || (left_z != 0 && right_z != 0)
 }
 
 fn java_hash_bucket(pos: BlockPos) -> u32 {
@@ -880,7 +860,10 @@ fn moving_block_entity(
     moved_block_entity: Option<BlockEntityData>,
 ) -> BlockEntityData {
     let mut fields = BTreeMap::from([
-        ("moved_state".to_owned(), serde_json::Value::from(moved_state.id.0)),
+        (
+            "moved_state".to_owned(),
+            serde_json::Value::from(moved_state.id.0),
+        ),
         (
             "moved_state_name".to_owned(),
             serde_json::Value::String(moved_state.name.clone()),
@@ -889,8 +872,14 @@ fn moving_block_entity(
             "moved_state_properties".to_owned(),
             serde_json::to_value(&moved_state.properties).unwrap_or_default(),
         ),
-        ("direction".to_owned(), serde_json::Value::from(direction_name(direction))),
-        ("settle_tick".to_owned(), serde_json::Value::from(settle_tick)),
+        (
+            "direction".to_owned(),
+            serde_json::Value::from(direction_name(direction)),
+        ),
+        (
+            "settle_tick".to_owned(),
+            serde_json::Value::from(settle_tick),
+        ),
         ("extending".to_owned(), serde_json::Value::Bool(extending)),
         ("source".to_owned(), serde_json::Value::Bool(source)),
     ]);

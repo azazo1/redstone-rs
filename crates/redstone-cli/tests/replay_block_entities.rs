@@ -105,7 +105,10 @@ fn structure() -> Vec<u8> {
             [0, 0, 0],
             0,
             HashMap::from([
-                ("id".to_owned(), Value::String("minecraft:hopper".to_owned())),
+                (
+                    "id".to_owned(),
+                    Value::String("minecraft:hopper".to_owned()),
+                ),
                 ("Items".to_owned(), Value::List(Vec::new())),
                 ("TransferCooldown".to_owned(), Value::Int(0)),
             ]),
@@ -119,7 +122,10 @@ fn structure() -> Vec<u8> {
                     "Items".to_owned(),
                     Value::List(vec![Value::Compound(HashMap::from([
                         ("Slot".to_owned(), Value::Byte(0)),
-                        ("id".to_owned(), Value::String("minecraft:redstone".to_owned())),
+                        (
+                            "id".to_owned(),
+                            Value::String("minecraft:redstone".to_owned()),
+                        ),
                         ("count".to_owned(), Value::Int(2)),
                         (
                             "components".to_owned(),
@@ -163,9 +169,7 @@ fn block_state(name: &str, properties: &[(&str, &str)]) -> Value {
             Value::Compound(
                 properties
                     .iter()
-                    .map(|(key, value)| {
-                        ((*key).to_owned(), Value::String((*value).to_owned()))
-                    })
+                    .map(|(key, value)| ((*key).to_owned(), Value::String((*value).to_owned())))
                     .collect(),
             ),
         ),
@@ -285,8 +289,13 @@ fn nbt_int_field(nbt: &[u8], name: &str) -> Option<i32> {
     pattern.push(3);
     pattern.extend_from_slice(&(name.len() as u16).to_be_bytes());
     pattern.extend_from_slice(name);
-    let offset = nbt.windows(pattern.len()).position(|value| value == pattern)? + pattern.len();
-    Some(i32::from_be_bytes(nbt.get(offset..offset + 4)?.try_into().ok()?))
+    let offset = nbt
+        .windows(pattern.len())
+        .position(|value| value == pattern)?
+        + pattern.len();
+    Some(i32::from_be_bytes(
+        nbt.get(offset..offset + 4)?.try_into().ok()?,
+    ))
 }
 
 struct Cursor<'a> {

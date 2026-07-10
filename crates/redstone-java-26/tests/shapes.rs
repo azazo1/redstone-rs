@@ -3,11 +3,7 @@ use std::collections::BTreeMap;
 use redstone_core::{Action, BlockPos, BlockStateId, Simulation, SimulationConfig, SparseWorld};
 use redstone_java_26::{Java26Registry, Java26Rules, StateResolver};
 
-fn state(
-    registry: &mut Java26Registry,
-    name: &str,
-    properties: &[(&str, &str)],
-) -> BlockStateId {
+fn state(registry: &mut Java26Registry, name: &str, properties: &[(&str, &str)]) -> BlockStateId {
     registry
         .resolve_state(
             name,
@@ -133,17 +129,29 @@ async fn tripwire_connects_only_to_an_aligned_hook() {
     let aligned_hook = state(
         &mut registry,
         "minecraft:tripwire_hook",
-        &[("attached", "false"), ("facing", "west"), ("powered", "false")],
+        &[
+            ("attached", "false"),
+            ("facing", "west"),
+            ("powered", "false"),
+        ],
     );
     let crossed_hook = state(
         &mut registry,
         "minecraft:tripwire_hook",
-        &[("attached", "false"), ("facing", "east"), ("powered", "false")],
+        &[
+            ("attached", "false"),
+            ("facing", "east"),
+            ("powered", "false"),
+        ],
     );
     let mut world = SparseWorld::new(registry.air_state());
     world.set_block(BlockPos::ZERO, tripwire).unwrap();
-    world.set_block(BlockPos::new(1, 0, 0), aligned_hook).unwrap();
-    world.set_block(BlockPos::new(0, 0, 1), crossed_hook).unwrap();
+    world
+        .set_block(BlockPos::new(1, 0, 0), aligned_hook)
+        .unwrap();
+    world
+        .set_block(BlockPos::new(0, 0, 1), crossed_hook)
+        .unwrap();
     let rules = Java26Rules::new(registry);
     let mut simulation = Simulation::load(rules, world, SimulationConfig::default())
         .await

@@ -362,10 +362,7 @@ fn scheduler_structure() -> Vec<u8> {
         ("locked".to_owned(), Value::String("false".to_owned())),
         ("powered".to_owned(), Value::String("false".to_owned())),
     ]);
-    let target_properties = HashMap::from([(
-        "power".to_owned(),
-        Value::String("0".to_owned()),
-    )]);
+    let target_properties = HashMap::from([("power".to_owned(), Value::String("0".to_owned()))]);
     let root = HashMap::from([
         ("DataVersion".to_owned(), Value::Int(4790)),
         (
@@ -394,10 +391,7 @@ fn scheduler_structure() -> Vec<u8> {
                         "Name".to_owned(),
                         Value::String("minecraft:target".to_owned()),
                     ),
-                    (
-                        "Properties".to_owned(),
-                        Value::Compound(target_properties),
-                    ),
+                    ("Properties".to_owned(), Value::Compound(target_properties)),
                 ])),
             ]),
         ),
@@ -444,14 +438,8 @@ fn piston_event_structure_for(piston_name: &str) -> Vec<u8> {
                     Value::String("minecraft:stone".to_owned()),
                 )])),
                 Value::Compound(HashMap::from([
-                    (
-                        "Name".to_owned(),
-                        Value::String(piston_name.to_owned()),
-                    ),
-                    (
-                        "Properties".to_owned(),
-                        Value::Compound(piston_properties),
-                    ),
+                    ("Name".to_owned(), Value::String(piston_name.to_owned())),
+                    ("Properties".to_owned(), Value::Compound(piston_properties)),
                 ])),
             ]),
         ),

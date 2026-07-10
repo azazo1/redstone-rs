@@ -67,7 +67,12 @@ mod tests {
     fn embedded_registry_order_contains_all_synchronized_registries() {
         assert_eq!(registry_packets().len(), 28);
         let biome = REGISTRY_DATA.lines().next().unwrap();
-        let entries = biome.split_once('=').unwrap().1.split(',').collect::<Vec<_>>();
+        let entries = biome
+            .split_once('=')
+            .unwrap()
+            .1
+            .split(',')
+            .collect::<Vec<_>>();
         assert_eq!(entries[40], "plains");
     }
 

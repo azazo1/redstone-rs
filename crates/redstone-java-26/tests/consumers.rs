@@ -6,11 +6,7 @@ use redstone_core::{
 };
 use redstone_java_26::{Java26Registry, Java26Rules, StateResolver};
 
-fn state(
-    registry: &mut Java26Registry,
-    name: &str,
-    properties: &[(&str, &str)],
-) -> BlockStateId {
+fn state(registry: &mut Java26Registry, name: &str, properties: &[(&str, &str)]) -> BlockStateId {
     registry
         .resolve_state(
             name,
@@ -138,7 +134,11 @@ async fn note_block_and_bell_emit_events_only_on_rising_edges() {
     let bell = state(
         &mut registry,
         "minecraft:bell",
-        &[("attachment", "floor"), ("facing", "north"), ("powered", "false")],
+        &[
+            ("attachment", "floor"),
+            ("facing", "north"),
+            ("powered", "false"),
+        ],
     );
     let source = state(&mut registry, "minecraft:redstone_block", &[]);
     let source_pos = BlockPos::ZERO;
@@ -212,7 +212,9 @@ async fn using_a_note_block_cycles_its_note_and_plays_once() {
     );
 
     let delta = simulation
-        .step_with_actions(&[Action::UseBlock { pos: BlockPos::ZERO }])
+        .step_with_actions(&[Action::UseBlock {
+            pos: BlockPos::ZERO,
+        }])
         .await
         .unwrap();
 
@@ -253,7 +255,10 @@ async fn target_strength_uses_hit_location_and_releases_after_eight_ticks() {
         .await
         .unwrap();
     assert_eq!(hit.probes[0].value, ProbeValue::String("3".to_owned()));
-    simulation.run_until(redstone_core::GameTick(8)).await.unwrap();
+    simulation
+        .run_until(redstone_core::GameTick(8))
+        .await
+        .unwrap();
     assert_eq!(
         simulation
             .rules()

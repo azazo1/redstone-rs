@@ -261,10 +261,7 @@ impl<'a> EventContext<'a> {
         }
     }
 
-    fn last_recorded_block_entity_data(
-        &self,
-        pos: BlockPos,
-    ) -> Option<Option<&BlockEntityData>> {
+    fn last_recorded_block_entity_data(&self, pos: BlockPos) -> Option<Option<&BlockEntityData>> {
         self.events.iter().rev().find_map(|event| match event {
             WorldEvent::BlockEntity { change } if change.pos() == pos => {
                 Some(change.current_data())

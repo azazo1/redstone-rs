@@ -47,14 +47,17 @@ fn supports_face(
         .then(|| world.block_entity(pos))
         .flatten()
         .filter(|data| data.fields.get("source").and_then(|value| value.as_bool()) == Some(true))
-        .and_then(|data| data.fields.get("direction").and_then(|value| value.as_str()))
+        .and_then(|data| {
+            data.fields
+                .get("direction")
+                .and_then(|value| value.as_str())
+        })
         .and_then(parse_direction)
         .is_some_and(|direction| face == direction.opposite());
     let full = state.sturdy(face) || moving_source_face;
     let path = state.name.strip_prefix("minecraft:").unwrap_or(&state.name);
     let center = full
-        || face == Direction::Up
-            && (path.ends_with("_fence") || path.ends_with("_wall"))
+        || face == Direction::Up && (path.ends_with("_fence") || path.ends_with("_wall"))
         || matches!(path, "piston" | "sticky_piston")
             && state.bool_property("extended")
             && state.direction_property("facing") != Some(face);
@@ -167,9 +170,7 @@ impl Java26Rules {
             }
             ShapeFamily::Pane => self.cross_shape(ctx.world, pos, &state, CrossKind::Pane)?,
             ShapeFamily::Wall => self.wall_shape(ctx.world, pos, &state)?,
-            ShapeFamily::Door => {
-                self.door_shape(ctx.world, pos, &state, direction_to_neighbor)?
-            }
+            ShapeFamily::Door => self.door_shape(ctx.world, pos, &state, direction_to_neighbor)?,
             ShapeFamily::Rail { .. } => unreachable!("rail shapes return above"),
         };
         if repaired == state_id {
@@ -255,15 +256,14 @@ impl Java26Rules {
         {
             return false;
         }
-        let support_direction = match RailShape::parse(
-            state.property("shape").unwrap_or("north_south"),
-        ) {
-            RailShape::AscendingEast => Some(Direction::East),
-            RailShape::AscendingWest => Some(Direction::West),
-            RailShape::AscendingNorth => Some(Direction::North),
-            RailShape::AscendingSouth => Some(Direction::South),
-            _ => None,
-        };
+        let support_direction =
+            match RailShape::parse(state.property("shape").unwrap_or("north_south")) {
+                RailShape::AscendingEast => Some(Direction::East),
+                RailShape::AscendingWest => Some(Direction::West),
+                RailShape::AscendingNorth => Some(Direction::North),
+                RailShape::AscendingSouth => Some(Direction::South),
+                _ => None,
+            };
         support_direction.is_none_or(|direction| {
             self.state_or_air(world, pos.relative(direction))
                 .sturdy(Direction::Up)
@@ -279,15 +279,14 @@ impl Java26Rules {
         if source_pos == pos.relative(Direction::Down) {
             return true;
         }
-        let support_direction = match RailShape::parse(
-            state.property("shape").unwrap_or("north_south"),
-        ) {
-            RailShape::AscendingEast => Some(Direction::East),
-            RailShape::AscendingWest => Some(Direction::West),
-            RailShape::AscendingNorth => Some(Direction::North),
-            RailShape::AscendingSouth => Some(Direction::South),
-            _ => None,
-        };
+        let support_direction =
+            match RailShape::parse(state.property("shape").unwrap_or("north_south")) {
+                RailShape::AscendingEast => Some(Direction::East),
+                RailShape::AscendingWest => Some(Direction::West),
+                RailShape::AscendingNorth => Some(Direction::North),
+                RailShape::AscendingSouth => Some(Direction::South),
+                _ => None,
+            };
         support_direction.is_some_and(|direction| source_pos == pos.relative(direction))
     }
 
@@ -305,11 +304,11 @@ impl Java26Rules {
         self.write_shape_state(ctx, pos, repaired, notify, "rail_shape")?;
 
         for connection in shape.connections(pos) {
-            let Some((neighbor_pos, neighbor_state)) = self.find_rail(ctx.world, connection)
-            else {
+            let Some((neighbor_pos, neighbor_state)) = self.find_rail(ctx.world, connection) else {
                 continue;
             };
-            let soft_connections = self.soft_rail_connections(ctx.world, neighbor_pos, &neighbor_state);
+            let soft_connections =
+                self.soft_rail_connections(ctx.world, neighbor_pos, &neighbor_state);
             if !contains_rail_column(&soft_connections, pos) && soft_connections.len() == 2 {
                 continue;
             }
@@ -468,10 +467,16 @@ impl Java26Rules {
         mut shape: RailShape,
     ) -> RailShape {
         if shape == RailShape::NorthSouth {
-            if self.is_rail_at(world, pos.relative(Direction::North).relative(Direction::Up)) {
+            if self.is_rail_at(
+                world,
+                pos.relative(Direction::North).relative(Direction::Up),
+            ) {
                 shape = RailShape::AscendingNorth;
             }
-            if self.is_rail_at(world, pos.relative(Direction::South).relative(Direction::Up)) {
+            if self.is_rail_at(
+                world,
+                pos.relative(Direction::South).relative(Direction::Up),
+            ) {
                 shape = RailShape::AscendingSouth;
             }
         }
@@ -486,12 +491,7 @@ impl Java26Rules {
         shape
     }
 
-    fn has_neighbor_rail(
-        &self,
-        world: &SparseWorld,
-        pos: BlockPos,
-        direction: Direction,
-    ) -> bool {
+    fn has_neighbor_rail(&self, world: &SparseWorld, pos: BlockPos, direction: Direction) -> bool {
         let Some((neighbor_pos, neighbor_state)) = self.find_rail(world, pos.relative(direction))
         else {
             return false;
@@ -511,9 +511,8 @@ impl Java26Rules {
             .into_iter()
             .filter_map(|connection| {
                 let (rail_pos, rail_state) = self.find_rail(world, connection)?;
-                let rail_shape = RailShape::parse(
-                    rail_state.property("shape").unwrap_or("north_south"),
-                );
+                let rail_shape =
+                    RailShape::parse(rail_state.property("shape").unwrap_or("north_south"));
                 rail_shape
                     .connections(rail_pos)
                     .into_iter()
@@ -523,17 +522,17 @@ impl Java26Rules {
             .collect()
     }
 
-    fn find_rail(
-        &self,
-        world: &SparseWorld,
-        pos: BlockPos,
-    ) -> Option<(BlockPos, StateDefinition)> {
-        [pos, pos.relative(Direction::Up), pos.relative(Direction::Down)]
-            .into_iter()
-            .find_map(|candidate| {
-                let state = self.state_or_air(world, candidate);
-                is_rail_name(&state.name).then(|| (candidate, state.clone()))
-            })
+    fn find_rail(&self, world: &SparseWorld, pos: BlockPos) -> Option<(BlockPos, StateDefinition)> {
+        [
+            pos,
+            pos.relative(Direction::Up),
+            pos.relative(Direction::Down),
+        ]
+        .into_iter()
+        .find_map(|candidate| {
+            let state = self.state_or_air(world, candidate);
+            is_rail_name(&state.name).then(|| (candidate, state.clone()))
+        })
     }
 
     fn is_rail_at(&self, world: &SparseWorld, pos: BlockPos) -> bool {
@@ -549,9 +548,8 @@ impl Java26Rules {
         let was_dot = Direction::HORIZONTAL
             .into_iter()
             .all(|direction| state.property(direction_name(direction)) == Some("none"));
-        let mut connections = Direction::HORIZONTAL.map(|direction| {
-            self.wire_connection(world, pos, direction)
-        });
+        let mut connections =
+            Direction::HORIZONTAL.map(|direction| self.wire_connection(world, pos, direction));
         let connected = connections.map(|connection| connection != "none");
         if !(was_dot && connected.into_iter().all(|connected| !connected)) {
             let north_south_empty = !connected[0] && !connected[2];
@@ -580,15 +578,14 @@ impl Java26Rules {
     ) -> &'static str {
         let side = pos.relative(direction);
         let side_state = self.state_or_air(world, side);
-        let above_open = !self.state_or_air(world, pos.relative(Direction::Up)).redstone_conductor;
+        let above_open = !self
+            .state_or_air(world, pos.relative(Direction::Up))
+            .redstone_conductor;
         if above_open
             && (side_state.name.ends_with("_trapdoor")
                 || side_state.sturdy(Direction::Up)
                 || matches!(side_state.behavior, BlockBehavior::Hopper))
-            && self.wire_connects_to(
-                self.state_or_air(world, side.relative(Direction::Up)),
-                None,
-            )
+            && self.wire_connects_to(self.state_or_air(world, side.relative(Direction::Up)), None)
         {
             return if side_state.sturdy(direction.opposite()) {
                 "up"
@@ -609,20 +606,19 @@ impl Java26Rules {
         }
     }
 
-    fn wire_connects_to(
-        &self,
-        state: &StateDefinition,
-        direction: Option<Direction>,
-    ) -> bool {
+    fn wire_connects_to(&self, state: &StateDefinition, direction: Option<Direction>) -> bool {
         match state.behavior {
             BlockBehavior::Wire => true,
-            BlockBehavior::Repeater | BlockBehavior::Comparator => direction.is_some_and(|direction| {
-                let facing = state.direction_property("facing").unwrap_or(Direction::North);
-                facing == direction || facing.opposite() == direction
-            }),
-            BlockBehavior::Observer => {
-                direction.is_some_and(|direction| state.direction_property("facing") == Some(direction))
+            BlockBehavior::Repeater | BlockBehavior::Comparator => {
+                direction.is_some_and(|direction| {
+                    let facing = state
+                        .direction_property("facing")
+                        .unwrap_or(Direction::North);
+                    facing == direction || facing.opposite() == direction
+                })
             }
+            BlockBehavior::Observer => direction
+                .is_some_and(|direction| state.direction_property("facing") == Some(direction)),
             _ => direction.is_some() && is_signal_source(&state.behavior),
         }
     }
@@ -695,8 +691,8 @@ impl Java26Rules {
         let has_corner = north_none && east_none && south_none && west_none
             || north_none != south_none
             || west_none != east_none;
-        let straight_tall = covered
-            && (connections[0] && connections[2] || connections[1] && connections[3]);
+        let straight_tall =
+            covered && (connections[0] && connections[2] || connections[1] && connections[3]);
         let raise_post = above_wall_post || has_corner || !straight_tall && covered;
         next = self.changed_state(next, "up", raise_post.to_string())?;
         Ok(next)
@@ -716,9 +712,7 @@ impl Java26Rules {
         let pair_direction = half == "lower" && direction == Direction::Up
             || half == "upper" && direction == Direction::Down;
         if pair_direction {
-            let other = self
-                .state_or_air(world, pos.relative(direction))
-                .clone();
+            let other = self.state_or_air(world, pos.relative(direction)).clone();
             if other.name == state.name && other.property("half") != Some(half) {
                 return self.changed_state(other.id, "half", half);
             }
@@ -870,10 +864,7 @@ impl RailShape {
                 pos.relative(Direction::North),
                 pos.relative(Direction::South),
             ],
-            Self::EastWest => [
-                pos.relative(Direction::West),
-                pos.relative(Direction::East),
-            ],
+            Self::EastWest => [pos.relative(Direction::West), pos.relative(Direction::East)],
             Self::AscendingEast => [
                 pos.relative(Direction::West),
                 pos.relative(Direction::East).relative(Direction::Up),
@@ -931,8 +922,7 @@ fn same_rail_column(left: BlockPos, right: BlockPos) -> bool {
 
 fn fence_connects(state: &StateDefinition, direction: Direction, wooden: bool) -> bool {
     let path = state.name.strip_prefix("minecraft:").unwrap_or(&state.name);
-    let same_fence = path.ends_with("_fence")
-        && (path != "nether_brick_fence") == wooden;
+    let same_fence = path.ends_with("_fence") && (path != "nether_brick_fence") == wooden;
     let gate = path.ends_with("_fence_gate")
         && state
             .direction_property("facing")

@@ -123,7 +123,11 @@ pub enum ScenarioActionKind {
 }
 
 impl ScenarioActionKind {
-    pub fn entity_data(kind: String, position: [f64; 3], fields: BTreeMap<String, serde_json::Value>) -> EntityData {
+    pub fn entity_data(
+        kind: String,
+        position: [f64; 3],
+        fields: BTreeMap<String, serde_json::Value>,
+    ) -> EntityData {
         EntityData {
             kind,
             position,

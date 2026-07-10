@@ -35,17 +35,15 @@ pub(super) fn analog_output(
         "end_portal_frame" => i32::from(state.bool_property("eye")) * 15,
         "respawn_anchor" => state.int_property("charges").unwrap_or(0) * 15 / 4,
         value if value.ends_with("_bulb") => i32::from(state.bool_property("lit")) * 15,
-        value if value.ends_with("copper_golem_statue") => copper_golem_pose_output(
-            state.property("copper_golem_pose").unwrap_or("standing"),
-        ),
-        "chiseled_bookshelf" => block_entity_i64(
-            world,
-            pos,
-            &["last_interacted_slot", "LastInteractedSlot"],
-        )
-        .unwrap_or(-1)
-        .clamp(-1, 14) as i32
-            + 1,
+        value if value.ends_with("copper_golem_statue") => {
+            copper_golem_pose_output(state.property("copper_golem_pose").unwrap_or("standing"))
+        }
+        "chiseled_bookshelf" => {
+            block_entity_i64(world, pos, &["last_interacted_slot", "LastInteractedSlot"])
+                .unwrap_or(-1)
+                .clamp(-1, 14) as i32
+                + 1
+        }
         "command_block" | "chain_command_block" | "repeating_command_block" => {
             block_entity_i64(world, pos, &["SuccessCount", "success_count"])
                 .unwrap_or(0)
@@ -62,20 +60,15 @@ pub(super) fn analog_output(
             }
         }
         "detector_rail" => detector_rail_output(world, pos, state.bool_property("powered")),
-        "jukebox" => block_entity_i64(
-            world,
-            pos,
-            &["comparator_output", "ComparatorOutput"],
-        )
-        .map_or_else(
-            || block_entity::jukebox_output(world, pos),
-            |output| output.clamp(0, 15) as i32,
-        ),
-        "lectern" => block_entity_i64(world, pos, &["comparator_output"])
+        "jukebox" => block_entity_i64(world, pos, &["comparator_output", "ComparatorOutput"])
             .map_or_else(
-                || block_entity::lectern_output(world, pos, state),
+                || block_entity::jukebox_output(world, pos),
                 |output| output.clamp(0, 15) as i32,
             ),
+        "lectern" => block_entity_i64(world, pos, &["comparator_output"]).map_or_else(
+            || block_entity::lectern_output(world, pos, state),
+            |output| output.clamp(0, 15) as i32,
+        ),
         "sculk_sensor" | "calibrated_sculk_sensor" => {
             if state.property("sculk_sensor_phase") == Some("active") {
                 block_entity_i64(

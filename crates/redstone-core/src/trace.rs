@@ -35,9 +35,8 @@ impl TraceLog {
         for event in &self.events {
             if let TraceKind::ProbeSample { sample } = &event.kind {
                 let width = probe_width(&sample.value);
-                if let Some((_, current_width)) = probes
-                    .iter_mut()
-                    .find(|(name, _)| name == &sample.name)
+                if let Some((_, current_width)) =
+                    probes.iter_mut().find(|(name, _)| name == &sample.name)
                 {
                     *current_width = (*current_width).max(width);
                 } else {
@@ -82,11 +81,9 @@ impl TraceLog {
                 ProbeValue::State(value) => {
                     writeln!(output, "b{:064b} p{index}", value.0 as u64)?;
                 }
-                ProbeValue::String(value) if value == "true" || value == "false" => writeln!(
-                    output,
-                    "{}",
-                    boolean_vcd(index, *width, value == "true")
-                )?,
+                ProbeValue::String(value) if value == "true" || value == "false" => {
+                    writeln!(output, "{}", boolean_vcd(index, *width, value == "true"))?
+                }
                 ProbeValue::String(value) => match value.parse::<i64>() {
                     Ok(value) => writeln!(output, "b{:064b} p{index}", value as u64)?,
                     Err(_) => writeln!(output, "bx p{index}")?,
@@ -142,29 +139,25 @@ mod tests {
 
     #[test]
     fn vcd_encodes_boolean_and_numeric_property_strings() {
-        let events = [
-            ("powered", "true"),
-            ("power", "15"),
-            ("facing", "north"),
-        ]
-        .into_iter()
-        .enumerate()
-        .map(|(index, (name, value))| TraceEvent {
-            tick: GameTick(1),
-            micro_step: MicroStep(index as u64 + 1),
-            phase: SimulationPhase::PostTick,
-            kind: TraceKind::ProbeSample {
-                sample: ProbeSample {
-                    name: name.to_owned(),
-                    probe: Probe::Property {
-                        pos: BlockPos::ZERO,
-                        property: name.to_owned(),
+        let events = [("powered", "true"), ("power", "15"), ("facing", "north")]
+            .into_iter()
+            .enumerate()
+            .map(|(index, (name, value))| TraceEvent {
+                tick: GameTick(1),
+                micro_step: MicroStep(index as u64 + 1),
+                phase: SimulationPhase::PostTick,
+                kind: TraceKind::ProbeSample {
+                    sample: ProbeSample {
+                        name: name.to_owned(),
+                        probe: Probe::Property {
+                            pos: BlockPos::ZERO,
+                            property: name.to_owned(),
+                        },
+                        value: ProbeValue::String(value.to_owned()),
                     },
-                    value: ProbeValue::String(value.to_owned()),
                 },
-            },
-        })
-        .collect::<Vec<_>>();
+            })
+            .collect::<Vec<_>>();
         let mut output = Vec::new();
         TraceLog::new(events).write_vcd(&mut output).unwrap();
         let output = String::from_utf8(output).unwrap();
@@ -172,7 +165,9 @@ mod tests {
         assert!(output.contains("$var wire 1 p0 powered $end"));
         assert!(output.contains("$var wire 64 p1 power $end"));
         assert!(output.contains("1p0"));
-        assert!(output.contains("b0000000000000000000000000000000000000000000000000000000000001111 p1"));
+        assert!(
+            output.contains("b0000000000000000000000000000000000000000000000000000000000001111 p1")
+        );
         assert!(output.contains("bx p2"));
     }
 
@@ -204,6 +199,8 @@ mod tests {
 
         assert!(output.contains("$var wire 64 p0 powered $end"));
         assert!(output.contains("bx p0"));
-        assert!(output.contains("b0000000000000000000000000000000000000000000000000000000000000001 p0"));
+        assert!(
+            output.contains("b0000000000000000000000000000000000000000000000000000000000000001 p0")
+        );
     }
 }

@@ -1,6 +1,4 @@
-use redstone_core::{
-    BlockPos, BlockStateId, Direction, EventContext, RulesError, TickPriority,
-};
+use redstone_core::{BlockPos, BlockStateId, Direction, EventContext, RulesError, TickPriority};
 
 use super::{BlockBehavior, Java26Rules};
 
@@ -74,7 +72,9 @@ impl Java26Rules {
         if !matches!(state.behavior, BlockBehavior::Observer) {
             return Ok(());
         }
-        let facing = state.direction_property("facing").unwrap_or(Direction::South);
+        let facing = state
+            .direction_property("facing")
+            .unwrap_or(Direction::South);
         if pos.relative(facing) == source_pos {
             self.start_observer_signal(ctx, pos, &state)?;
         }

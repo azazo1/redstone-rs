@@ -13,11 +13,7 @@ pub(super) fn decorated_pot_output(world: &SparseWorld, pos: BlockPos) -> i32 {
         .map_or(0, item_stack_signal)
 }
 
-pub(super) fn lectern_output(
-    world: &SparseWorld,
-    pos: BlockPos,
-    state: &StateDefinition,
-) -> i32 {
+pub(super) fn lectern_output(world: &SparseWorld, pos: BlockPos, state: &StateDefinition) -> i32 {
     if !state.bool_property("has_book") {
         return 0;
     }
@@ -59,10 +55,7 @@ pub(super) fn jukebox_output(world: &SparseWorld, pos: BlockPos) -> i32 {
     song.map_or(0, jukebox_song_output)
 }
 
-fn field_i64(
-    fields: &std::collections::BTreeMap<String, Value>,
-    keys: &[&str],
-) -> Option<i64> {
+fn field_i64(fields: &std::collections::BTreeMap<String, Value>, keys: &[&str]) -> Option<i64> {
     keys.iter()
         .find_map(|key| fields.get(*key).and_then(Value::as_i64))
 }
@@ -109,10 +102,7 @@ fn item_id(stack: &Value) -> Option<&str> {
 }
 
 fn jukebox_song_component(stack: &Value) -> Option<&str> {
-    let components = stack
-        .as_object()?
-        .get("components")?
-        .as_object()?;
+    let components = stack.as_object()?.get("components")?.as_object()?;
     let song = components.get("minecraft:jukebox_playable")?;
     song.as_str()
         .or_else(|| song.as_object()?.get("song")?.as_str())

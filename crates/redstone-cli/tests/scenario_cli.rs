@@ -49,8 +49,14 @@ fn run_executes_entity_and_target_actions_through_the_cli() {
 
     let repeated = run(&scenario_path, &repeated_trace_path, &repeated_vcd_path);
     assert!(repeated.status.success());
-    assert_eq!(fs::read(trace_path).unwrap(), fs::read(repeated_trace_path).unwrap());
-    assert_eq!(fs::read(vcd_path).unwrap(), fs::read(repeated_vcd_path).unwrap());
+    assert_eq!(
+        fs::read(trace_path).unwrap(),
+        fs::read(repeated_trace_path).unwrap()
+    );
+    assert_eq!(
+        fs::read(vcd_path).unwrap(),
+        fs::read(repeated_vcd_path).unwrap()
+    );
 }
 
 fn run(scenario: &Path, trace: &Path, vcd: &Path) -> std::process::Output {
@@ -96,9 +102,7 @@ fn block_state(name: &str, properties: &[(&str, &str)]) -> Value {
             Value::Compound(
                 properties
                     .iter()
-                    .map(|(name, value)| {
-                        ((*name).to_owned(), Value::String((*value).to_owned()))
-                    })
+                    .map(|(name, value)| ((*name).to_owned(), Value::String((*value).to_owned())))
                     .collect(),
             ),
         ),

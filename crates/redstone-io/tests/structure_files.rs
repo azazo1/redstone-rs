@@ -4,9 +4,7 @@ use std::io::Write;
 use fastnbt::{IntArray, LongArray, Value};
 use flate2::{Compression, write::GzEncoder};
 use redstone_core::{BlockPos, BlockStateId};
-use redstone_io::{
-    Mirror, Rotation, StructureLoader, StructureStateResolver, StructureTransform,
-};
+use redstone_io::{Mirror, Rotation, StructureLoader, StructureStateResolver, StructureTransform};
 
 #[derive(Default)]
 struct TestResolver {
@@ -41,16 +39,19 @@ fn vanilla_structure_round_trip_loads_blocks_block_entities_and_entities() {
     );
     root.insert(
         "palette".to_owned(),
-        Value::List(vec![Value::Compound(HashMap::from([(
-            "Name".to_owned(),
-            Value::String("minecraft:observer".to_owned()),
-        ), (
-            "Properties".to_owned(),
-            Value::Compound(HashMap::from([
-                ("facing".to_owned(), Value::String("north".to_owned())),
-                ("powered".to_owned(), Value::String("false".to_owned())),
-            ])),
-        )]))]),
+        Value::List(vec![Value::Compound(HashMap::from([
+            (
+                "Name".to_owned(),
+                Value::String("minecraft:observer".to_owned()),
+            ),
+            (
+                "Properties".to_owned(),
+                Value::Compound(HashMap::from([
+                    ("facing".to_owned(), Value::String("north".to_owned())),
+                    ("powered".to_owned(), Value::String("false".to_owned())),
+                ])),
+            ),
+        ]))]),
     );
     root.insert(
         "blocks".to_owned(),
@@ -63,13 +64,19 @@ fn vanilla_structure_round_trip_loads_blocks_block_entities_and_entities() {
             (
                 "nbt".to_owned(),
                 Value::Compound(HashMap::from([
-                    ("id".to_owned(), Value::String("minecraft:hopper".to_owned())),
+                    (
+                        "id".to_owned(),
+                        Value::String("minecraft:hopper".to_owned()),
+                    ),
                     ("TransferCooldown".to_owned(), Value::Int(6)),
                     (
                         "Items".to_owned(),
                         Value::List(vec![Value::Compound(HashMap::from([
                             ("Slot".to_owned(), Value::Byte(2)),
-                            ("id".to_owned(), Value::String("minecraft:redstone".to_owned())),
+                            (
+                                "id".to_owned(),
+                                Value::String("minecraft:redstone".to_owned()),
+                            ),
                             ("count".to_owned(), Value::Int(12)),
                             (
                                 "components".to_owned(),
@@ -89,7 +96,11 @@ fn vanilla_structure_round_trip_loads_blocks_block_entities_and_entities() {
         Value::List(vec![Value::Compound(HashMap::from([
             (
                 "pos".to_owned(),
-                Value::List(vec![Value::Double(0.5), Value::Double(0.0), Value::Double(0.5)]),
+                Value::List(vec![
+                    Value::Double(0.5),
+                    Value::Double(0.0),
+                    Value::Double(0.5),
+                ]),
             ),
             (
                 "nbt".to_owned(),
@@ -112,10 +123,7 @@ fn vanilla_structure_round_trip_loads_blocks_block_entities_and_entities() {
         ]))]),
     );
 
-    let path = std::env::temp_dir().join(format!(
-        "redstone-structure-{}.nbt",
-        std::process::id()
-    ));
+    let path = std::env::temp_dir().join(format!("redstone-structure-{}.nbt", std::process::id()));
     std::fs::write(&path, fastnbt::to_bytes(&root).unwrap()).unwrap();
     let transform = StructureTransform {
         origin: BlockPos::new(10, 20, 30),
@@ -130,10 +138,19 @@ fn vanilla_structure_round_trip_loads_blocks_block_entities_and_entities() {
     assert_eq!(loaded.region_min, BlockPos::new(10, 20, 30));
     assert_eq!(loaded.region_max, BlockPos::new(10, 20, 31));
     let block_entity = loaded.world.block_entity(block_pos).unwrap();
-    assert_eq!(block_entity.fields["item_count"], serde_json::Value::from(12));
+    assert_eq!(
+        block_entity.fields["item_count"],
+        serde_json::Value::from(12)
+    );
     assert_eq!(block_entity.fields["item_id"], "minecraft:redstone");
-    assert_eq!(block_entity.fields["slot_count"], serde_json::Value::from(5));
-    assert_eq!(block_entity.fields["capacity"], serde_json::Value::from(320));
+    assert_eq!(
+        block_entity.fields["slot_count"],
+        serde_json::Value::from(5)
+    );
+    assert_eq!(
+        block_entity.fields["capacity"],
+        serde_json::Value::from(320)
+    );
     assert_eq!(block_entity.fields["cooldown"], serde_json::Value::from(6));
     assert_eq!(
         block_entity.fields["inventory"][0]["components"]["minecraft:custom_name"],
@@ -151,10 +168,7 @@ fn vanilla_structure_round_trip_loads_blocks_block_entities_and_entities() {
 #[test]
 fn gzip_litematic_loads_negative_regions_from_their_minimum_corner() {
     let mut region = HashMap::new();
-    region.insert(
-        "Position".to_owned(),
-        xyz_compound(4, 0, 0),
-    );
+    region.insert("Position".to_owned(), xyz_compound(4, 0, 0));
     region.insert("Size".to_owned(), xyz_compound(-2, 1, 1));
     region.insert(
         "BlockStatePalette".to_owned(),
@@ -182,7 +196,11 @@ fn gzip_litematic_loads_negative_regions_from_their_minimum_corner() {
             ("id".to_owned(), Value::String("minecraft:item".to_owned())),
             (
                 "Pos".to_owned(),
-                Value::List(vec![Value::Double(0.25), Value::Double(0.0), Value::Double(0.5)]),
+                Value::List(vec![
+                    Value::Double(0.25),
+                    Value::Double(0.0),
+                    Value::Double(0.5),
+                ]),
             ),
         ]))]),
     );
@@ -191,7 +209,10 @@ fn gzip_litematic_loads_negative_regions_from_their_minimum_corner() {
         ("MinecraftDataVersion".to_owned(), Value::Int(4790)),
         (
             "Regions".to_owned(),
-            Value::Compound(HashMap::from([("main".to_owned(), Value::Compound(region))])),
+            Value::Compound(HashMap::from([(
+                "main".to_owned(),
+                Value::Compound(region),
+            )])),
         ),
     ]);
 
@@ -200,13 +221,21 @@ fn gzip_litematic_loads_negative_regions_from_their_minimum_corner() {
         std::process::id()
     ));
     let mut encoder = GzEncoder::new(Vec::new(), Compression::default());
-    encoder.write_all(&fastnbt::to_bytes(&root).unwrap()).unwrap();
+    encoder
+        .write_all(&fastnbt::to_bytes(&root).unwrap())
+        .unwrap();
     std::fs::write(&path, encoder.finish().unwrap()).unwrap();
     let mut resolver = TestResolver::default();
     let loaded = StructureLoader::load(&path, BlockPos::ZERO, &mut resolver).unwrap();
 
-    assert_ne!(loaded.world.get_block(BlockPos::new(3, 0, 0)), BlockStateId(0));
-    assert_ne!(loaded.world.get_block(BlockPos::new(4, 0, 0)), BlockStateId(0));
+    assert_ne!(
+        loaded.world.get_block(BlockPos::new(3, 0, 0)),
+        BlockStateId(0)
+    );
+    assert_ne!(
+        loaded.world.get_block(BlockPos::new(4, 0, 0)),
+        BlockStateId(0)
+    );
     assert_eq!(loaded.min, BlockPos::new(3, 0, 0));
     assert_eq!(loaded.max, BlockPos::new(4, 0, 0));
     assert_eq!(loaded.region_min, BlockPos::new(3, 0, 0));
@@ -245,7 +274,10 @@ fn vanilla_structure_preserves_crafter_disabled_slots() {
                 (
                     "nbt".to_owned(),
                     Value::Compound(HashMap::from([
-                        ("id".to_owned(), Value::String("minecraft:crafter".to_owned())),
+                        (
+                            "id".to_owned(),
+                            Value::String("minecraft:crafter".to_owned()),
+                        ),
                         ("Items".to_owned(), Value::List(Vec::new())),
                         (
                             "disabled_slots".to_owned(),
@@ -257,10 +289,7 @@ fn vanilla_structure_preserves_crafter_disabled_slots() {
         ),
         ("entities".to_owned(), Value::List(Vec::new())),
     ]);
-    let path = std::env::temp_dir().join(format!(
-        "redstone-crafter-{}.nbt",
-        std::process::id()
-    ));
+    let path = std::env::temp_dir().join(format!("redstone-crafter-{}.nbt", std::process::id()));
     std::fs::write(&path, fastnbt::to_bytes(&root).unwrap()).unwrap();
     let mut resolver = TestResolver::default();
     let loaded = StructureLoader::load(&path, BlockPos::ZERO, &mut resolver).unwrap();
@@ -280,19 +309,14 @@ fn xyz_compound(x: i32, y: i32, z: i32) -> Value {
 }
 
 fn block_state(name: &str, properties: &[(&str, &str)]) -> Value {
-    let mut state = HashMap::from([(
-        "Name".to_owned(),
-        Value::String(name.to_owned()),
-    )]);
+    let mut state = HashMap::from([("Name".to_owned(), Value::String(name.to_owned()))]);
     if !properties.is_empty() {
         state.insert(
             "Properties".to_owned(),
             Value::Compound(
                 properties
                     .iter()
-                    .map(|(name, value)| {
-                        ((*name).to_owned(), Value::String((*value).to_owned()))
-                    })
+                    .map(|(name, value)| ((*name).to_owned(), Value::String((*value).to_owned())))
                     .collect(),
             ),
         );

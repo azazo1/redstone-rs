@@ -146,7 +146,10 @@ fn inspect_block(
                 .cloned()
                 .unwrap_or_else(|| {
                     let mut nbt = data.fields.clone();
-                    nbt.insert("id".to_owned(), serde_json::Value::String(data.kind.clone()));
+                    nbt.insert(
+                        "id".to_owned(),
+                        serde_json::Value::String(data.kind.clone()),
+                    );
                     nbt
                 });
             BlockEntityInspection {

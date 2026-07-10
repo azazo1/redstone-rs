@@ -58,7 +58,10 @@ fn run_exports_parseable_replay_and_atomically_replaces_target() {
         .map(|packet| decode_block_update(packet.timestamp, packet.payload))
         .collect::<Vec<_>>();
     assert_eq!(
-        updates.iter().map(|update| (update.0, update.1)).collect::<Vec<_>>(),
+        updates
+            .iter()
+            .map(|update| (update.0, update.1))
+            .collect::<Vec<_>>(),
         [
             (50, (-17, 0, -1)),
             (50, (16, 0, -1)),
@@ -115,9 +118,11 @@ fn piston_scenario_exports_vanilla_moving_piston_packets() {
     assert_success(&output);
     let recording = read_recording(&replay);
     let packets = parse_packets(&recording);
-    assert!(packets
-        .iter()
-        .all(|packet| packet.timestamp == 0 || packet.id != BLOCK_EVENT));
+    assert!(
+        packets
+            .iter()
+            .all(|packet| packet.timestamp == 0 || packet.id != BLOCK_EVENT)
+    );
     let mut moving_pistons = 0;
     let mut moved_wool = false;
     for (index, packet) in packets.iter().enumerate() {
@@ -132,7 +137,10 @@ fn piston_scenario_exports_vanilla_moving_piston_packets() {
         let previous = &packets[index - 1];
         assert_eq!(previous.id, BLOCK_UPDATE);
         assert_eq!(previous.timestamp, packet.timestamp);
-        assert_eq!(decode_block_update(previous.timestamp, previous.payload).1, pos);
+        assert_eq!(
+            decode_block_update(previous.timestamp, previous.payload).1,
+            pos
+        );
         assert_eq!(nbt[0], 10);
         for field in [
             b"blockState".as_slice(),
@@ -154,8 +162,8 @@ fn piston_scenario_exports_vanilla_moving_piston_packets() {
 #[test]
 fn piston_animation_exports_vanilla_block_events_for_the_3x3_gate() {
     let directory = TestDirectory::new("replay-piston-animation");
-    let scenario = Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("../../assets/scenarios/piston-gate-3x3.toml");
+    let scenario =
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("../../assets/scenarios/piston-gate-3x3.toml");
     let replay = directory.path().join("piston-animation.mcpr");
 
     let output = Command::new(env!("CARGO_BIN_EXE_redstone"))
@@ -177,16 +185,10 @@ fn piston_animation_exports_vanilla_block_events_for_the_3x3_gate() {
 
     assert!(!events.is_empty());
     assert!(events.iter().any(|event| {
-        event.pos == (4, 3, 1)
-            && event.param_a == 0
-            && event.param_b == 1
-            && event.block == 128
+        event.pos == (4, 3, 1) && event.param_a == 0 && event.param_b == 1 && event.block == 128
     }));
     assert!(events.iter().any(|event| {
-        event.pos == (8, 7, 1)
-            && event.param_a == 0
-            && event.param_b == 0
-            && event.block == 138
+        event.pos == (8, 7, 1) && event.param_a == 0 && event.param_b == 0 && event.block == 138
     }));
 }
 
@@ -219,10 +221,7 @@ fn piston_animation_starts_before_slime_and_honey_branch_updates() {
                 && decode_block_event(packet.timestamp, packet.payload).pos == (1, 1, 0)
         })
         .unwrap();
-    let event = decode_block_event(
-        packets[event_index].timestamp,
-        packets[event_index].payload,
-    );
+    let event = decode_block_event(packets[event_index].timestamp, packets[event_index].payload);
     assert_eq!((event.param_a, event.param_b, event.block), (0, 5, 138));
 
     let moving_updates = packets
@@ -235,13 +234,21 @@ fn piston_animation_starts_before_slime_and_honey_branch_updates() {
             (kind == PISTON_BLOCK_ENTITY_TYPE).then_some((index, pos, nbt))
         })
         .collect::<Vec<_>>();
-    assert!(moving_updates.iter().all(|(index, _, _)| *index > event_index));
-    assert!(moving_updates.iter().any(|(_, pos, nbt)| {
-        *pos == (3, 1, 0) && contains(nbt, b"minecraft:slime_block")
-    }));
-    assert!(moving_updates.iter().any(|(_, pos, nbt)| {
-        *pos == (3, 2, 0) && contains(nbt, b"minecraft:stone")
-    }));
+    assert!(
+        moving_updates
+            .iter()
+            .all(|(index, _, _)| *index > event_index)
+    );
+    assert!(
+        moving_updates
+            .iter()
+            .any(|(_, pos, nbt)| { *pos == (3, 1, 0) && contains(nbt, b"minecraft:slime_block") })
+    );
+    assert!(
+        moving_updates
+            .iter()
+            .any(|(_, pos, nbt)| { *pos == (3, 2, 0) && contains(nbt, b"minecraft:stone") })
+    );
     assert!(moving_updates.iter().all(|(_, pos, _)| *pos != (3, 0, 0)));
 }
 
@@ -351,9 +358,7 @@ fn block_state_with_properties(name: &str, properties: &[(&str, &str)]) -> Value
             Value::Compound(
                 properties
                     .iter()
-                    .map(|(key, value)| {
-                        ((*key).to_owned(), Value::String((*value).to_owned()))
-                    })
+                    .map(|(key, value)| ((*key).to_owned(), Value::String((*value).to_owned())))
                     .collect(),
             ),
         ),
@@ -529,7 +534,11 @@ fn decode_container(cursor: &mut Cursor<'_>, size: usize) -> Vec<u32> {
     }
     let palette = if bits <= 8 {
         let length = cursor.var_int() as usize;
-        Some((0..length).map(|_| cursor.var_int() as u32).collect::<Vec<_>>())
+        Some(
+            (0..length)
+                .map(|_| cursor.var_int() as u32)
+                .collect::<Vec<_>>(),
+        )
     } else {
         None
     };
@@ -543,7 +552,9 @@ fn decode_container(cursor: &mut Cursor<'_>, size: usize) -> Vec<u32> {
             let value = (storage[index / values_per_long]
                 >> (index % values_per_long * bits as usize)
                 & mask) as usize;
-            palette.as_ref().map_or(value as u32, |palette| palette[value])
+            palette
+                .as_ref()
+                .map_or(value as u32, |palette| palette[value])
         })
         .collect()
 }

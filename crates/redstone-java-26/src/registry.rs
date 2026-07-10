@@ -27,13 +27,19 @@ pub enum BlockBehavior {
     Static,
     Wire,
     Lever,
-    Button { wooden: bool },
+    Button {
+        wooden: bool,
+    },
     RedstoneBlock,
-    Torch { wall: bool },
+    Torch {
+        wall: bool,
+    },
     Repeater,
     Comparator,
     Observer,
-    Piston { sticky: bool },
+    Piston {
+        sticky: bool,
+    },
     Lamp,
     CopperBulb,
     PoweredConsumer,
@@ -42,7 +48,10 @@ pub enum BlockBehavior {
     NoteBlock,
     Bell,
     Target,
-    PressurePlate { max_weight: Option<u32>, detects_items: bool },
+    PressurePlate {
+        max_weight: Option<u32>,
+        detects_items: bool,
+    },
     Tripwire,
     TripwireHook,
     DetectorRail,
@@ -201,14 +210,12 @@ impl StateResolver for Java26Registry {
             return Err(StateResolveError::InvalidName(name.to_owned()));
         }
         let key = state_key(name, properties);
-        let id = *self
-            .catalog
-            .states_by_key
-            .get(&key)
-            .ok_or_else(|| StateResolveError::UnknownCombination {
+        let id = *self.catalog.states_by_key.get(&key).ok_or_else(|| {
+            StateResolveError::UnknownCombination {
                 name: name.to_owned(),
                 properties: properties.clone(),
-            })?;
+            }
+        })?;
         if self.state(id).is_some() {
             return Ok(id);
         }
@@ -275,10 +282,8 @@ fn official_catalog() -> Arc<OfficialStateCatalog> {
                 }
                 for state in entry.states {
                     max_state_id = max_state_id.max(state.id);
-                    let old = states_by_key.insert(
-                        state_key(&name, &state.properties),
-                        BlockStateId(state.id),
-                    );
+                    let old = states_by_key
+                        .insert(state_key(&name, &state.properties), BlockStateId(state.id));
                     assert!(old.is_none(), "官方方块状态键重复: {name}");
                 }
             }
@@ -407,7 +412,10 @@ fn classify(name: &str, properties: &BTreeMap<String, String>) -> BlockTraits {
         },
         value if value.ends_with("_pressure_plate") => BlockBehavior::PressurePlate {
             max_weight: None,
-            detects_items: !matches!(value, "stone_pressure_plate" | "polished_blackstone_pressure_plate"),
+            detects_items: !matches!(
+                value,
+                "stone_pressure_plate" | "polished_blackstone_pressure_plate"
+            ),
         },
         "tripwire" => BlockBehavior::Tripwire,
         "tripwire_hook" => BlockBehavior::TripwireHook,
@@ -482,7 +490,9 @@ fn classify(name: &str, properties: &BTreeMap<String, String>) -> BlockTraits {
         || matches!(behavior, BlockBehavior::Observer | BlockBehavior::NoteBlock))
         && !matches!(path, "moving_piston" | "piston_head");
     let extended_piston = matches!(path, "piston" | "sticky_piston")
-        && properties.get("extended").is_some_and(|value| value == "true");
+        && properties
+            .get("extended")
+            .is_some_and(|value| value == "true");
     let sturdy_faces = if extended_piston {
         let mut faces = [false; 6];
         let back_face = match properties.get("facing").map(String::as_str) {
@@ -575,7 +585,11 @@ mod tests {
             "structure_void",
             "decorated_pot",
         ] {
-            assert_eq!(piston_push_reaction(path, false), PushReaction::Destroy, "{path}");
+            assert_eq!(
+                piston_push_reaction(path, false),
+                PushReaction::Destroy,
+                "{path}"
+            );
         }
         for path in [
             "barrier",
@@ -587,13 +601,20 @@ mod tests {
             "grindstone",
             "lodestone",
         ] {
-            assert_eq!(piston_push_reaction(path, false), PushReaction::Block, "{path}");
+            assert_eq!(
+                piston_push_reaction(path, false),
+                PushReaction::Block,
+                "{path}"
+            );
         }
         assert_eq!(
             piston_push_reaction("white_glazed_terracotta", false),
             PushReaction::PushOnly
         );
-        assert_eq!(piston_push_reaction("sticky_piston", true), PushReaction::Block);
+        assert_eq!(
+            piston_push_reaction("sticky_piston", true),
+            PushReaction::Block
+        );
     }
 }
 

@@ -4,9 +4,7 @@ use std::path::{Path, PathBuf};
 
 use fastnbt::Value;
 use flate2::read::GzDecoder;
-use redstone_core::{
-    BlockEntityData, BlockPos, BlockStateId, Direction, EntityData, SparseWorld,
-};
+use redstone_core::{BlockEntityData, BlockPos, BlockStateId, Direction, EntityData, SparseWorld};
 use serde::Serialize;
 use thiserror::Error;
 use tracing::info;
@@ -168,10 +166,7 @@ fn load_vanilla<R: StructureStateResolver>(
     for entry in palette {
         let entry = compound_value(entry)?;
         let name = string(entry, "Name")?;
-        let properties = transform_properties(
-            optional_properties(entry, "Properties")?,
-            transform,
-        );
+        let properties = transform_properties(optional_properties(entry, "Properties")?, transform);
         states.push(resolve(resolver, name, &properties)?);
         names.push(name.to_owned());
     }
@@ -250,7 +245,9 @@ fn load_litematic<R: StructureStateResolver>(
         let right_pos = compound_value(right)
             .and_then(|region| xyz_compound(region, "Position"))
             .unwrap_or(BlockPos::ZERO);
-        left_pos.cmp(&right_pos).then_with(|| left_name.cmp(right_name))
+        left_pos
+            .cmp(&right_pos)
+            .then_with(|| left_name.cmp(right_name))
     });
     for (_region_name, region_value) in region_entries {
         let region = compound_value(region_value)?;
@@ -271,7 +268,11 @@ fn load_litematic<R: StructureStateResolver>(
             region_position.y.max(end.y),
             region_position.z.max(end.z),
         );
-        let dimensions = [size.x.unsigned_abs(), size.y.unsigned_abs(), size.z.unsigned_abs()];
+        let dimensions = [
+            size.x.unsigned_abs(),
+            size.y.unsigned_abs(),
+            size.z.unsigned_abs(),
+        ];
         if dimensions.contains(&0) {
             continue;
         }
@@ -284,10 +285,8 @@ fn load_litematic<R: StructureStateResolver>(
         for entry in palette {
             let entry = compound_value(entry)?;
             let name = string(entry, "Name")?;
-            let properties = transform_properties(
-                optional_properties(entry, "Properties")?,
-                transform,
-            );
+            let properties =
+                transform_properties(optional_properties(entry, "Properties")?, transform);
             states.push(resolve(resolver, name, &properties)?);
             names.push(name.to_owned());
         }
@@ -320,7 +319,8 @@ fn load_litematic<R: StructureStateResolver>(
                 let x = integer(entry, "x")?;
                 let y = integer(entry, "y")?;
                 let z = integer(entry, "z")?;
-                let absolute = transform.apply(BlockPos::new(start.x + x, start.y + y, start.z + z));
+                let absolute =
+                    transform.apply(BlockPos::new(start.x + x, start.y + y, start.z + z));
                 block_entity_nbt.insert(absolute, nbt_compound_to_json(entry));
                 world.set_block_entity(absolute, nbt_to_block_entity(entry));
             }
@@ -413,7 +413,10 @@ fn unpack_palette_index(longs: &[i64], index: usize, bits: usize) -> usize {
 fn nbt_to_block_entity(nbt: &HashMap<String, Value>) -> BlockEntityData {
     let kind = nbt
         .get("id")
-        .and_then(|value| match value { Value::String(value) => Some(value.clone()), _ => None })
+        .and_then(|value| match value {
+            Value::String(value) => Some(value.clone()),
+            _ => None,
+        })
         .unwrap_or_else(|| "minecraft:unknown".to_owned());
     let mut fields = nbt
         .iter()
@@ -424,9 +427,7 @@ fn nbt_to_block_entity(nbt: &HashMap<String, Value>) -> BlockEntityData {
     BlockEntityData { kind, fields }
 }
 
-fn nbt_compound_to_json(
-    nbt: &HashMap<String, Value>,
-) -> BTreeMap<String, serde_json::Value> {
+fn nbt_compound_to_json(nbt: &HashMap<String, Value>) -> BTreeMap<String, serde_json::Value> {
     nbt.iter()
         .map(|(key, value)| (key.clone(), nbt_value_to_json(value)))
         .collect()
@@ -506,9 +507,7 @@ fn normalize_inventory_fields(
         .iter()
         .map(|(_, _, count, _)| i64::from(*count))
         .sum::<i64>();
-    let first_item = inventory
-        .first()
-        .map(|(_, item_id, _, _)| item_id.clone());
+    let first_item = inventory.first().map(|(_, item_id, _, _)| item_id.clone());
     let inventory = inventory
         .into_iter()
         .map(|(slot, item_id, count, components)| {
@@ -572,7 +571,9 @@ fn container_slot_count(
             .iter()
             .filter_map(|entry| entry.get("slot").and_then(serde_json::Value::as_i64))
             .max()
-            .map_or(1, |slot| slot.saturating_add(1).clamp(1, i64::from(i32::MAX)) as i32)
+            .map_or(1, |slot| {
+                slot.saturating_add(1).clamp(1, i64::from(i32::MAX)) as i32
+            })
             .max(
                 fields
                     .get("Size")
@@ -595,7 +596,10 @@ fn normalize_item_entity_fields(
         return;
     };
     if let Some(Value::String(item_id)) = item.get("id") {
-        fields.insert("item_id".to_owned(), serde_json::Value::String(item_id.clone()));
+        fields.insert(
+            "item_id".to_owned(),
+            serde_json::Value::String(item_id.clone()),
+        );
     }
     if let Some(count) = item
         .get("count")
@@ -604,7 +608,11 @@ fn normalize_item_entity_fields(
     {
         fields.insert("item_count".to_owned(), serde_json::Value::from(count));
     }
-    if let Some(age) = nbt.get("Age").or_else(|| nbt.get("age")).and_then(value_i32) {
+    if let Some(age) = nbt
+        .get("Age")
+        .or_else(|| nbt.get("age"))
+        .and_then(value_i32)
+    {
         fields.insert("age".to_owned(), serde_json::Value::from(age));
     }
     if let Some(delay) = nbt
@@ -626,7 +634,10 @@ fn normalize_item_frame_fields(
     }
     if let Some(Value::Compound(item)) = nbt.get("Item").or_else(|| nbt.get("item")) {
         if let Some(Value::String(item_id)) = item.get("id") {
-            fields.insert("item_id".to_owned(), serde_json::Value::String(item_id.clone()));
+            fields.insert(
+                "item_id".to_owned(),
+                serde_json::Value::String(item_id.clone()),
+            );
         }
         if let Some(count) = item
             .get("count")
@@ -641,7 +652,10 @@ fn normalize_item_frame_fields(
         .or_else(|| nbt.get("item_rotation"))
         .and_then(value_i32)
     {
-        fields.insert("rotation".to_owned(), serde_json::Value::from(rotation.rem_euclid(8)));
+        fields.insert(
+            "rotation".to_owned(),
+            serde_json::Value::from(rotation.rem_euclid(8)),
+        );
     }
     if let Some(facing) = nbt.get("Facing").or_else(|| nbt.get("facing")) {
         let facing = match facing {
@@ -706,17 +720,22 @@ fn transform_properties(
         }
         let value = match key.as_str() {
             "facing" => parse_direction(&value)
-                .map(|direction| direction_name(transform_direction(direction, transform)).to_owned())
+                .map(|direction| {
+                    direction_name(transform_direction(direction, transform)).to_owned()
+                })
                 .unwrap_or(value),
             "axis"
                 if matches!(
                     transform.rotation,
                     Rotation::Clockwise90 | Rotation::Counterclockwise90
-                ) => match value.as_str() {
+                ) =>
+            {
+                match value.as_str() {
                     "x" => "z".to_owned(),
                     "z" => "x".to_owned(),
                     _ => value,
-                },
+                }
+            }
             "hinge" if transform.mirror != Mirror::None => match value.as_str() {
                 "left" => "right".to_owned(),
                 "right" => "left".to_owned(),
@@ -867,11 +886,33 @@ fn nbt_value_to_json(value: &Value) -> serde_json::Value {
         Value::Float(value) => serde_json::Value::from(*value),
         Value::Double(value) => serde_json::Value::from(*value),
         Value::String(value) => serde_json::Value::from(value.clone()),
-        Value::ByteArray(value) => serde_json::Value::Array(value.iter().map(|value| serde_json::Value::from(*value)).collect()),
-        Value::IntArray(value) => serde_json::Value::Array(value.iter().map(|value| serde_json::Value::from(*value)).collect()),
-        Value::LongArray(value) => serde_json::Value::Array(value.iter().map(|value| serde_json::Value::from(*value)).collect()),
-        Value::List(value) => serde_json::Value::Array(value.iter().map(nbt_value_to_json).collect()),
-        Value::Compound(value) => serde_json::Value::Object(value.iter().map(|(key, value)| (key.clone(), nbt_value_to_json(value))).collect()),
+        Value::ByteArray(value) => serde_json::Value::Array(
+            value
+                .iter()
+                .map(|value| serde_json::Value::from(*value))
+                .collect(),
+        ),
+        Value::IntArray(value) => serde_json::Value::Array(
+            value
+                .iter()
+                .map(|value| serde_json::Value::from(*value))
+                .collect(),
+        ),
+        Value::LongArray(value) => serde_json::Value::Array(
+            value
+                .iter()
+                .map(|value| serde_json::Value::from(*value))
+                .collect(),
+        ),
+        Value::List(value) => {
+            serde_json::Value::Array(value.iter().map(nbt_value_to_json).collect())
+        }
+        Value::Compound(value) => serde_json::Value::Object(
+            value
+                .iter()
+                .map(|(key, value)| (key.clone(), nbt_value_to_json(value)))
+                .collect(),
+        ),
     }
 }
 
@@ -882,7 +923,10 @@ fn list<'a>(map: &'a HashMap<String, Value>, key: &str) -> Result<&'a Vec<Value>
     }
 }
 
-fn compound<'a>(map: &'a HashMap<String, Value>, key: &str) -> Result<&'a HashMap<String, Value>, StructureError> {
+fn compound<'a>(
+    map: &'a HashMap<String, Value>,
+    key: &str,
+) -> Result<&'a HashMap<String, Value>, StructureError> {
     match map.get(key) {
         Some(Value::Compound(value)) => Ok(value),
         _ => Err(StructureError::MissingField(key.to_owned())),
@@ -923,15 +967,23 @@ fn int_list(map: &HashMap<String, Value>, key: &str) -> Result<[i32; 3], Structu
 
 fn xyz_compound(map: &HashMap<String, Value>, key: &str) -> Result<BlockPos, StructureError> {
     let value = compound(map, key)?;
-    Ok(BlockPos::new(integer(value, "x")?, integer(value, "y")?, integer(value, "z")?))
+    Ok(BlockPos::new(
+        integer(value, "x")?,
+        integer(value, "y")?,
+        integer(value, "z")?,
+    ))
 }
 
 fn optional_properties(
     map: &HashMap<String, Value>,
     key: &str,
 ) -> Result<BTreeMap<String, String>, StructureError> {
-    let Some(value) = map.get(key) else { return Ok(BTreeMap::new()); };
-    let Value::Compound(properties) = value else { return Err(StructureError::InvalidType("properties")); };
+    let Some(value) = map.get(key) else {
+        return Ok(BTreeMap::new());
+    };
+    let Value::Compound(properties) = value else {
+        return Err(StructureError::InvalidType("properties"));
+    };
     properties
         .iter()
         .map(|(key, value)| match value {
@@ -1008,7 +1060,10 @@ mod tests {
                 longs[start + 1] |= (value as u64) >> (64 - offset);
             }
         }
-        let longs = longs.into_iter().map(|value| value as i64).collect::<Vec<_>>();
+        let longs = longs
+            .into_iter()
+            .map(|value| value as i64)
+            .collect::<Vec<_>>();
         for (index, expected) in values.into_iter().enumerate() {
             assert_eq!(unpack_palette_index(&longs, index, bits), expected);
         }

@@ -171,7 +171,10 @@ impl Java26Rules {
             if arrow { 20 } else { 8 },
             TickPriority::Normal,
         );
-        *self.event_counts.entry("target_hit".to_owned()).or_default() += 1;
+        *self
+            .event_counts
+            .entry("target_hit".to_owned())
+            .or_default() += 1;
         Ok(())
     }
 }

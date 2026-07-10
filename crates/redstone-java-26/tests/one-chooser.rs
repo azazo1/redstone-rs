@@ -3,9 +3,7 @@ use std::path::PathBuf;
 
 use redstone_core::{Action, BlockPos, GameTick, Simulation, SimulationConfig};
 use redstone_io::{StructureLoader, StructureStateResolver};
-use redstone_java_26::{
-    Java26Registry, Java26Rules, StateResolveError, StateResolver,
-};
+use redstone_java_26::{Java26Registry, Java26Rules, StateResolveError, StateResolver};
 
 struct RegistryResolver(Java26Registry);
 
@@ -95,21 +93,9 @@ async fn each_note_block_selects_only_the_lamp_above_it_with_initialized_dropper
                     .is_some_and(|state| state.property("lit") == Some("true"))
             })
             .collect::<Vec<_>>();
-        assert_eq!(
-            lit.len(),
-            1,
-            "note block at {note_pos:?} selected {lit:?}"
-        );
-        assert_eq!(
-            lit[0].x,
-            note_pos.x,
-            "note={note_pos:?}, lit={lit:?}"
-        );
-        assert_eq!(
-            lit[0].z,
-            note_pos.z,
-            "note={note_pos:?}, lit={lit:?}"
-        );
+        assert_eq!(lit.len(), 1, "note block at {note_pos:?} selected {lit:?}");
+        assert_eq!(lit[0].x, note_pos.x, "note={note_pos:?}, lit={lit:?}");
+        assert_eq!(lit[0].z, note_pos.z, "note={note_pos:?}, lit={lit:?}");
         assert!(lit[0].y > note_pos.y);
     }
 }

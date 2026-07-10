@@ -1,13 +1,11 @@
 use std::collections::BTreeMap;
 
-use redstone_core::{BlockEntityData, BlockPos, BlockStateId, Simulation, SimulationConfig, SparseWorld};
+use redstone_core::{
+    BlockEntityData, BlockPos, BlockStateId, Simulation, SimulationConfig, SparseWorld,
+};
 use redstone_java_26::{Java26Registry, Java26Rules, StateResolver};
 
-fn state(
-    registry: &mut Java26Registry,
-    name: &str,
-    properties: &[(&str, &str)],
-) -> BlockStateId {
+fn state(registry: &mut Java26Registry, name: &str, properties: &[(&str, &str)]) -> BlockStateId {
     registry
         .resolve_state(
             name,
@@ -19,11 +17,7 @@ fn state(
         .unwrap()
 }
 
-fn container(
-    kind: &str,
-    slot_count: i64,
-    slots: &[(u32, &str, i64)],
-) -> BlockEntityData {
+fn container(kind: &str, slot_count: i64, slots: &[(u32, &str, i64)]) -> BlockEntityData {
     let inventory = slots
         .iter()
         .map(|(slot, item_id, count)| {
@@ -43,7 +37,10 @@ fn container(
                 serde_json::Value::from(slots.iter().map(|(_, _, count)| *count).sum::<i64>()),
             ),
             ("slot_count".to_owned(), serde_json::Value::from(slot_count)),
-            ("capacity".to_owned(), serde_json::Value::from(slot_count * 64)),
+            (
+                "capacity".to_owned(),
+                serde_json::Value::from(slot_count * 64),
+            ),
         ]),
     }
 }
@@ -116,8 +113,14 @@ async fn hoppers_use_the_furnace_slots_exposed_by_each_face() {
 
     simulation.step().await.unwrap();
 
-    assert_eq!(slot_item(simulation.world(), side_furnace, 1), Some(("minecraft:coal", 1)));
-    assert_eq!(slot_item(simulation.world(), top_furnace, 0), Some(("minecraft:cobblestone", 1)));
+    assert_eq!(
+        slot_item(simulation.world(), side_furnace, 1),
+        Some(("minecraft:coal", 1))
+    );
+    assert_eq!(
+        slot_item(simulation.world(), top_furnace, 0),
+        Some(("minecraft:cobblestone", 1))
+    );
     assert_eq!(
         slot_item(simulation.world(), rejected_hopper, 0),
         Some(("minecraft:cobblestone", 1))
@@ -146,7 +149,11 @@ async fn brewing_stands_expose_ingredient_fuel_and_output_slots_by_face() {
     let brewing = state(
         &mut registry,
         "minecraft:brewing_stand",
-        &[("has_bottle_0", "false"), ("has_bottle_1", "false"), ("has_bottle_2", "false")],
+        &[
+            ("has_bottle_0", "false"),
+            ("has_bottle_1", "false"),
+            ("has_bottle_2", "false"),
+        ],
     );
     let top_hopper = BlockPos::new(0, 1, 0);
     let top_brewing = BlockPos::ZERO;
@@ -178,7 +185,11 @@ async fn brewing_stands_expose_ingredient_fuel_and_output_slots_by_face() {
     world.set_block_entity(bottom_hopper, container("minecraft:hopper", 5, &[]));
     world.set_block_entity(
         bottom_brewing,
-        container("minecraft:brewing_stand", 5, &[(3, "minecraft:nether_wart", 1)]),
+        container(
+            "minecraft:brewing_stand",
+            5,
+            &[(3, "minecraft:nether_wart", 1)],
+        ),
     );
     let rules = Java26Rules::new(registry);
     let mut simulation = Simulation::load(rules, world, SimulationConfig::default())
@@ -187,10 +198,26 @@ async fn brewing_stands_expose_ingredient_fuel_and_output_slots_by_face() {
 
     simulation.step().await.unwrap();
 
-    assert_eq!(slot_item(simulation.world(), top_brewing, 3), Some(("minecraft:nether_wart", 1)));
-    assert_eq!(slot_item(simulation.world(), side_brewing, 4), Some(("minecraft:blaze_powder", 1)));
-    assert_eq!(slot_item(simulation.world(), bottom_brewing, 3), Some(("minecraft:nether_wart", 1)));
-    assert_eq!(simulation.world().block_entity(bottom_hopper).unwrap().fields["item_count"], 0);
+    assert_eq!(
+        slot_item(simulation.world(), top_brewing, 3),
+        Some(("minecraft:nether_wart", 1))
+    );
+    assert_eq!(
+        slot_item(simulation.world(), side_brewing, 4),
+        Some(("minecraft:blaze_powder", 1))
+    );
+    assert_eq!(
+        slot_item(simulation.world(), bottom_brewing, 3),
+        Some(("minecraft:nether_wart", 1))
+    );
+    assert_eq!(
+        simulation
+            .world()
+            .block_entity(bottom_hopper)
+            .unwrap()
+            .fields["item_count"],
+        0
+    );
 }
 
 #[tokio::test]
@@ -233,7 +260,10 @@ async fn hopper_insertion_skips_disabled_crafter_slots() {
     simulation.step().await.unwrap();
 
     assert_eq!(slot_item(simulation.world(), crafter_pos, 0), None);
-    assert_eq!(slot_item(simulation.world(), crafter_pos, 1), Some(("minecraft:stone", 1)));
+    assert_eq!(
+        slot_item(simulation.world(), crafter_pos, 1),
+        Some(("minecraft:stone", 1))
+    );
 }
 
 #[tokio::test]
@@ -253,7 +283,11 @@ async fn dropper_preserves_a_shulker_box_rejected_by_an_existing_container() {
     world.set_block(target, shulker).unwrap();
     world.set_block_entity(
         BlockPos::ZERO,
-        container("minecraft:dropper", 9, &[(0, "minecraft:blue_shulker_box", 1)]),
+        container(
+            "minecraft:dropper",
+            9,
+            &[(0, "minecraft:blue_shulker_box", 1)],
+        ),
     );
     world.set_block_entity(target, container("minecraft:shulker_box", 27, &[]));
     let rules = Java26Rules::new(registry);
@@ -261,12 +295,18 @@ async fn dropper_preserves_a_shulker_box_rejected_by_an_existing_container() {
         .await
         .unwrap();
 
-    simulation.run_until(redstone_core::GameTick(5)).await.unwrap();
+    simulation
+        .run_until(redstone_core::GameTick(5))
+        .await
+        .unwrap();
 
     assert_eq!(
         slot_item(simulation.world(), BlockPos::ZERO, 0),
         Some(("minecraft:blue_shulker_box", 1))
     );
     assert_eq!(simulation.world().entities().count(), 0);
-    assert_eq!(simulation.world().block_entity(target).unwrap().fields["item_count"], 0);
+    assert_eq!(
+        simulation.world().block_entity(target).unwrap().fields["item_count"],
+        0
+    );
 }

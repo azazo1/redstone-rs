@@ -17,7 +17,10 @@ fn inspect_queries_block_types_coordinates_and_raw_components_as_json() {
     let hopper_report = serde_json::from_slice::<serde_json::Value>(&hopper_output.stdout).unwrap();
     let hopper = &hopper_report["blocks"][0];
     assert_eq!(hopper_report["blocks"].as_array().unwrap().len(), 1);
-    assert_eq!(hopper["position"], serde_json::json!({ "x": 0, "y": 0, "z": 0 }));
+    assert_eq!(
+        hopper["position"],
+        serde_json::json!({ "x": 0, "y": 0, "z": 0 })
+    );
     assert_eq!(hopper["state"]["name"], "minecraft:hopper");
     assert_eq!(hopper["state"]["properties"]["facing"], "down");
     assert_eq!(hopper["block_entity"]["id"], "minecraft:hopper");
@@ -26,8 +29,7 @@ fn inspect_queries_block_types_coordinates_and_raw_components_as_json() {
         "input"
     );
     assert_eq!(
-        hopper["block_entity"]["nbt"]["Items"][0]["components"]
-            ["minecraft:custom_data"]["channel"],
+        hopper["block_entity"]["nbt"]["Items"][0]["components"]["minecraft:custom_data"]["channel"],
         7
     );
 
@@ -35,7 +37,10 @@ fn inspect_queries_block_types_coordinates_and_raw_components_as_json() {
     assert_success(&stone_output);
     let stone_report = serde_json::from_slice::<serde_json::Value>(&stone_output.stdout).unwrap();
     assert_eq!(stone_report["blocks"].as_array().unwrap().len(), 1);
-    assert_eq!(stone_report["blocks"][0]["state"]["name"], "minecraft:stone");
+    assert_eq!(
+        stone_report["blocks"][0]["state"]["name"],
+        "minecraft:stone"
+    );
     assert!(stone_report["blocks"][0].get("block_entity").is_none());
 }
 
@@ -112,9 +117,7 @@ fn block_state(name: &str, properties: &[(&str, &str)]) -> Value {
             Value::Compound(
                 properties
                     .iter()
-                    .map(|(name, value)| {
-                        ((*name).to_owned(), Value::String((*value).to_owned()))
-                    })
+                    .map(|(name, value)| ((*name).to_owned(), Value::String((*value).to_owned())))
                     .collect(),
             ),
         );
@@ -138,7 +141,10 @@ fn structure_block(x: i32, state: i32, nbt: Option<HashMap<String, Value>>) -> V
 
 fn hopper_nbt() -> HashMap<String, Value> {
     HashMap::from([
-        ("id".to_owned(), Value::String("minecraft:hopper".to_owned())),
+        (
+            "id".to_owned(),
+            Value::String("minecraft:hopper".to_owned()),
+        ),
         (
             "components".to_owned(),
             Value::Compound(HashMap::from([(
@@ -150,16 +156,16 @@ fn hopper_nbt() -> HashMap<String, Value> {
             "Items".to_owned(),
             Value::List(vec![Value::Compound(HashMap::from([
                 ("Slot".to_owned(), Value::Byte(0)),
-                ("id".to_owned(), Value::String("minecraft:redstone".to_owned())),
+                (
+                    "id".to_owned(),
+                    Value::String("minecraft:redstone".to_owned()),
+                ),
                 ("count".to_owned(), Value::Int(1)),
                 (
                     "components".to_owned(),
                     Value::Compound(HashMap::from([(
                         "minecraft:custom_data".to_owned(),
-                        Value::Compound(HashMap::from([(
-                            "channel".to_owned(),
-                            Value::Int(7),
-                        )])),
+                        Value::Compound(HashMap::from([("channel".to_owned(), Value::Int(7))])),
                     )])),
                 ),
             ]))]),

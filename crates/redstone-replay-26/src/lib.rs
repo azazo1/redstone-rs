@@ -13,13 +13,11 @@ use zip::write::SimpleFileOptions;
 
 use crate::protocol::PacketState;
 use crate::protocol::block_entity::{BlockEntityEncodeError, block_entity_data};
-use crate::protocol::chunk::{
-    ChunkSnapshot, MAX_BLOCK_STATE_ID, MAX_Y, MIN_Y, encode_chunk,
-};
+use crate::protocol::chunk::{ChunkSnapshot, MAX_BLOCK_STATE_ID, MAX_Y, MIN_Y, encode_chunk};
 use crate::protocol::packets::{
-    Camera, CONFIG_ENABLED_FEATURES, CONFIG_FINISH, CONFIG_REGISTRY_DATA,
-    CONFIG_SELECT_KNOWN_PACKS, CONFIG_UPDATE_TAGS, LOGIN_FINISHED, PLAY_BLOCK_ENTITY_DATA,
-    PLAY_BLOCK_EVENT, PLAY_BLOCK_UPDATE, PLAY_CHUNK_BATCH_FINISHED, PLAY_CHUNK_BATCH_START,
+    CONFIG_ENABLED_FEATURES, CONFIG_FINISH, CONFIG_REGISTRY_DATA, CONFIG_SELECT_KNOWN_PACKS,
+    CONFIG_UPDATE_TAGS, Camera, LOGIN_FINISHED, PLAY_BLOCK_ENTITY_DATA, PLAY_BLOCK_EVENT,
+    PLAY_BLOCK_UPDATE, PLAY_CHUNK_BATCH_FINISHED, PLAY_CHUNK_BATCH_START,
     PLAY_LEVEL_CHUNK_WITH_LIGHT, PLAY_LOGIN, PLAY_PLAYER_POSITION, PLAY_SET_CHUNK_CACHE_CENTER,
     PLAY_SET_CHUNK_CACHE_RADIUS, PLAY_SET_DEFAULT_SPAWN, PLAY_SET_SIMULATION_DISTANCE,
     PLAY_SET_TIME, block_event, block_update, chunk_cache_center, default_spawn, enabled_features,
@@ -224,10 +222,7 @@ impl ReplayWriter {
                 }
                 BlockEntityChange::Remove { .. } => {}
             },
-            WorldEvent::BlockEvent {
-                event,
-                block_name,
-            } => {
+            WorldEvent::BlockEvent { event, block_name } => {
                 if self.options.piston_animation
                     && let Some(block) = piston_block_registry_id(block_name)
                 {
@@ -246,14 +241,16 @@ impl ReplayWriter {
     ) -> Result<(), ReplayError> {
         validate_position(event.pos)?;
         self.ensure_chunk_area(timestamp, chunk_pos(event.pos))?;
-        let param_a = u8::try_from(event.param_a).map_err(|_| ReplayError::BlockEventParameter {
-            name: "param_a",
-            value: event.param_a,
-        })?;
-        let param_b = u8::try_from(event.param_b).map_err(|_| ReplayError::BlockEventParameter {
-            name: "param_b",
-            value: event.param_b,
-        })?;
+        let param_a =
+            u8::try_from(event.param_a).map_err(|_| ReplayError::BlockEventParameter {
+                name: "param_a",
+                value: event.param_a,
+            })?;
+        let param_b =
+            u8::try_from(event.param_b).map_err(|_| ReplayError::BlockEventParameter {
+                name: "param_b",
+                value: event.param_b,
+            })?;
         self.write_packet(
             timestamp,
             PacketState::Play,
@@ -302,7 +299,10 @@ impl ReplayWriter {
         let mut chunks = BTreeMap::<(i32, i32), ChunkSnapshot>::new();
         for (pos, state) in world.iter_blocks() {
             validate_block(pos, state.0)?;
-            chunks.entry(chunk_pos(pos)).or_default().set_block(pos, state);
+            chunks
+                .entry(chunk_pos(pos))
+                .or_default()
+                .set_block(pos, state);
         }
         for (pos, data) in world.block_entities() {
             validate_position(*pos)?;
@@ -502,7 +502,10 @@ impl ReplayWriter {
         packet.write_bytes(payload);
         let packet = packet.into_inner();
         let packet_len = i32::try_from(packet.len()).map_err(|_| ReplayError::PacketTooLarge)?;
-        let recording = self.recording.as_mut().ok_or(ReplayError::AlreadyFinished)?;
+        let recording = self
+            .recording
+            .as_mut()
+            .ok_or(ReplayError::AlreadyFinished)?;
         let timestamp_bytes = timestamp.to_be_bytes();
         let length_bytes = packet_len.to_be_bytes();
         recording.write_all(&timestamp_bytes)?;
@@ -605,8 +608,7 @@ impl ChunkArea {
     }
 
     fn chunks(self) -> impl Iterator<Item = (i32, i32)> {
-        (self.min_x..=self.max_x)
-            .flat_map(move |x| (self.min_z..=self.max_z).map(move |z| (x, z)))
+        (self.min_x..=self.max_x).flat_map(move |x| (self.min_z..=self.max_z).map(move |z| (x, z)))
     }
 }
 
@@ -679,8 +681,7 @@ fn validate_position(pos: BlockPos) -> Result<(), ReplayError> {
     if !(MIN_Y..=MAX_Y).contains(&pos.y) {
         return Err(ReplayError::HeightOutOfRange { pos });
     }
-    if !(-33_554_432..=33_554_431).contains(&pos.x)
-        || !(-33_554_432..=33_554_431).contains(&pos.z)
+    if !(-33_554_432..=33_554_431).contains(&pos.x) || !(-33_554_432..=33_554_431).contains(&pos.z)
     {
         return Err(ReplayError::PositionOutOfRange { pos });
     }
@@ -782,10 +783,7 @@ mod tests {
                 seed: 7,
                 experimental: false,
                 recorded_at: UNIX_EPOCH + Duration::from_millis(1234),
-                region: ReplayRegion::new(
-                    BlockPos::new(-1, -64, 16),
-                    BlockPos::new(-1, -64, 16),
-                ),
+                region: ReplayRegion::new(BlockPos::new(-1, -64, 16), BlockPos::new(-1, -64, 16)),
                 piston_animation: false,
             },
             &world,
@@ -883,7 +881,10 @@ mod tests {
         let moving_piston = BlockEntityData {
             kind: "minecraft:moving_piston".to_owned(),
             fields: BTreeMap::from([
-                ("direction".to_owned(), serde_json::Value::String("east".to_owned())),
+                (
+                    "direction".to_owned(),
+                    serde_json::Value::String("east".to_owned()),
+                ),
                 ("extending".to_owned(), serde_json::Value::Bool(true)),
                 (
                     "moved_state_name".to_owned(),

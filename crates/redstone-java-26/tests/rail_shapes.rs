@@ -3,11 +3,7 @@ use std::collections::BTreeMap;
 use redstone_core::{BlockPos, BlockStateId, Simulation, SimulationConfig, SparseWorld};
 use redstone_java_26::{Java26Registry, Java26Rules, StateResolver};
 
-fn state(
-    registry: &mut Java26Registry,
-    name: &str,
-    properties: &[(&str, &str)],
-) -> BlockStateId {
+fn state(registry: &mut Java26Registry, name: &str, properties: &[(&str, &str)]) -> BlockStateId {
     registry
         .resolve_state(
             name,
@@ -72,7 +68,11 @@ async fn ordinary_rail_forms_a_south_east_corner() {
     let mut registry = Java26Registry::new();
     let rail = rail(&mut registry);
     let mut world = SparseWorld::new(registry.air_state());
-    for pos in [BlockPos::ZERO, BlockPos::new(1, 0, 0), BlockPos::new(0, 0, 1)] {
+    for pos in [
+        BlockPos::ZERO,
+        BlockPos::new(1, 0, 0),
+        BlockPos::new(0, 0, 1),
+    ] {
         world.set_block(pos, rail).unwrap();
     }
     let rules = Java26Rules::new(registry);
@@ -108,7 +108,11 @@ async fn straight_rail_types_never_form_a_corner() {
     let mut registry = Java26Registry::new();
     let rail = powered_rail(&mut registry);
     let mut world = SparseWorld::new(registry.air_state());
-    for pos in [BlockPos::ZERO, BlockPos::new(1, 0, 0), BlockPos::new(0, 0, 1)] {
+    for pos in [
+        BlockPos::ZERO,
+        BlockPos::new(1, 0, 0),
+        BlockPos::new(0, 0, 1),
+    ] {
         world.set_block(pos, rail).unwrap();
     }
     let rules = Java26Rules::new(registry);

@@ -83,10 +83,7 @@ fn moving_piston_nbt(
                 .collect::<BTreeMap<_, _>>()
         })
         .unwrap_or_default();
-    let mut block_state = BTreeMap::from([(
-        "Name".to_owned(),
-        NbtValue::String(name.to_owned()),
-    )]);
+    let mut block_state = BTreeMap::from([("Name".to_owned(), NbtValue::String(name.to_owned()))]);
     if !properties.is_empty() {
         block_state.insert("Properties".to_owned(), NbtValue::Compound(properties));
     }
@@ -140,10 +137,16 @@ fn generic_block_entity_nbt(
     if is_container {
         output.insert("Items".to_owned(), container_items(data)?);
         if let Some(cooldown) = data.fields.get("cooldown").and_then(Value::as_i64) {
-            output.insert("TransferCooldown".to_owned(), NbtValue::Int(clamp_i32(cooldown)));
+            output.insert(
+                "TransferCooldown".to_owned(),
+                NbtValue::Int(clamp_i32(cooldown)),
+            );
         }
     }
-    if matches!(data.kind.as_str(), "minecraft:sign" | "minecraft:hanging_sign") {
+    if matches!(
+        data.kind.as_str(),
+        "minecraft:sign" | "minecraft:hanging_sign"
+    ) {
         add_sign_text_defaults(data, &mut output)?;
     }
     Ok(output)
@@ -460,10 +463,7 @@ impl NbtValue {
     }
 }
 
-fn write_nbt_string(
-    output: &mut Vec<u8>,
-    value: &str,
-) -> Result<(), BlockEntityEncodeError> {
+fn write_nbt_string(output: &mut Vec<u8>, value: &str) -> Result<(), BlockEntityEncodeError> {
     let length = u16::try_from(value.len()).map_err(|_| BlockEntityEncodeError::NbtTooLarge)?;
     output.extend_from_slice(&length.to_be_bytes());
     output.extend_from_slice(value.as_bytes());
@@ -505,18 +505,27 @@ mod tests {
                     "moved_state_name".to_owned(),
                     Value::String("minecraft:orange_wool".to_owned()),
                 ),
-                (
-                    "moved_state_properties".to_owned(),
-                    serde_json::json!({}),
-                ),
+                ("moved_state_properties".to_owned(), serde_json::json!({})),
                 ("source".to_owned(), Value::Bool(false)),
             ]),
         };
         let encoded = network_nbt(&data).unwrap();
         assert_eq!(encoded[0], 10);
-        assert!(encoded.windows("blockState".len()).any(|value| value == b"blockState"));
-        assert!(encoded.windows("progress".len()).any(|value| value == b"progress"));
-        assert!(encoded.windows("orange_wool".len()).any(|value| value == b"orange_wool"));
+        assert!(
+            encoded
+                .windows("blockState".len())
+                .any(|value| value == b"blockState")
+        );
+        assert!(
+            encoded
+                .windows("progress".len())
+                .any(|value| value == b"progress")
+        );
+        assert!(
+            encoded
+                .windows("orange_wool".len())
+                .any(|value| value == b"orange_wool")
+        );
     }
 
     #[test]
@@ -534,8 +543,14 @@ mod tests {
             )]),
         };
         let sign = network_nbt(&sign).unwrap();
-        assert!(sign.windows("front_text".len()).any(|value| value == b"front_text"));
-        assert!(sign.windows("back_text".len()).any(|value| value == b"back_text"));
+        assert!(
+            sign.windows("front_text".len())
+                .any(|value| value == b"front_text")
+        );
+        assert!(
+            sign.windows("back_text".len())
+                .any(|value| value == b"back_text")
+        );
 
         let container = BlockEntityData {
             kind: "minecraft:hopper".to_owned(),
@@ -549,8 +564,16 @@ mod tests {
             )]),
         };
         let container = network_nbt(&container).unwrap();
-        assert!(container.windows("Items".len()).any(|value| value == b"Items"));
-        assert!(container.windows("redstone".len()).any(|value| value == b"redstone"));
+        assert!(
+            container
+                .windows("Items".len())
+                .any(|value| value == b"Items")
+        );
+        assert!(
+            container
+                .windows("redstone".len())
+                .any(|value| value == b"redstone")
+        );
     }
 
     #[test]
@@ -570,8 +593,14 @@ mod tests {
             )]),
         };
         let raw = network_nbt(&raw).unwrap();
-        assert!(raw.windows("redstone".len()).any(|value| value == b"redstone"));
-        assert!(raw.windows("custom_name".len()).any(|value| value == b"custom_name"));
+        assert!(
+            raw.windows("redstone".len())
+                .any(|value| value == b"redstone")
+        );
+        assert!(
+            raw.windows("custom_name".len())
+                .any(|value| value == b"custom_name")
+        );
 
         let replaced = BlockEntityData {
             kind: "minecraft:hopper".to_owned(),
@@ -598,7 +627,15 @@ mod tests {
             ]),
         };
         let replaced = network_nbt(&replaced).unwrap();
-        assert!(replaced.windows("stone".len()).any(|value| value == b"stone"));
-        assert!(!replaced.windows("custom_name".len()).any(|value| value == b"custom_name"));
+        assert!(
+            replaced
+                .windows("stone".len())
+                .any(|value| value == b"stone")
+        );
+        assert!(
+            !replaced
+                .windows("custom_name".len())
+                .any(|value| value == b"custom_name")
+        );
     }
 }

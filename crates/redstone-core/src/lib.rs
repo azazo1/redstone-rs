@@ -17,4 +17,4 @@ pub use types::{
     Direction, EntityData, EntityId, Expectation, GameTick, MicroStep, Probe, ProbeSample,
     ProbeValue, RedstoneMode, SimulationPhase, TraceEvent, TraceKind, WorldDelta, WorldEvent,
 };
-pub use world::{PaletteSection, SectionPos, SparseWorld, WorldError, SECTION_EDGE};
+pub use world::{PaletteSection, SECTION_EDGE, SectionPos, SparseWorld, WorldError};

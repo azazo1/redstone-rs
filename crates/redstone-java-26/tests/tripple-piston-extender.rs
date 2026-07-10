@@ -3,9 +3,7 @@ use std::path::PathBuf;
 
 use redstone_core::{Action, BlockPos, GameTick, Simulation, SimulationConfig};
 use redstone_io::{StructureLoader, StructureStateResolver};
-use redstone_java_26::{
-    Java26Registry, Java26Rules, StateResolveError, StateResolver,
-};
+use redstone_java_26::{Java26Registry, Java26Rules, StateResolveError, StateResolver};
 
 const BUTTON_POS: BlockPos = BlockPos::new(3, 1, 1);
 const RETRACTED_WOOL_POS: BlockPos = BlockPos::new(5, 0, 5);
@@ -70,10 +68,12 @@ fn assert_settled_wool_at(
 ) {
     let actual = wool_positions(simulation, wool);
     assert_eq!(actual, [expected]);
-    assert!(simulation
-        .world()
-        .block_entities()
-        .all(|(_, data)| data.kind != "minecraft:moving_piston"));
+    assert!(
+        simulation
+            .world()
+            .block_entities()
+            .all(|(_, data)| data.kind != "minecraft:moving_piston")
+    );
 }
 
 fn wool_positions(

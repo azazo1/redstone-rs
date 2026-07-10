@@ -8,17 +8,17 @@ use redstone_core::{
 };
 use tracing::debug;
 
-use crate::{BlockBehavior, JAVA_VERSION, Java26Registry, PushReaction, StateDefinition};
 use crate::orientation::{Orientation, SideBias};
+use crate::{BlockBehavior, JAVA_VERSION, Java26Registry, PushReaction, StateDefinition};
 
+mod comparator;
+mod consumer;
 mod inventory;
 mod item;
 mod observer;
 mod piston;
 mod removal;
 mod shape;
-mod consumer;
-mod comparator;
 
 use inventory::block_entity_i64;
 
@@ -75,14 +75,7 @@ impl Java26Rules {
         if old == requested_state {
             return Ok(false);
         }
-        let state = self.apply_observer_lifecycle(
-            ctx,
-            pos,
-            old,
-            requested_state,
-            true,
-            true,
-        )?;
+        let state = self.apply_observer_lifecycle(ctx, pos, old, requested_state, true, true)?;
         self.sync_entity_sensor(pos, old, state);
         if state != requested_state {
             return Ok(true);
@@ -146,9 +139,7 @@ impl Java26Rules {
                                 pos: pos.relative(direction),
                                 source_pos: pos,
                                 source_block,
-                                orientation: Some(
-                                    orientation.with_front(direction).index(),
-                                ),
+                                orientation: Some(orientation.with_front(direction).index()),
                                 moved_by_piston: false,
                             });
                         }
@@ -177,7 +168,9 @@ impl Java26Rules {
         pos: BlockPos,
         state: &StateDefinition,
     ) {
-        let facing = state.direction_property("facing").unwrap_or(Direction::North);
+        let facing = state
+            .direction_property("facing")
+            .unwrap_or(Direction::North);
         let output_direction = facing.opposite();
         let output_pos = pos.relative(output_direction);
         let orientation = match ctx.mode {
@@ -279,12 +272,7 @@ impl Java26Rules {
         })
     }
 
-    fn signal(
-        &self,
-        world: &SparseWorld,
-        pos: BlockPos,
-        direction: Direction,
-    ) -> u8 {
+    fn signal(&self, world: &SparseWorld, pos: BlockPos, direction: Direction) -> u8 {
         let state_id = world.get_block(pos);
         let Ok(state) = self.state(state_id) else {
             return 0;
@@ -296,11 +284,7 @@ impl Java26Rules {
         Direction::UPDATE_ORDER
             .into_iter()
             .map(|neighbor_direction| {
-                self.direct_signal(
-                    world,
-                    pos.relative(neighbor_direction),
-                    neighbor_direction,
-                )
+                self.direct_signal(world, pos.relative(neighbor_direction), neighbor_direction)
             })
             .max()
             .unwrap_or(0)
@@ -335,7 +319,11 @@ impl Java26Rules {
                 }
             }
             BlockBehavior::Lever | BlockBehavior::Button { .. } => {
-                if state.bool_property("powered") { 15 } else { 0 }
+                if state.bool_property("powered") {
+                    15
+                } else {
+                    0
+                }
             }
             BlockBehavior::Torch { wall } => {
                 if !state.bool_property("lit") {
@@ -374,10 +362,7 @@ impl Java26Rules {
                     0
                 }
             }
-            BlockBehavior::Target => state
-                .int_property("power")
-                .unwrap_or(0)
-                .clamp(0, 15) as u8,
+            BlockBehavior::Target => state.int_property("power").unwrap_or(0).clamp(0, 15) as u8,
             BlockBehavior::PressurePlate { .. }
             | BlockBehavior::TripwireHook
             | BlockBehavior::DetectorRail
@@ -393,12 +378,7 @@ impl Java26Rules {
         }
     }
 
-    fn direct_signal(
-        &self,
-        world: &SparseWorld,
-        pos: BlockPos,
-        direction: Direction,
-    ) -> u8 {
+    fn direct_signal(&self, world: &SparseWorld, pos: BlockPos, direction: Direction) -> u8 {
         let state_id = world.get_block(pos);
         let Ok(state) = self.state(state_id) else {
             return 0;
@@ -419,9 +399,7 @@ impl Java26Rules {
                     0
                 }
             }
-            BlockBehavior::DetectorRail
-            | BlockBehavior::Lectern
-            | BlockBehavior::TrappedChest => {
+            BlockBehavior::DetectorRail | BlockBehavior::Lectern | BlockBehavior::TrappedChest => {
                 if direction == Direction::Up {
                     self.weak_signal(world, pos, state, direction)
                 } else {
@@ -483,11 +461,8 @@ impl Java26Rules {
         let mut block_power = 0u8;
         for direction in Direction::UPDATE_ORDER {
             let neighbor = pos.relative(direction);
-            block_power = block_power.max(self.signal_without_wire_feedback(
-                world,
-                neighbor,
-                direction,
-            ));
+            block_power =
+                block_power.max(self.signal_without_wire_feedback(world, neighbor, direction));
         }
 
         let above_open = self
@@ -575,12 +550,9 @@ impl Java26Rules {
                             Some(orientation),
                         )?;
                     }
-                    for (candidate, candidate_orientation) in oriented_wire_neighbors(
-                        ctx.world,
-                        pos,
-                        orientation,
-                        &self.registry,
-                    ) {
+                    for (candidate, candidate_orientation) in
+                        oriented_wire_neighbors(ctx.world, pos, orientation, &self.registry)
+                    {
                         if known.insert(candidate) {
                             turn_off.push_back((candidate, candidate_orientation));
                         }
@@ -596,7 +568,8 @@ impl Java26Rules {
                     let old = state.int_property("power").unwrap_or(0).clamp(0, 15) as u8;
                     let target = self.wire_target_power(ctx.world, pos);
                     if target > old {
-                        let new_state = self.changed_state(state_id, "power", target.to_string())?;
+                        let new_state =
+                            self.changed_state(state_id, "power", target.to_string())?;
                         self.set_state_and_notify(
                             ctx,
                             pos,
@@ -604,12 +577,9 @@ impl Java26Rules {
                             "experimental_wire_on",
                             Some(orientation),
                         )?;
-                        for (candidate, candidate_orientation) in oriented_wire_neighbors(
-                            ctx.world,
-                            pos,
-                            orientation,
-                            &self.registry,
-                        ) {
+                        for (candidate, candidate_orientation) in
+                            oriented_wire_neighbors(ctx.world, pos, orientation, &self.registry)
+                        {
                             turn_on.push_back((candidate, candidate_orientation));
                         }
                     }
@@ -628,9 +598,7 @@ impl Java26Rules {
         let state = self.state(state_id)?.clone();
         let attached = attached_block(pos, &state);
         let should_be_lit = self.signal(ctx.world, attached, torch_input_direction(&state)) == 0;
-        if state.bool_property("lit") != should_be_lit
-            && !ctx.has_scheduled_tick(pos, state.kind)
-        {
+        if state.bool_property("lit") != should_be_lit && !ctx.has_scheduled_tick(pos, state.kind) {
             ctx.schedule_tick(pos, state.kind, 2, TickPriority::Normal);
         }
         Ok(())
@@ -662,13 +630,17 @@ impl Java26Rules {
     }
 
     fn diode_input(&self, world: &SparseWorld, pos: BlockPos, state: &StateDefinition) -> u8 {
-        let facing = state.direction_property("facing").unwrap_or(Direction::North);
+        let facing = state
+            .direction_property("facing")
+            .unwrap_or(Direction::North);
         let rear = pos.relative(facing);
         self.signal(world, rear, facing)
     }
 
     fn side_input(&self, world: &SparseWorld, pos: BlockPos, state: &StateDefinition) -> u8 {
-        let facing = state.direction_property("facing").unwrap_or(Direction::North);
+        let facing = state
+            .direction_property("facing")
+            .unwrap_or(Direction::North);
         [facing.clockwise(), facing.counter_clockwise()]
             .into_iter()
             .map(|direction| {
@@ -679,13 +651,10 @@ impl Java26Rules {
             .unwrap_or(0)
     }
 
-    fn repeater_locked(
-        &self,
-        world: &SparseWorld,
-        pos: BlockPos,
-        state: &StateDefinition,
-    ) -> bool {
-        let facing = state.direction_property("facing").unwrap_or(Direction::North);
+    fn repeater_locked(&self, world: &SparseWorld, pos: BlockPos, state: &StateDefinition) -> bool {
+        let facing = state
+            .direction_property("facing")
+            .unwrap_or(Direction::North);
         [facing.clockwise(), facing.counter_clockwise()]
             .into_iter()
             .any(|direction| {
@@ -693,17 +662,14 @@ impl Java26Rules {
                 let Ok(source) = self.state(world.get_block(source_pos)) else {
                     return false;
                 };
-                matches!(source.behavior, BlockBehavior::Repeater | BlockBehavior::Comparator)
-                    && self.signal(world, source_pos, direction) > 0
+                matches!(
+                    source.behavior,
+                    BlockBehavior::Repeater | BlockBehavior::Comparator
+                ) && self.signal(world, source_pos, direction) > 0
             })
     }
 
-    fn comparator_output(
-        &self,
-        world: &SparseWorld,
-        pos: BlockPos,
-        state: &StateDefinition,
-    ) -> u8 {
+    fn comparator_output(&self, world: &SparseWorld, pos: BlockPos, state: &StateDefinition) -> u8 {
         let input = self.analog_input(world, pos, state);
         let side = self.side_input(world, pos, state);
         if side > input {
@@ -715,13 +681,10 @@ impl Java26Rules {
         }
     }
 
-    fn analog_input(
-        &self,
-        world: &SparseWorld,
-        pos: BlockPos,
-        state: &StateDefinition,
-    ) -> u8 {
-        let facing = state.direction_property("facing").unwrap_or(Direction::North);
+    fn analog_input(&self, world: &SparseWorld, pos: BlockPos, state: &StateDefinition) -> u8 {
+        let facing = state
+            .direction_property("facing")
+            .unwrap_or(Direction::North);
         let rear = pos.relative(facing);
         let rear_state = self.state(world.get_block(rear)).ok();
         if rear_state.is_some_and(comparator::has_analog_output) {
@@ -780,7 +743,6 @@ impl Java26Rules {
         Ok(())
     }
 
-
     fn refresh_triggered_container(
         &mut self,
         ctx: &mut EventContext<'_>,
@@ -790,8 +752,10 @@ impl Java26Rules {
     ) -> Result<(), RulesError> {
         let state = self.state(state_id)?.clone();
         let powered = self.is_powered(ctx.world, pos)
-            || matches!(state.behavior, BlockBehavior::Dropper | BlockBehavior::Dispenser)
-                && self.is_powered(ctx.world, pos.relative(Direction::Up));
+            || matches!(
+                state.behavior,
+                BlockBehavior::Dropper | BlockBehavior::Dispenser
+            ) && self.is_powered(ctx.world, pos.relative(Direction::Up));
         let triggered = state.bool_property("triggered");
         if powered && !triggered {
             let next = self.changed_state(state.id, "triggered", "true")?;
@@ -850,9 +814,7 @@ impl Java26Rules {
                     let next = self.changed_state(state_id, "powered", powered.to_string())?;
                     self.set_state_and_notify(ctx, pos, next, "powered_consumer", None)?;
                 }
-                if state.properties.contains_key("open")
-                    && state.bool_property("open") != powered
-                {
+                if state.properties.contains_key("open") && state.bool_property("open") != powered {
                     let next = self.changed_state(state_id, "open", powered.to_string())?;
                     self.set_state_and_notify(ctx, pos, next, "powered_openable", None)?;
                 }
@@ -863,15 +825,12 @@ impl Java26Rules {
                 self.refresh_edge_consumer(ctx, pos, state_id)?;
             }
             BlockBehavior::Tnt if powered => {
-                self.set_state_and_notify(
-                    ctx,
-                    pos,
-                    self.registry.air_state(),
-                    "tnt_primed",
-                    None,
-                )?;
+                self.set_state_and_notify(ctx, pos, self.registry.air_state(), "tnt_primed", None)?;
                 ctx.unsupported(pos, "tnt_explosion");
-                *self.event_counts.entry("tnt_primed".to_owned()).or_default() += 1;
+                *self
+                    .event_counts
+                    .entry("tnt_primed".to_owned())
+                    .or_default() += 1;
             }
             _ => {}
         }
@@ -922,26 +881,10 @@ impl Java26Rules {
             BlockBehavior::Lectern if !force_button && !force_lever => {
                 if !state.bool_property("powered") {
                     let next = self.changed_state(state_id, "powered", "true")?;
-                    if self.set_state_and_notify(
-                        ctx,
-                        pos,
-                        next,
-                        "lectern_page_change",
-                        None,
-                    )? {
-                        ctx.update_neighbors(
-                            pos.relative(Direction::Down),
-                            state.kind,
-                            None,
-                            None,
-                        );
+                    if self.set_state_and_notify(ctx, pos, next, "lectern_page_change", None)? {
+                        ctx.update_neighbors(pos.relative(Direction::Down), state.kind, None, None);
                     }
-                    ctx.schedule_tick_after_neighbors(
-                        pos,
-                        state.kind,
-                        2,
-                        TickPriority::Normal,
-                    );
+                    ctx.schedule_tick_after_neighbors(pos, state.kind, 2, TickPriority::Normal);
                 }
             }
             BlockBehavior::NoteBlock if !force_button && !force_lever => {
@@ -975,7 +918,9 @@ impl BlockRules for Java26Rules {
     }
 
     fn block_kind(&self, state: BlockStateId) -> BlockKindId {
-        self.registry.state(state).map_or(BlockKindId(0), |state| state.kind)
+        self.registry
+            .state(state)
+            .map_or(BlockKindId(0), |state| state.kind)
     }
 
     fn block_name(&self, state: BlockStateId) -> &str {
@@ -985,17 +930,20 @@ impl BlockRules for Java26Rules {
     }
 
     fn is_supported(&self, state: BlockStateId) -> bool {
-        self.registry.state(state).is_some_and(|state| state.supported)
+        self.registry
+            .state(state)
+            .is_some_and(|state| state.supported)
     }
 
     fn load_world(&mut self, world: &SparseWorld) -> Result<(), RulesError> {
         self.entity_sensors.clear();
-        self.entity_sensors.extend(world.iter_blocks().filter_map(|(pos, state)| {
-            self.registry
-                .state(state)
-                .is_some_and(|state| tracks_entity_collisions(&state.behavior))
-                .then_some(pos)
-        }));
+        self.entity_sensors
+            .extend(world.iter_blocks().filter_map(|(pos, state)| {
+                self.registry
+                    .state(state)
+                    .is_some_and(|state| tracks_entity_collisions(&state.behavior))
+                    .then_some(pos)
+            }));
         Ok(())
     }
 
@@ -1205,7 +1153,10 @@ impl BlockRules for Java26Rules {
                     }
                     if burnout {
                         ctx.schedule_tick(tick.pos, state.kind, 160, TickPriority::Normal);
-                        *self.event_counts.entry("torch_burnout".to_owned()).or_default() += 1;
+                        *self
+                            .event_counts
+                            .entry("torch_burnout".to_owned())
+                            .or_default() += 1;
                     }
                 }
             }
@@ -1219,17 +1170,9 @@ impl BlockRules for Java26Rules {
                         let next = self.changed_state(state_id, "powered", "true")?;
                         self.set_diode_state(ctx, tick.pos, next, "repeater_tick")?;
                         if !should_power {
-                            let delay = state
-                                .int_property("delay")
-                                .unwrap_or(1)
-                                .clamp(1, 4) as u64
-                                * 2;
-                            ctx.schedule_tick(
-                                tick.pos,
-                                state.kind,
-                                delay,
-                                TickPriority::VeryHigh,
-                            );
+                            let delay =
+                                state.int_property("delay").unwrap_or(1).clamp(1, 4) as u64 * 2;
+                            ctx.schedule_tick(tick.pos, state.kind, delay, TickPriority::VeryHigh);
                         }
                     }
                 }
@@ -1241,8 +1184,7 @@ impl BlockRules for Java26Rules {
                 if old_output != output || state.property("mode") == Some("compare") {
                     let powered = output > 0;
                     if powered != state.bool_property("powered") {
-                        let next =
-                            self.changed_state(state_id, "powered", powered.to_string())?;
+                        let next = self.changed_state(state_id, "powered", powered.to_string())?;
                         self.set_diode_state(ctx, tick.pos, next, "comparator_tick")?;
                     }
                     self.update_diode_output_neighbors(ctx, tick.pos, &state);
@@ -1264,13 +1206,7 @@ impl BlockRules for Java26Rules {
             BlockBehavior::Lectern => {
                 if state.bool_property("powered") {
                     let next = self.changed_state(state_id, "powered", "false")?;
-                    if self.set_state_and_notify(
-                        ctx,
-                        tick.pos,
-                        next,
-                        "lectern_pulse_end",
-                        None,
-                    )? {
+                    if self.set_state_and_notify(ctx, tick.pos, next, "lectern_pulse_end", None)? {
                         ctx.update_neighbors(
                             tick.pos.relative(Direction::Down),
                             state.kind,
@@ -1392,7 +1328,11 @@ impl BlockRules for Java26Rules {
                 let sky = block_entity_i64(ctx.world, pos, "sky_signal")
                     .unwrap_or_else(|| state.int_property("power").unwrap_or(0).into())
                     .clamp(0, 15);
-                let power = if state.bool_property("inverted") { 15 - sky } else { sky };
+                let power = if state.bool_property("inverted") {
+                    15 - sky
+                } else {
+                    sky
+                };
                 if state.int_property("power") != Some(power as i32) {
                     let next = self.changed_state(state.id, "power", power.to_string())?;
                     self.set_state_and_notify(ctx, pos, next, "daylight_detector", None)?;
@@ -1405,18 +1345,11 @@ impl BlockRules for Java26Rules {
                 let previous = block_entity_i64(ctx.world, pos, "last_open_count").unwrap_or(0);
                 if open != previous {
                     ctx.update_block_entity(pos, |data| {
-                        data.fields.insert(
-                            "last_open_count".to_owned(),
-                            serde_json::Value::from(open),
-                        );
+                        data.fields
+                            .insert("last_open_count".to_owned(), serde_json::Value::from(open));
                     });
                     ctx.update_neighbors(pos, state.kind, None, None);
-                    ctx.update_neighbors(
-                        pos.relative(Direction::Down),
-                        state.kind,
-                        None,
-                        None,
-                    );
+                    ctx.update_neighbors(pos.relative(Direction::Down), state.kind, None, None);
                 }
             }
             _ => {}
@@ -1443,10 +1376,12 @@ impl BlockRules for Java26Rules {
                 .registry
                 .state(world.get_block(*pos))
                 .and_then(|state| state.property(property))
-                .map_or(ProbeValue::None, |value| ProbeValue::String(value.to_owned())),
-            Probe::ContainerCount { pos } => ProbeValue::Integer(
-                block_entity_i64(world, *pos, "item_count").unwrap_or(0),
-            ),
+                .map_or(ProbeValue::None, |value| {
+                    ProbeValue::String(value.to_owned())
+                }),
+            Probe::ContainerCount { pos } => {
+                ProbeValue::Integer(block_entity_i64(world, *pos, "item_count").unwrap_or(0))
+            }
             Probe::EntityCount { kind } => ProbeValue::Integer(
                 world
                     .entities()
@@ -1457,12 +1392,9 @@ impl BlockRules for Java26Rules {
                 .entity(*id)
                 .and_then(|entity| entity.fields.get(field))
                 .map_or(ProbeValue::None, json_probe_value),
-            Probe::EntityContainerCount { id } => ProbeValue::Integer(
-                world
-                    .entity(*id)
-                    .map(entity_container_count)
-                    .unwrap_or(0),
-            ),
+            Probe::EntityContainerCount { id } => {
+                ProbeValue::Integer(world.entity(*id).map(entity_container_count).unwrap_or(0))
+            }
             Probe::EventCount { kind } => {
                 ProbeValue::Integer(self.event_counts.get(kind).copied().unwrap_or(0))
             }
@@ -1507,10 +1439,7 @@ impl Java26Rules {
         let mut expired = Vec::<EntityId>::new();
         let entity_ids = ctx.world.entities().map(|(id, _)| *id).collect::<Vec<_>>();
         for id in entity_ids {
-            let kind = ctx
-                .world
-                .entity(id)
-                .map(|entity| entity.kind.clone());
+            let kind = ctx.world.entity(id).map(|entity| entity.kind.clone());
             match kind.as_deref() {
                 Some("minecraft:item") => {
                     let Some(fields) = ctx.world.entity_fields_mut(id) else {
@@ -1581,9 +1510,15 @@ impl Java26Rules {
             ctx.world.remove_entity(id);
             if kind.as_deref() == Some("minecraft:tnt") {
                 ctx.unsupported(pos.unwrap_or(BlockPos::ZERO), "tnt_explosion");
-                *self.event_counts.entry("tnt_explosion".to_owned()).or_default() += 1;
+                *self
+                    .event_counts
+                    .entry("tnt_explosion".to_owned())
+                    .or_default() += 1;
             } else {
-                *self.event_counts.entry("item_despawn".to_owned()).or_default() += 1;
+                *self
+                    .event_counts
+                    .entry("item_despawn".to_owned())
+                    .or_default() += 1;
             }
         }
         Ok(())
@@ -1613,9 +1548,8 @@ impl Java26Rules {
                 (power, 20)
             }
             BlockBehavior::DetectorRail => {
-                let count = entities_on_block(ctx.world, pos, |entity| {
-                    entity.kind.ends_with("minecart")
-                });
+                let count =
+                    entities_on_block(ctx.world, pos, |entity| entity.kind.ends_with("minecart"));
                 (if count > 0 { 15 } else { 0 }, 20)
             }
             BlockBehavior::Tripwire => {
@@ -1646,12 +1580,7 @@ impl Java26Rules {
                     BlockBehavior::PressurePlate { .. } | BlockBehavior::DetectorRail
                 )
             {
-                ctx.update_neighbors(
-                    pos.relative(Direction::Down),
-                    state.kind,
-                    None,
-                    None,
-                );
+                ctx.update_neighbors(pos.relative(Direction::Down), state.kind, None, None);
             }
             if matches!(state.behavior, BlockBehavior::Tripwire) {
                 self.refresh_tripwire_hooks(ctx, pos, power > 0)?;
@@ -1686,13 +1615,7 @@ impl Java26Rules {
                         if state.bool_property("powered") != powered {
                             next = self.changed_state(next, "powered", powered.to_string())?;
                         }
-                        if self.set_state_and_notify(
-                            ctx,
-                            cursor,
-                            next,
-                            "tripwire_hook",
-                            None,
-                        )? {
+                        if self.set_state_and_notify(ctx, cursor, next, "tripwire_hook", None)? {
                             update_attached_power_neighbors(ctx, cursor, &state);
                         }
                         break;
@@ -1781,9 +1704,9 @@ fn entity_block_pos(position: [f64; 3]) -> BlockPos {
 fn json_probe_value(value: &serde_json::Value) -> ProbeValue {
     match value {
         serde_json::Value::Bool(value) => ProbeValue::Bool(*value),
-        serde_json::Value::Number(value) => value
-            .as_i64()
-            .map_or(ProbeValue::None, ProbeValue::Integer),
+        serde_json::Value::Number(value) => {
+            value.as_i64().map_or(ProbeValue::None, ProbeValue::Integer)
+        }
         serde_json::Value::String(value) => ProbeValue::String(value.clone()),
         _ => ProbeValue::String(value.to_string()),
     }
@@ -1800,7 +1723,12 @@ fn entity_container_count(entity: &redstone_core::EntityData) -> i64 {
                 .filter_map(|entry| entry.get("count").and_then(serde_json::Value::as_i64))
                 .sum()
         })
-        .or_else(|| entity.fields.get("item_count").and_then(serde_json::Value::as_i64))
+        .or_else(|| {
+            entity
+                .fields
+                .get("item_count")
+                .and_then(serde_json::Value::as_i64)
+        })
         .unwrap_or(0)
 }
 
@@ -1850,7 +1778,10 @@ fn absorb_into_hopper_minecart(world: &mut SparseWorld, id: EntityId) -> bool {
     if item_count <= 1 {
         world.remove_entity(item_id);
     } else if let Some(fields) = world.entity_fields_mut(item_id) {
-        fields.insert("item_count".to_owned(), serde_json::Value::from(item_count - 1));
+        fields.insert(
+            "item_count".to_owned(),
+            serde_json::Value::from(item_count - 1),
+        );
     }
     true
 }
@@ -1914,7 +1845,9 @@ fn insert_entity_item(world: &mut SparseWorld, id: EntityId, item_id: &str) -> b
     if let Some(fields) = world.entity_fields_mut(id) {
         fields.insert("inventory".to_owned(), serde_json::Value::Array(inventory));
         fields.insert("item_count".to_owned(), serde_json::Value::from(count));
-        fields.entry("capacity".to_owned()).or_insert_with(|| serde_json::Value::from(320));
+        fields
+            .entry("capacity".to_owned())
+            .or_insert_with(|| serde_json::Value::from(320));
     }
     true
 }
@@ -1922,9 +1855,7 @@ fn insert_entity_item(world: &mut SparseWorld, id: EntityId, item_id: &str) -> b
 fn tracks_entity_collisions(behavior: &BlockBehavior) -> bool {
     matches!(
         behavior,
-        BlockBehavior::PressurePlate { .. }
-            | BlockBehavior::Tripwire
-            | BlockBehavior::DetectorRail
+        BlockBehavior::PressurePlate { .. } | BlockBehavior::Tripwire | BlockBehavior::DetectorRail
     )
 }
 
@@ -1967,7 +1898,9 @@ fn attached_direction(state: &StateDefinition) -> Direction {
     match state.property("face") {
         Some("ceiling") => Direction::Down,
         Some("floor") => Direction::Up,
-        _ => state.direction_property("facing").unwrap_or(Direction::North),
+        _ => state
+            .direction_property("facing")
+            .unwrap_or(Direction::North),
     }
 }
 

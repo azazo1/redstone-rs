@@ -220,7 +220,11 @@ mod tests {
         assert_eq!(&encoded[0..4], &(-2i32).to_be_bytes());
         assert_eq!(&encoded[4..8], &(-1i32).to_be_bytes());
         assert_eq!(encoded[8], 2);
-        assert!(encoded.windows(LIGHT_BYTES).any(|window| window.iter().all(|byte| *byte == 0xff)));
+        assert!(
+            encoded
+                .windows(LIGHT_BYTES)
+                .any(|window| window.iter().all(|byte| *byte == 0xff))
+        );
     }
 
     #[test]
@@ -255,12 +259,23 @@ mod tests {
         assert_eq!(read_var_int(&encoded, &mut offset), 1);
         assert_eq!(encoded[offset], 0xff);
         offset += 1;
-        assert_eq!(i16::from_be_bytes(encoded[offset..offset + 2].try_into().unwrap()), 12);
+        assert_eq!(
+            i16::from_be_bytes(encoded[offset..offset + 2].try_into().unwrap()),
+            12
+        );
         offset += 2;
         assert_eq!(read_var_int(&encoded, &mut offset), 7);
         assert_eq!(encoded[offset], 10);
-        assert!(encoded[offset..].windows(10).any(|value| value == b"front_text"));
-        assert!(encoded[offset..].windows(9).any(|value| value == b"back_text"));
+        assert!(
+            encoded[offset..]
+                .windows(10)
+                .any(|value| value == b"front_text")
+        );
+        assert!(
+            encoded[offset..]
+                .windows(9)
+                .any(|value| value == b"back_text")
+        );
     }
 
     fn encoded_bits(distinct: usize) -> u8 {

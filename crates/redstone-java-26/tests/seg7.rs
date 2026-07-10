@@ -1,13 +1,9 @@
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 
-use redstone_core::{
-    Action, BlockPos, GameTick, RedstoneMode, Simulation, SimulationConfig,
-};
+use redstone_core::{Action, BlockPos, GameTick, RedstoneMode, Simulation, SimulationConfig};
 use redstone_io::{StructureLoader, StructureStateResolver};
-use redstone_java_26::{
-    Java26Registry, Java26Rules, StateResolveError, StateResolver,
-};
+use redstone_java_26::{Java26Registry, Java26Rules, StateResolveError, StateResolver};
 
 const SEGMENTS: [[BlockPos; 3]; 7] = [
     [
@@ -89,8 +85,8 @@ async fn experimental_wire_mode_displays_each_decimal_input_with_seven_segments(
 }
 
 async fn assert_all_digits(mode: RedstoneMode) {
-    let schematic = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("../../assets/schematics/seg7.litematic");
+    let schematic =
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../assets/schematics/seg7.litematic");
     let mut resolver = RegistryResolver(Java26Registry::new());
     let loaded = StructureLoader::load(&schematic, BlockPos::ZERO, &mut resolver).unwrap();
 

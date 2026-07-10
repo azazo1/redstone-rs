@@ -162,11 +162,22 @@ pub struct EntityData {
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum Action {
-    SetBlock { pos: BlockPos, state: BlockStateId },
-    BreakBlock { pos: BlockPos },
-    UseBlock { pos: BlockPos },
-    PressButton { pos: BlockPos },
-    PullLever { pos: BlockPos },
+    SetBlock {
+        pos: BlockPos,
+        state: BlockStateId,
+    },
+    BreakBlock {
+        pos: BlockPos,
+    },
+    UseBlock {
+        pos: BlockPos,
+    },
+    PressButton {
+        pos: BlockPos,
+    },
+    PullLever {
+        pos: BlockPos,
+    },
     SetBlockEntity {
         pos: BlockPos,
         data: BlockEntityData,
@@ -205,13 +216,29 @@ pub enum Probe {
         #[serde(default)]
         direction: Option<Direction>,
     },
-    BlockState { pos: BlockPos },
-    Property { pos: BlockPos, property: String },
-    ContainerCount { pos: BlockPos },
-    EntityCount { kind: Option<String> },
-    EntityField { id: EntityId, field: String },
-    EntityContainerCount { id: EntityId },
-    EventCount { kind: String },
+    BlockState {
+        pos: BlockPos,
+    },
+    Property {
+        pos: BlockPos,
+        property: String,
+    },
+    ContainerCount {
+        pos: BlockPos,
+    },
+    EntityCount {
+        kind: Option<String>,
+    },
+    EntityField {
+        id: EntityId,
+        field: String,
+    },
+    EntityContainerCount {
+        id: EntityId,
+    },
+    EventCount {
+        kind: String,
+    },
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -282,8 +309,12 @@ impl BlockEntityChange {
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum WorldEvent {
-    Block { change: BlockChange },
-    BlockEntity { change: BlockEntityChange },
+    Block {
+        change: BlockChange,
+    },
+    BlockEntity {
+        change: BlockEntityChange,
+    },
     BlockEvent {
         event: BlockEvent,
         block_name: String,
@@ -309,7 +340,9 @@ pub struct TraceEvent {
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 #[serde(tag = "event", rename_all = "snake_case")]
 pub enum TraceKind {
-    Action { action: Action },
+    Action {
+        action: Action,
+    },
     BlockChanged {
         pos: BlockPos,
         old_state: BlockStateId,
@@ -330,7 +363,10 @@ pub enum TraceKind {
         priority: i8,
         sub_tick_order: i64,
     },
-    ScheduledTickExecuted { pos: BlockPos, block: BlockKindId },
+    ScheduledTickExecuted {
+        pos: BlockPos,
+        block: BlockKindId,
+    },
     BlockEventQueued {
         pos: BlockPos,
         block: BlockKindId,
@@ -343,7 +379,15 @@ pub enum TraceKind {
         param_a: i32,
         param_b: i32,
     },
-    ProbeSample { sample: ProbeSample },
-    UnsupportedTrigger { pos: BlockPos, behavior: String },
-    Message { level: String, message: String },
+    ProbeSample {
+        sample: ProbeSample,
+    },
+    UnsupportedTrigger {
+        pos: BlockPos,
+        behavior: String,
+    },
+    Message {
+        level: String,
+        message: String,
+    },
 }

@@ -1,9 +1,9 @@
 use std::collections::BTreeMap;
 use std::fs::File;
+use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
-use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, anyhow, bail};
 use clap::{Parser, Subcommand};
@@ -77,7 +77,11 @@ enum Command {
         scenario: PathBuf,
         #[arg(long)]
         replay: Option<PathBuf>,
-        #[arg(long, requires = "replay", help = "在 Replay Mod 录像中保留活塞动画和声音")]
+        #[arg(
+            long,
+            requires = "replay",
+            help = "在 Replay Mod 录像中保留活塞动画和声音"
+        )]
         replay_anim: bool,
         #[arg(long)]
         trace: Option<PathBuf>,
@@ -90,7 +94,11 @@ enum Command {
         path: PathBuf,
         #[arg(long)]
         replay: Option<PathBuf>,
-        #[arg(long, requires = "replay", help = "在 Replay Mod 录像中保留活塞动画和声音")]
+        #[arg(
+            long,
+            requires = "replay",
+            help = "在 Replay Mod 录像中保留活塞动画和声音"
+        )]
         replay_anim: bool,
         #[arg(long)]
         oracle: bool,
@@ -172,14 +180,16 @@ async fn main() -> Result<()> {
             replay_anim,
             oracle,
             allow_static_fallback,
-        } => test_path(
-            &path,
-            replay.as_deref(),
-            replay_anim,
-            oracle,
-            allow_static_fallback,
-        )
-        .await,
+        } => {
+            test_path(
+                &path,
+                replay.as_deref(),
+                replay_anim,
+                oracle,
+                allow_static_fallback,
+            )
+            .await
+        }
         Command::Trace {
             scenario,
             output,
@@ -219,7 +229,14 @@ async fn bench(blocks: usize, active: usize, ticks: usize) -> Result<()> {
     progress.pb_start();
     for index in 0..blocks {
         let pos = benchmark_position(index, side)?;
-        world.set_block(pos, if index < active { pressure_plate } else { stone })?;
+        world.set_block(
+            pos,
+            if index < active {
+                pressure_plate
+            } else {
+                stone
+            },
+        )?;
         if index % 16_384 == 0 {
             progress.pb_set_position(index as u64);
         }
@@ -241,9 +258,18 @@ async fn bench(blocks: usize, active: usize, ticks: usize) -> Result<()> {
     println!("active_components: {active}");
     println!("sections: {sections}");
     println!("build_ms: {:.3}", build_elapsed.as_secs_f64() * 1_000.0);
-    println!("tick_p50_ms: {:.3}", percentile(&samples, 50).as_secs_f64() * 1_000.0);
-    println!("tick_p95_ms: {:.3}", percentile(&samples, 95).as_secs_f64() * 1_000.0);
-    println!("tick_p99_ms: {:.3}", percentile(&samples, 99).as_secs_f64() * 1_000.0);
+    println!(
+        "tick_p50_ms: {:.3}",
+        percentile(&samples, 50).as_secs_f64() * 1_000.0
+    );
+    println!(
+        "tick_p95_ms: {:.3}",
+        percentile(&samples, 95).as_secs_f64() * 1_000.0
+    );
+    println!(
+        "tick_p99_ms: {:.3}",
+        percentile(&samples, 99).as_secs_f64() * 1_000.0
+    );
     if let Some(rss) = resident_memory_bytes() {
         println!("resident_memory_mib: {:.2}", rss as f64 / 1024.0 / 1024.0);
     }
@@ -402,9 +428,10 @@ async fn execute_scenario(
     }
 
     let mut replay = if let Some(path) = replay_path {
-        let name = scenario_path
-            .file_name()
-            .map_or_else(|| scenario_path.display().to_string(), |name| name.to_string_lossy().into_owned());
+        let name = scenario_path.file_name().map_or_else(
+            || scenario_path.display().to_string(),
+            |name| name.to_string_lossy().into_owned(),
+        );
         Some(
             ReplayWriter::new(
                 path,
@@ -486,12 +513,14 @@ async fn execute_scenario(
         log_replay_stats(path, &stats);
     }
     if let Some(path) = trace_path {
-        let output = File::create(path).with_context(|| format!("创建轨迹文件失败: {}", path.display()))?;
+        let output =
+            File::create(path).with_context(|| format!("创建轨迹文件失败: {}", path.display()))?;
         simulation.trace().write_jsonl(output)?;
         debug!(path = %path.display(), "写入 JSONL 轨迹");
     }
     if let Some(path) = vcd_path {
-        let output = File::create(path).with_context(|| format!("创建 VCD 文件失败: {}", path.display()))?;
+        let output =
+            File::create(path).with_context(|| format!("创建 VCD 文件失败: {}", path.display()))?;
         simulation.trace().write_vcd(output)?;
         info!(path = %path.display(), "写入 VCD 波形");
     }
@@ -531,7 +560,10 @@ async fn test_path(
         std::fs::read_dir(path)?
             .filter_map(Result::ok)
             .map(|entry| entry.path())
-            .filter(|path| path.extension().is_some_and(|extension| extension == "toml"))
+            .filter(|path| {
+                path.extension()
+                    .is_some_and(|extension| extension == "toml")
+            })
             .collect::<Vec<_>>()
     } else {
         vec![path.to_path_buf()]
@@ -581,7 +613,9 @@ async fn test_path(
         match result {
             Ok(summary) => println!(
                 "PASS {} ticks={} trace_events={}",
-                scenario.display(), summary.ticks, summary.trace_events
+                scenario.display(),
+                summary.ticks,
+                summary.trace_events
             ),
             Err(error) => {
                 failures += 1;
@@ -646,7 +680,10 @@ async fn compare_with_oracle(scenario: &Path, rust_trace: &Path) -> Result<()> {
         std::process::id(),
         stable_path_hash(scenario)
     ));
-    let mut command = if oracle.extension().is_some_and(|extension| extension == "sh") {
+    let mut command = if oracle
+        .extension()
+        .is_some_and(|extension| extension == "sh")
+    {
         let mut command = ProcessCommand::new("sh");
         command.arg(&oracle);
         command
@@ -672,8 +709,14 @@ async fn compare_with_oracle(scenario: &Path, rust_trace: &Path) -> Result<()> {
         let mut child = command
             .spawn()
             .with_context(|| format!("启动 Java oracle 失败: {}", oracle.display()))?;
-        let stdout = child.stdout.take().context("捕获 Java oracle stdout 失败")?;
-        let stderr = child.stderr.take().context("捕获 Java oracle stderr 失败")?;
+        let stdout = child
+            .stdout
+            .take()
+            .context("捕获 Java oracle stdout 失败")?;
+        let stderr = child
+            .stderr
+            .take()
+            .context("捕获 Java oracle stderr 失败")?;
         let (status, stdout, stderr) = tokio::join!(
             child.wait(),
             capture_oracle_stream(stdout, "stdout", &scenario_name, &progress),
@@ -906,23 +949,27 @@ fn compare_oracle_samples_v2(rust_trace: &[u8], java_output: &[u8]) -> Result<()
                 param_a,
                 param_b,
                 ..
-            } => Some(OracleMicroSample::BlockEventQueued(OracleBlockEventSample {
-                tick: event.tick.0,
-                pos,
-                param_a,
-                param_b,
-            })),
+            } => Some(OracleMicroSample::BlockEventQueued(
+                OracleBlockEventSample {
+                    tick: event.tick.0,
+                    pos,
+                    param_a,
+                    param_b,
+                },
+            )),
             TraceKind::BlockEventExecuted {
                 pos,
                 param_a,
                 param_b,
                 ..
-            } => Some(OracleMicroSample::BlockEventExecuted(OracleBlockEventSample {
-                tick: event.tick.0,
-                pos,
-                param_a,
-                param_b,
-            })),
+            } => Some(OracleMicroSample::BlockEventExecuted(
+                OracleBlockEventSample {
+                    tick: event.tick.0,
+                    pos,
+                    param_a,
+                    param_b,
+                },
+            )),
             TraceKind::BlockChanged {
                 pos,
                 old_state,
@@ -1110,11 +1157,7 @@ fn compare_oracle_samples_v2(rust_trace: &[u8], java_output: &[u8]) -> Result<()
     compare_sample_vectors("探针", &rust_probes, &java_probes)?;
     compare_sample_vectors("全局微轨迹", &rust_micro, &java_micro)?;
     compare_sample_vectors("邻居更新", &rust_neighbors, &java_neighbors)?;
-    compare_sample_vectors(
-        "计划刻入队",
-        &rust_scheduled_queued,
-        &java_scheduled_queued,
-    )?;
+    compare_sample_vectors("计划刻入队", &rust_scheduled_queued, &java_scheduled_queued)?;
     compare_sample_vectors(
         "计划刻执行",
         &rust_scheduled_executed,

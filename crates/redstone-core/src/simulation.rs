@@ -132,11 +132,10 @@ impl<R: BlockRules> Simulation<R> {
                 action: action.clone(),
             },
         );
-        let tasks = self.with_context_and_changes(
-            SimulationPhase::PreTick,
-            &mut changes,
-            |rules, ctx| rules.apply_action(ctx, &action),
-        )?;
+        let tasks =
+            self.with_context_and_changes(SimulationPhase::PreTick, &mut changes, |rules, ctx| {
+                rules.apply_action(ctx, &action)
+            })?;
         self.process_neighbor_tasks_with_changes(tasks, SimulationPhase::PreTick, &mut changes)?;
         let delta = WorldDelta {
             tick: self.tick,
@@ -200,7 +199,10 @@ impl<R: BlockRules> Simulation<R> {
         Ok(delta)
     }
 
-    pub async fn run_until(&mut self, target: GameTick) -> Result<Vec<WorldDelta>, SimulationError> {
+    pub async fn run_until(
+        &mut self,
+        target: GameTick,
+    ) -> Result<Vec<WorldDelta>, SimulationError> {
         let mut deltas = Vec::new();
         while self.tick < target {
             deltas.push(self.step().await?);
@@ -279,13 +281,13 @@ impl<R: BlockRules> Simulation<R> {
         Ok(())
     }
 
-    fn run_block_events(
-        &mut self,
-        changes: &mut Vec<WorldEvent>,
-    ) -> Result<(), SimulationError> {
+    fn run_block_events(&mut self, changes: &mut Vec<WorldEvent>) -> Result<(), SimulationError> {
         while let Some(event) = self.block_events.pop_front() {
             self.block_event_keys.remove(&event);
-            let block_name = self.rules.block_name(self.world.get_block(event.pos)).to_owned();
+            let block_name = self
+                .rules
+                .block_name(self.world.get_block(event.pos))
+                .to_owned();
             self.push_trace(
                 SimulationPhase::BlockEvents,
                 TraceKind::BlockEventExecuted {
@@ -305,25 +307,15 @@ impl<R: BlockRules> Simulation<R> {
                     Ok(())
                 },
             )?;
-            self.process_neighbor_tasks_with_changes(
-                tasks,
-                SimulationPhase::BlockEvents,
-                changes,
-            )?;
+            self.process_neighbor_tasks_with_changes(tasks, SimulationPhase::BlockEvents, changes)?;
             if executed {
-                changes.insert(event_index, WorldEvent::BlockEvent {
-                    event,
-                    block_name,
-                });
+                changes.insert(event_index, WorldEvent::BlockEvent { event, block_name });
             }
         }
         Ok(())
     }
 
-    fn run_block_entities(
-        &mut self,
-        changes: &mut Vec<WorldEvent>,
-    ) -> Result<(), SimulationError> {
+    fn run_block_entities(&mut self, changes: &mut Vec<WorldEvent>) -> Result<(), SimulationError> {
         let positions = self
             .world
             .block_entities()
@@ -374,14 +366,10 @@ impl<R: BlockRules> Simulation<R> {
                     delay,
                     priority,
                 } => {
-                    let nested = self.with_context_and_changes(
-                        phase,
-                        changes,
-                        |_rules, ctx| {
-                            ctx.schedule_tick(pos, block, delay, priority);
-                            Ok(())
-                        },
-                    )?;
+                    let nested = self.with_context_and_changes(phase, changes, |_rules, ctx| {
+                        ctx.schedule_tick(pos, block, delay, priority);
+                        Ok(())
+                    })?;
                     for task in nested.into_iter().rev() {
                         stack.push(task);
                     }
@@ -393,17 +381,13 @@ impl<R: BlockRules> Simulation<R> {
                     cause,
                     source_block,
                 } => {
-                    let nested = self.with_context_and_changes(
-                        phase,
-                        changes,
-                        |_rules, ctx| {
-                            let old = ctx.set_block(pos, state, cause)?;
-                            if old != state {
-                                ctx.update_neighbors(pos, source_block, None, None);
-                            }
-                            Ok(())
-                        },
-                    )?;
+                    let nested = self.with_context_and_changes(phase, changes, |_rules, ctx| {
+                        let old = ctx.set_block(pos, state, cause)?;
+                        if old != state {
+                            ctx.update_neighbors(pos, source_block, None, None);
+                        }
+                        Ok(())
+                    })?;
                     for task in nested.into_iter().rev() {
                         stack.push(task);
                     }
@@ -413,25 +397,21 @@ impl<R: BlockRules> Simulation<R> {
                     changes: deferred_changes,
                     follow_up,
                 } => {
-                    let nested = self.with_context_and_changes(
-                        phase,
-                        changes,
-                        |_rules, ctx| {
-                            for change in deferred_changes {
-                                ctx.set_block(change.pos, change.state, change.cause)?;
-                                match change.block_entity {
-                                    DeferredBlockEntityUpdate::Keep => {}
-                                    DeferredBlockEntityUpdate::Remove => {
-                                        ctx.remove_block_entity(change.pos);
-                                    }
-                                    DeferredBlockEntityUpdate::Set(data) => {
-                                        ctx.set_block_entity(change.pos, data);
-                                    }
+                    let nested = self.with_context_and_changes(phase, changes, |_rules, ctx| {
+                        for change in deferred_changes {
+                            ctx.set_block(change.pos, change.state, change.cause)?;
+                            match change.block_entity {
+                                DeferredBlockEntityUpdate::Keep => {}
+                                DeferredBlockEntityUpdate::Remove => {
+                                    ctx.remove_block_entity(change.pos);
+                                }
+                                DeferredBlockEntityUpdate::Set(data) => {
+                                    ctx.set_block_entity(change.pos, data);
                                 }
                             }
-                            Ok(())
-                        },
-                    )?;
+                        }
+                        Ok(())
+                    })?;
                     for task in follow_up.into_iter().rev() {
                         stack.push(task);
                     }
@@ -441,11 +421,9 @@ impl<R: BlockRules> Simulation<R> {
                     continue;
                 }
                 NeighborTask::RunRuleTaskAfterNeighbors(task) => {
-                    let nested = self.with_context_and_changes(
-                        phase,
-                        changes,
-                        |rules, ctx| rules.on_deferred_task(ctx, task),
-                    )?;
+                    let nested = self.with_context_and_changes(phase, changes, |rules, ctx| {
+                        rules.on_deferred_task(ctx, task)
+                    })?;
                     for task in nested.into_iter().rev() {
                         stack.push(task);
                     }

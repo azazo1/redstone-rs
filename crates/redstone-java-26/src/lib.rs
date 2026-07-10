@@ -1,10 +1,9 @@
-mod registry;
 mod orientation;
+mod registry;
 mod rules;
 
 pub use registry::{
-    BlockBehavior, Java26Registry, PushReaction, StateDefinition, StateResolveError,
-    StateResolver,
+    BlockBehavior, Java26Registry, PushReaction, StateDefinition, StateResolveError, StateResolver,
 };
 pub use rules::Java26Rules;
 

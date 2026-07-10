@@ -1,16 +1,12 @@
 use std::collections::BTreeMap;
 
 use redstone_core::{
-    Action, BlockPos, BlockStateId, Direction, EntityData, EntityId, Probe, ProbeValue,
-    Simulation, SimulationConfig, SparseWorld,
+    Action, BlockPos, BlockStateId, Direction, EntityData, EntityId, Probe, ProbeValue, Simulation,
+    SimulationConfig, SparseWorld,
 };
 use redstone_java_26::{Java26Registry, Java26Rules, StateResolver};
 
-fn state(
-    registry: &mut Java26Registry,
-    name: &str,
-    properties: &[(&str, &str)],
-) -> BlockStateId {
+fn state(registry: &mut Java26Registry, name: &str, properties: &[(&str, &str)]) -> BlockStateId {
     registry
         .resolve_state(
             name,
@@ -73,7 +69,10 @@ async fn entity_actions_move_a_generic_collision_onto_a_pressure_plate() {
         .unwrap();
     assert_eq!(plate.property("powered"), Some("true"));
     let latest = simulation.step().await.unwrap();
-    assert_eq!(latest.probes[0].value, ProbeValue::String("test".to_owned()));
+    assert_eq!(
+        latest.probes[0].value,
+        ProbeValue::String("test".to_owned())
+    );
 
     simulation
         .apply(Action::RemoveEntity { id: EntityId(50) })
@@ -118,8 +117,14 @@ async fn comparator_reads_and_tracks_a_unique_item_frame_through_a_conductor() {
                 kind: "minecraft:item_frame".to_owned(),
                 position: [2.5, 0.5, 0.5],
                 fields: BTreeMap::from([
-                    ("facing".to_owned(), serde_json::Value::String("east".to_owned())),
-                    ("item_id".to_owned(), serde_json::Value::String("minecraft:map".to_owned())),
+                    (
+                        "facing".to_owned(),
+                        serde_json::Value::String("east".to_owned()),
+                    ),
+                    (
+                        "item_id".to_owned(),
+                        serde_json::Value::String("minecraft:map".to_owned()),
+                    ),
                     ("item_count".to_owned(), serde_json::Value::from(1)),
                     ("rotation".to_owned(), serde_json::Value::from(5)),
                 ]),
@@ -169,7 +174,10 @@ async fn hopper_minecart_absorbs_one_item_per_entity_tick() {
                 kind: "minecraft:item".to_owned(),
                 position: [0.5, 0.1, 0.5],
                 fields: BTreeMap::from([
-                    ("item_id".to_owned(), serde_json::Value::String("minecraft:iron_ingot".to_owned())),
+                    (
+                        "item_id".to_owned(),
+                        serde_json::Value::String("minecraft:iron_ingot".to_owned()),
+                    ),
                     ("item_count".to_owned(), serde_json::Value::from(2)),
                 ]),
             },
@@ -187,11 +195,7 @@ async fn hopper_minecart_absorbs_one_item_per_entity_tick() {
     let first = simulation.step().await.unwrap();
     assert_eq!(first.probes[0].value, ProbeValue::Integer(1));
     assert_eq!(
-        simulation
-            .world()
-            .entity(EntityId(2))
-            .unwrap()
-            .fields["item_count"],
+        simulation.world().entity(EntityId(2)).unwrap().fields["item_count"],
         1
     );
     let second = simulation.step().await.unwrap();

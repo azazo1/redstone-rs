@@ -154,12 +154,16 @@ const fn axis(direction: Direction) -> Axis {
 const fn same_axis(left: Direction, right: Direction) -> bool {
     matches!(
         (left, right),
-        (Direction::West | Direction::East, Direction::West | Direction::East)
-            | (Direction::Down | Direction::Up, Direction::Down | Direction::Up)
-            | (
-                Direction::North | Direction::South,
-                Direction::North | Direction::South
-            )
+        (
+            Direction::West | Direction::East,
+            Direction::West | Direction::East
+        ) | (
+            Direction::Down | Direction::Up,
+            Direction::Down | Direction::Up
+        ) | (
+            Direction::North | Direction::South,
+            Direction::North | Direction::South
+        )
     )
 }
 

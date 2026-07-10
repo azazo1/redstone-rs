@@ -6,11 +6,7 @@ use redstone_core::{
 };
 use redstone_java_26::{Java26Registry, Java26Rules, StateResolver};
 
-fn state(
-    registry: &mut Java26Registry,
-    name: &str,
-    properties: &[(&str, &str)],
-) -> BlockStateId {
+fn state(registry: &mut Java26Registry, name: &str, properties: &[(&str, &str)]) -> BlockStateId {
     registry
         .resolve_state(
             name,
@@ -113,7 +109,12 @@ async fn dispensed_tnt_counts_down_and_records_an_unsupported_explosion() {
     assert_eq!(tnt.fields["ignited_by"], "dispenser");
 
     simulation.run_until(GameTick(84)).await.unwrap();
-    assert!(simulation.world().entities().all(|(_, entity)| entity.kind != "minecraft:tnt"));
+    assert!(
+        simulation
+            .world()
+            .entities()
+            .all(|(_, entity)| entity.kind != "minecraft:tnt")
+    );
     assert!(simulation.trace().events().iter().any(|event| {
         matches!(
             &event.kind,

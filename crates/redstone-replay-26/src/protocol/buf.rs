@@ -95,7 +95,6 @@ impl PacketBuf {
     pub(crate) fn write_block_pos(&mut self, pos: BlockPos) {
         self.write_u64(pack_block_pos(pos));
     }
-
 }
 
 pub(crate) fn pack_block_pos(pos: BlockPos) -> u64 {
@@ -106,9 +105,7 @@ pub(crate) fn pack_block_pos(pos: BlockPos) -> u64 {
 
 #[cfg(test)]
 pub(crate) fn pack_section_pos(x: i32, y: i32, z: i32) -> u64 {
-    ((x as u64 & 0x3f_ffff) << 42)
-        | ((z as u64 & 0x3f_ffff) << 20)
-        | (y as u64 & 0xf_ffff)
+    ((x as u64 & 0x3f_ffff) << 42) | ((z as u64 & 0x3f_ffff) << 20) | (y as u64 & 0xf_ffff)
 }
 
 #[cfg(test)]

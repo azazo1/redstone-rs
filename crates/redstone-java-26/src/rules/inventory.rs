@@ -39,7 +39,9 @@ impl Java26Rules {
                 set_block_entity_i64(ctx, pos, "cooldown", cooldown - 1);
                 return Ok(());
             }
-            let facing = state.direction_property("facing").unwrap_or(Direction::Down);
+            let facing = state
+                .direction_property("facing")
+                .unwrap_or(Direction::Down);
             let target = pos.relative(facing);
             let moved = transfer_one_item(ctx, pos, target, None, Some(facing.opposite()))
                 || transfer_one_item(
@@ -55,7 +57,10 @@ impl Java26Rules {
                 self.refresh_comparators_near(ctx, pos)?;
                 self.refresh_comparators_near(ctx, target)?;
                 self.refresh_comparators_near(ctx, pos.relative(Direction::Up))?;
-                *self.event_counts.entry("hopper_transfer".to_owned()).or_default() += 1;
+                *self
+                    .event_counts
+                    .entry("hopper_transfer".to_owned())
+                    .or_default() += 1;
             }
         }
         Ok(())
@@ -85,19 +90,25 @@ impl Java26Rules {
         let Some(index) = random_stack_index(ctx, pos) else {
             return Ok(());
         };
-        let facing = state.direction_property("facing").unwrap_or(Direction::North);
+        let facing = state
+            .direction_property("facing")
+            .unwrap_or(Direction::North);
         let target = pos.relative(facing);
         let item = inventory(ctx.world, pos)[index].item_id.clone();
         if insert_item(ctx, target, &item, 1, Some(facing.opposite())) == 1 {
             take_item_at(ctx, pos, index, 1);
-            *self.event_counts.entry("dropper_transfer".to_owned()).or_default() += 1;
+            *self
+                .event_counts
+                .entry("dropper_transfer".to_owned())
+                .or_default() += 1;
             self.refresh_comparators_near(ctx, target)?;
             self.refresh_comparators_near(ctx, pos)?;
-        } else if !is_container(ctx.world, target)
-            && take_item_at(ctx, pos, index, 1).is_some()
-        {
+        } else if !is_container(ctx.world, target) && take_item_at(ctx, pos, index, 1).is_some() {
             spawn_item(ctx.world, target, item, 1);
-            *self.event_counts.entry("dropper_eject".to_owned()).or_default() += 1;
+            *self
+                .event_counts
+                .entry("dropper_eject".to_owned())
+                .or_default() += 1;
             self.refresh_comparators_near(ctx, pos)?;
         }
         Ok(())
@@ -113,7 +124,9 @@ impl Java26Rules {
             return Ok(());
         };
         let item = inventory(ctx.world, pos)[index].item_id.clone();
-        let facing = state.direction_property("facing").unwrap_or(Direction::North);
+        let facing = state
+            .direction_property("facing")
+            .unwrap_or(Direction::North);
         let target = pos.relative(facing);
         match dispenser_behavior(&item) {
             Some(DispenserBehavior::Projectile) => {
@@ -134,31 +147,44 @@ impl Java26Rules {
                             ),
                         ]),
                     });
-                    *self.event_counts.entry("dispenser_projectile".to_owned()).or_default() += 1;
+                    *self
+                        .event_counts
+                        .entry("dispenser_projectile".to_owned())
+                        .or_default() += 1;
                 }
             }
             Some(DispenserBehavior::PrimeTnt) => {
                 if take_item_at(ctx, pos, index, 1).is_some() {
                     ctx.world.spawn_entity(EntityData {
                         kind: "minecraft:tnt".to_owned(),
-                        position: [target.x as f64 + 0.5, target.y as f64, target.z as f64 + 0.5],
+                        position: [
+                            target.x as f64 + 0.5,
+                            target.y as f64,
+                            target.z as f64 + 0.5,
+                        ],
                         fields: BTreeMap::from([
                             ("fuse".to_owned(), Value::from(80)),
                             ("explosion_power".to_owned(), Value::from(4)),
-                            ("ignited_by".to_owned(), Value::String("dispenser".to_owned())),
+                            (
+                                "ignited_by".to_owned(),
+                                Value::String("dispenser".to_owned()),
+                            ),
                         ]),
                     });
-                    *self.event_counts.entry("dispenser_tnt".to_owned()).or_default() += 1;
+                    *self
+                        .event_counts
+                        .entry("dispenser_tnt".to_owned())
+                        .or_default() += 1;
                 }
             }
             Some(DispenserBehavior::Minecart) => {
                 if let Some(position) = minecart_spawn_position(self, ctx.world, pos, facing) {
                     if take_item_at(ctx, pos, index, 1).is_some() {
-                    ctx.world.spawn_entity(EntityData {
+                        ctx.world.spawn_entity(EntityData {
                             kind: item.clone(),
-                        position,
-                        fields: BTreeMap::new(),
-                    });
+                            position,
+                            fields: BTreeMap::new(),
+                        });
                         *self
                             .event_counts
                             .entry("dispenser_minecart".to_owned())
@@ -166,13 +192,19 @@ impl Java26Rules {
                     }
                 } else if take_item_at(ctx, pos, index, 1).is_some() {
                     spawn_item(ctx.world, target, item, 1);
-                    *self.event_counts.entry("dispenser_eject".to_owned()).or_default() += 1;
+                    *self
+                        .event_counts
+                        .entry("dispenser_eject".to_owned())
+                        .or_default() += 1;
                 }
             }
             Some(DispenserBehavior::DefaultEject) => {
                 if take_item_at(ctx, pos, index, 1).is_some() {
                     spawn_item(ctx.world, target, item, 1);
-                    *self.event_counts.entry("dispenser_eject".to_owned()).or_default() += 1;
+                    *self
+                        .event_counts
+                        .entry("dispenser_eject".to_owned())
+                        .or_default() += 1;
                 }
             }
             None => ctx.unsupported(pos, format!("dispenser_item:{item}")),
@@ -197,7 +229,9 @@ impl Java26Rules {
         };
         let output_item = block_entity_string(ctx.world, pos, "output_item_id")
             .unwrap_or_else(|| item.item_id.clone());
-        let output_count = block_entity_i64(ctx.world, pos, "output_count").unwrap_or(1).max(1);
+        let output_count = block_entity_i64(ctx.world, pos, "output_count")
+            .unwrap_or(1)
+            .max(1);
         let front = crafter_front(state);
         let target = pos.relative(front);
         let inserted = insert_item(
@@ -215,7 +249,10 @@ impl Java26Rules {
         self.refresh_comparators_near(ctx, pos)?;
         self.refresh_comparators_near(ctx, target)?;
         ctx.schedule_tick(pos, state.kind, 1, TickPriority::Normal);
-        *self.event_counts.entry("crafter_craft".to_owned()).or_default() += 1;
+        *self
+            .event_counts
+            .entry("crafter_craft".to_owned())
+            .or_default() += 1;
         Ok(())
     }
 }
@@ -270,9 +307,7 @@ pub(super) fn container_signal_for_positions(
                 .as_ref()
                 .and_then(|components| components.get("minecraft:max_stack_size"))
                 .and_then(Value::as_i64)
-                .unwrap_or_else(|| {
-                    super::item::official_item_max_stack_size(&stack.item_id)
-                })
+                .unwrap_or_else(|| super::item::official_item_max_stack_size(&stack.item_id))
                 .max(1);
             fill += stack.count.clamp(0, max_stack_size) as f32 / max_stack_size as f32;
         }
@@ -280,10 +315,7 @@ pub(super) fn container_signal_for_positions(
     Some(container_signal_from_fill(fill, slot_count))
 }
 
-pub(super) fn container_signal_from_fields(
-    kind: &str,
-    fields: &BTreeMap<String, Value>,
-) -> u8 {
+pub(super) fn container_signal_from_fields(kind: &str, fields: &BTreeMap<String, Value>) -> u8 {
     let capacity = fields
         .get("capacity")
         .and_then(Value::as_i64)
@@ -311,9 +343,7 @@ pub(super) fn container_signal_from_fields(
                 .get("components")
                 .and_then(|components| components.get("minecraft:max_stack_size"))
                 .and_then(Value::as_i64)
-                .unwrap_or_else(|| {
-                    super::item::official_item_max_stack_size(item_id)
-                })
+                .unwrap_or_else(|| super::item::official_item_max_stack_size(item_id))
                 .max(1);
             Some(count.clamp(0, max_stack_size) as f32 / max_stack_size as f32)
         })
@@ -405,15 +435,14 @@ fn insert_item_with_components(
             break;
         }
     }
-    let mut used = stacks.iter().map(|stack| stack.slot).collect::<BTreeSet<_>>();
+    let mut used = stacks
+        .iter()
+        .map(|stack| stack.slot)
+        .collect::<BTreeSet<_>>();
     while remaining > 0 {
-        let Some(slot) = slots
-            .iter()
-            .copied()
-            .find(|slot| {
-                !used.contains(slot) && can_place_in_slot(ctx.world, target, *slot, item_id)
-            })
-        else {
+        let Some(slot) = slots.iter().copied().find(|slot| {
+            !used.contains(slot) && can_place_in_slot(ctx.world, target, *slot, item_id)
+        }) else {
             break;
         };
         let moved = remaining.min(slot_stack_limit(ctx.world, target, slot, item_id));
@@ -543,7 +572,8 @@ fn write_inventory(ctx: &mut EventContext<'_>, pos: BlockPos, mut stacks: Vec<It
     ctx.update_block_entity(pos, |data| {
         data.fields
             .insert("inventory".to_owned(), Value::Array(inventory));
-        data.fields.insert("item_count".to_owned(), Value::from(count));
+        data.fields
+            .insert("item_count".to_owned(), Value::from(count));
         if let Some(first) = stacks.first() {
             data.fields
                 .insert("item_id".to_owned(), Value::String(first.item_id.clone()));
@@ -557,16 +587,10 @@ fn container_slot_count(world: &SparseWorld, pos: BlockPos, capacity: i64) -> u3
     block_entity_i64(world, pos, "slot_count")
         .and_then(|value| u32::try_from(value).ok())
         .filter(|value| *value > 0)
-        .unwrap_or_else(|| {
-            ((capacity + DEFAULT_STACK_SIZE - 1) / DEFAULT_STACK_SIZE).max(1) as u32
-        })
+        .unwrap_or_else(|| ((capacity + DEFAULT_STACK_SIZE - 1) / DEFAULT_STACK_SIZE).max(1) as u32)
 }
 
-fn slots_for_face(
-    world: &SparseWorld,
-    pos: BlockPos,
-    face: Option<Direction>,
-) -> Vec<u32> {
+fn slots_for_face(world: &SparseWorld, pos: BlockPos, face: Option<Direction>) -> Vec<u32> {
     let capacity = block_entity_i64(world, pos, "capacity")
         .unwrap_or(DEFAULT_STACK_SIZE)
         .max(1);
@@ -575,13 +599,11 @@ fn slots_for_face(
         return all();
     };
     match container_kind(world, pos) {
-        Some("minecraft:furnace" | "minecraft:blast_furnace" | "minecraft:smoker") => {
-            match face {
-                Direction::Up => vec![0],
-                Direction::Down => vec![2, 1],
-                _ => vec![1],
-            }
-        }
+        Some("minecraft:furnace" | "minecraft:blast_furnace" | "minecraft:smoker") => match face {
+            Direction::Up => vec![0],
+            Direction::Down => vec![2, 1],
+            _ => vec![1],
+        },
         Some("minecraft:brewing_stand") => match face {
             Direction::Up => vec![3],
             Direction::Down => vec![0, 1, 2, 3],
@@ -595,17 +617,15 @@ fn can_place_in_slot(world: &SparseWorld, pos: BlockPos, slot: u32, item_id: &st
     let stacks = inventory(world, pos);
     let current = stacks.iter().find(|stack| stack.slot == slot);
     match container_kind(world, pos) {
-        Some("minecraft:furnace" | "minecraft:blast_furnace" | "minecraft:smoker") => {
-            match slot {
-                0 => true,
-                1 => {
-                    is_furnace_fuel(item_id)
-                        || item_id == "minecraft:bucket"
-                            && current.is_none_or(|stack| stack.item_id != "minecraft:bucket")
-                }
-                _ => false,
+        Some("minecraft:furnace" | "minecraft:blast_furnace" | "minecraft:smoker") => match slot {
+            0 => true,
+            1 => {
+                is_furnace_fuel(item_id)
+                    || item_id == "minecraft:bucket"
+                        && current.is_none_or(|stack| stack.item_id != "minecraft:bucket")
             }
-        }
+            _ => false,
+        },
         Some("minecraft:brewing_stand") => match slot {
             0..=2 => is_brewing_bottle(item_id) && current.is_none(),
             3 => is_brewing_ingredient(item_id),
@@ -629,9 +649,7 @@ fn can_place_in_slot(world: &SparseWorld, pos: BlockPos, slot: u32, item_id: &st
                 stacks
                     .iter()
                     .find(|stack| stack.slot == later_slot)
-                    .is_none_or(|later| {
-                        later.item_id == item_id && later.count < current.count
-                    })
+                    .is_none_or(|later| later.item_id == item_id && later.count < current.count)
             })
         }
         Some(kind) if is_shulker_box_container(kind) => !is_shulker_box_item(item_id),
@@ -650,7 +668,10 @@ fn can_take_from_slot(
             Some("minecraft:furnace" | "minecraft:blast_furnace" | "minecraft:smoker"),
             Some(Direction::Down),
         ) if stack.slot == 1 => {
-            matches!(stack.item_id.as_str(), "minecraft:bucket" | "minecraft:water_bucket")
+            matches!(
+                stack.item_id.as_str(),
+                "minecraft:bucket" | "minecraft:water_bucket"
+            )
         }
         (Some("minecraft:brewing_stand"), _) if stack.slot == 3 => {
             stack.item_id == "minecraft:glass_bottle"
@@ -673,18 +694,14 @@ fn item_stack_limit(kind: Option<&str>, slot: u32, item_id: &str) -> i64 {
 
 fn default_container_slot_count(kind: &str) -> Option<u32> {
     match kind {
-        "minecraft:hopper" | "minecraft:hopper_minecart" | "minecraft:brewing_stand" => {
-            Some(5)
-        }
+        "minecraft:hopper" | "minecraft:hopper_minecart" | "minecraft:brewing_stand" => Some(5),
         "minecraft:dispenser" | "minecraft:dropper" | "minecraft:crafter" => Some(9),
         "minecraft:furnace" | "minecraft:blast_furnace" | "minecraft:smoker" => Some(3),
         "minecraft:chest"
         | "minecraft:trapped_chest"
         | "minecraft:barrel"
         | "minecraft:chest_minecart" => Some(27),
-        value if value.ends_with("_shulker_box") || value == "minecraft:shulker_box" => {
-            Some(27)
-        }
+        value if value.ends_with("_shulker_box") || value == "minecraft:shulker_box" => Some(27),
         _ => None,
     }
 }
@@ -761,15 +778,7 @@ fn is_furnace_fuel(item_id: &str) -> bool {
 
 fn is_overworld_wood_item(item_id: &str) -> bool {
     const WOOD_TYPES: [&str; 10] = [
-        "oak",
-        "spruce",
-        "birch",
-        "jungle",
-        "acacia",
-        "dark_oak",
-        "pale_oak",
-        "mangrove",
-        "cherry",
+        "oak", "spruce", "birch", "jungle", "acacia", "dark_oak", "pale_oak", "mangrove", "cherry",
         "bamboo",
     ];
     let path = item_id.strip_prefix("minecraft:").unwrap_or(item_id);
@@ -809,15 +818,7 @@ fn is_overworld_wood_item(item_id: &str) -> bool {
 
 fn is_overworld_log(path: &str) -> bool {
     const LOG_TYPES: [&str; 9] = [
-        "oak",
-        "spruce",
-        "birch",
-        "jungle",
-        "acacia",
-        "dark_oak",
-        "pale_oak",
-        "mangrove",
-        "cherry",
+        "oak", "spruce", "birch", "jungle", "acacia", "dark_oak", "pale_oak", "mangrove", "cherry",
     ];
     LOG_TYPES.iter().any(|wood| {
         matches!(
@@ -920,7 +921,11 @@ fn absorb_item_entity(ctx: &mut EventContext<'_>, hopper: BlockPos) -> bool {
     let candidate = ctx
         .world
         .entity_ids_in_aabb(
-            [hopper.x as f64 - 0.25, hopper.y as f64, hopper.z as f64 - 0.25],
+            [
+                hopper.x as f64 - 0.25,
+                hopper.y as f64,
+                hopper.z as f64 - 0.25,
+            ],
             [
                 hopper.x as f64 + 1.25,
                 hopper.y as f64 + 1.5,
@@ -931,11 +936,19 @@ fn absorb_item_entity(ctx: &mut EventContext<'_>, hopper: BlockPos) -> bool {
         .find_map(|id| {
             let entity = ctx.world.entity(id)?;
             (entity.kind == "minecraft:item").then(|| {
-            (
-                id,
-                entity.fields.get("item_id").and_then(Value::as_str).map(ToOwned::to_owned),
-                entity.fields.get("item_count").and_then(Value::as_i64).unwrap_or(1),
-            )
+                (
+                    id,
+                    entity
+                        .fields
+                        .get("item_id")
+                        .and_then(Value::as_str)
+                        .map(ToOwned::to_owned),
+                    entity
+                        .fields
+                        .get("item_count")
+                        .and_then(Value::as_i64)
+                        .unwrap_or(1),
+                )
             })
         });
     let Some((entity_id, Some(item_id), entity_count)) = candidate else {
@@ -1026,7 +1039,14 @@ fn minecart_spawn_position(
     let front = source.relative(facing);
     let front_state = world.get_block(front);
     let (rail_pos, offset) = if is_rail_state(rules, front_state) {
-        (front, if rail_is_slope(rules, front_state) { 0.6 } else { 0.1 })
+        (
+            front,
+            if rail_is_slope(rules, front_state) {
+                0.6
+            } else {
+                0.1
+            },
+        )
     } else if front_state == world.air()
         && is_rail_state(rules, world.get_block(front.relative(Direction::Down)))
     {
@@ -1060,12 +1080,7 @@ fn rail_is_slope(rules: &Java26Rules, state: redstone_core::BlockStateId) -> boo
     rules.state(state).is_ok_and(|state| {
         matches!(
             state.property("shape"),
-            Some(
-                "ascending_east"
-                    | "ascending_west"
-                    | "ascending_north"
-                    | "ascending_south"
-            )
+            Some("ascending_east" | "ascending_west" | "ascending_north" | "ascending_south")
         )
     })
 }

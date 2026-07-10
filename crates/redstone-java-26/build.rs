@@ -8,8 +8,15 @@ fn main() {
     let report_dir = PathBuf::from("data/26.1.2/reports/minecraft/components/item");
     let mut entries = fs::read_dir(&report_dir)
         .expect("official item component reports must exist")
-        .map(|entry| entry.expect("item component report entry must be readable").path())
-        .filter(|path| path.extension().is_some_and(|extension| extension == "json"))
+        .map(|entry| {
+            entry
+                .expect("item component report entry must be readable")
+                .path()
+        })
+        .filter(|path| {
+            path.extension()
+                .is_some_and(|extension| extension == "json")
+        })
         .collect::<Vec<_>>();
     entries.sort();
     println!("cargo:rerun-if-changed={}", report_dir.display());

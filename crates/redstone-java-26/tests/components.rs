@@ -7,11 +7,7 @@ use redstone_core::{
 };
 use redstone_java_26::{Java26Registry, Java26Rules, StateResolver};
 
-fn state(
-    registry: &mut Java26Registry,
-    name: &str,
-    properties: &[(&str, &str)],
-) -> BlockStateId {
+fn state(registry: &mut Java26Registry, name: &str, properties: &[(&str, &str)]) -> BlockStateId {
     registry
         .resolve_state(
             name,
@@ -140,7 +136,12 @@ async fn redstone_block_powers_a_wire_in_both_modes() {
         simulation.initialize().await.unwrap();
         let state_id = simulation.world().get_block(BlockPos::new(1, 0, 0));
         assert_eq!(
-            simulation.rules().registry().state(state_id).unwrap().property("power"),
+            simulation
+                .rules()
+                .registry()
+                .state(state_id)
+                .unwrap()
+                .property("power"),
             Some("15")
         );
     }
@@ -155,7 +156,9 @@ async fn default_wire_does_not_power_itself_through_a_conductor() {
     let mut world = SparseWorld::new(registry.air_state());
     world.set_block(BlockPos::ZERO, source).unwrap();
     world.set_block(BlockPos::new(1, -1, 0), stone).unwrap();
-    world.set_block(BlockPos::new(1, 0, 0), powered_wire).unwrap();
+    world
+        .set_block(BlockPos::new(1, 0, 0), powered_wire)
+        .unwrap();
     let rules = Java26Rules::new(registry);
     let mut simulation = Simulation::load(rules, world, SimulationConfig::default())
         .await
@@ -169,7 +172,12 @@ async fn default_wire_does_not_power_itself_through_a_conductor() {
 
     let wire_id = simulation.world().get_block(BlockPos::new(1, 0, 0));
     assert_eq!(
-        simulation.rules().registry().state(wire_id).unwrap().property("power"),
+        simulation
+            .rules()
+            .registry()
+            .state(wire_id)
+            .unwrap()
+            .property("power"),
         Some("0")
     );
 }
@@ -192,7 +200,9 @@ async fn repeater_waits_for_its_configured_delay_and_outputs_forward() {
     let mut world = SparseWorld::new(registry.air_state());
     world.set_block(BlockPos::new(0, 0, -1), source).unwrap();
     world.set_block(BlockPos::ZERO, repeater).unwrap();
-    world.set_block(BlockPos::new(0, 0, 1), output_wire).unwrap();
+    world
+        .set_block(BlockPos::new(0, 0, 1), output_wire)
+        .unwrap();
     let rules = Java26Rules::new(registry);
     let mut simulation = Simulation::load(rules, world, SimulationConfig::default())
         .await
@@ -208,18 +218,25 @@ async fn repeater_waits_for_its_configured_delay_and_outputs_forward() {
     simulation.step().await.unwrap();
     let state_id = simulation.world().get_block(BlockPos::ZERO);
     assert_eq!(
-        simulation.rules().registry().state(state_id).unwrap().property("powered"),
+        simulation
+            .rules()
+            .registry()
+            .state(state_id)
+            .unwrap()
+            .property("powered"),
         Some("false")
     );
 
     let delta = simulation.step().await.unwrap();
-    assert_eq!(
-        delta.probes[0].value,
-        ProbeValue::Integer(15),
-    );
+    assert_eq!(delta.probes[0].value, ProbeValue::Integer(15),);
     let wire_id = simulation.world().get_block(BlockPos::new(0, 0, 1));
     assert_eq!(
-        simulation.rules().registry().state(wire_id).unwrap().property("power"),
+        simulation
+            .rules()
+            .registry()
+            .state(wire_id)
+            .unwrap()
+            .property("power"),
         Some("15")
     );
 }
@@ -248,7 +265,10 @@ async fn a_side_signal_from_a_non_diode_does_not_lock_a_repeater() {
         .unwrap();
 
     simulation.initialize().await.unwrap();
-    simulation.run_until(redstone_core::GameTick(2)).await.unwrap();
+    simulation
+        .run_until(redstone_core::GameTick(2))
+        .await
+        .unwrap();
 
     let state_id = simulation.world().get_block(BlockPos::ZERO);
     assert_eq!(
@@ -277,7 +297,11 @@ async fn comparator_reads_explicit_block_entity_output_from_a_lectern() {
     let lectern = state(
         &mut registry,
         "minecraft:lectern",
-        &[("facing", "north"), ("has_book", "true"), ("powered", "false")],
+        &[
+            ("facing", "north"),
+            ("has_book", "true"),
+            ("powered", "false"),
+        ],
     );
     let input = BlockPos::new(0, 0, -1);
     let mut world = SparseWorld::new(registry.air_state());
@@ -287,10 +311,7 @@ async fn comparator_reads_explicit_block_entity_output_from_a_lectern() {
         input,
         BlockEntityData {
             kind: "minecraft:lectern".to_owned(),
-            fields: BTreeMap::from([(
-                "comparator_output".to_owned(),
-                serde_json::Value::from(7),
-            )]),
+            fields: BTreeMap::from([("comparator_output".to_owned(), serde_json::Value::from(7))]),
         },
     );
     let rules = Java26Rules::new(registry);
@@ -338,14 +359,24 @@ async fn observer_emits_a_two_tick_pulse_after_observed_change() {
     simulation.step().await.unwrap();
     let powered = simulation.world().get_block(BlockPos::ZERO);
     assert_eq!(
-        simulation.rules().registry().state(powered).unwrap().property("powered"),
+        simulation
+            .rules()
+            .registry()
+            .state(powered)
+            .unwrap()
+            .property("powered"),
         Some("true")
     );
     simulation.step().await.unwrap();
     simulation.step().await.unwrap();
     let unpowered = simulation.world().get_block(BlockPos::ZERO);
     assert_eq!(
-        simulation.rules().registry().state(unpowered).unwrap().property("powered"),
+        simulation
+            .rules()
+            .registry()
+            .state(unpowered)
+            .unwrap()
+            .property("powered"),
         Some("false")
     );
 }
@@ -376,11 +407,19 @@ async fn moved_observer_schedules_an_air_update_after_settling() {
     simulation.initialize().await.unwrap();
 
     simulation.step().await.unwrap();
-    simulation.run_until(redstone_core::GameTick(3)).await.unwrap();
+    simulation
+        .run_until(redstone_core::GameTick(3))
+        .await
+        .unwrap();
 
     let moved = simulation.world().get_block(moved_pos);
     assert_eq!(
-        simulation.rules().registry().state(moved).unwrap().property("powered"),
+        simulation
+            .rules()
+            .registry()
+            .state(moved)
+            .unwrap()
+            .property("powered"),
         Some("false")
     );
     assert!(simulation.trace().events().iter().any(|event| {
@@ -394,10 +433,18 @@ async fn moved_observer_schedules_an_air_update_after_settling() {
         )
     }));
 
-    simulation.run_until(redstone_core::GameTick(5)).await.unwrap();
+    simulation
+        .run_until(redstone_core::GameTick(5))
+        .await
+        .unwrap();
     let moved = simulation.world().get_block(moved_pos);
     assert_eq!(
-        simulation.rules().registry().state(moved).unwrap().property("powered"),
+        simulation
+            .rules()
+            .registry()
+            .state(moved)
+            .unwrap()
+            .property("powered"),
         Some("true")
     );
 }
@@ -469,7 +516,9 @@ async fn observer_detects_piston_base_retraction() {
     let source_pos = BlockPos::new(-1, 0, 0);
     let mut world = SparseWorld::new(registry.air_state());
     world.set_block(BlockPos::ZERO, piston).unwrap();
-    world.set_block(BlockPos::new(1, 0, 0), piston_head).unwrap();
+    world
+        .set_block(BlockPos::new(1, 0, 0), piston_head)
+        .unwrap();
     world.set_block(observer_pos, observer).unwrap();
     world.set_block(source_pos, source).unwrap();
     let rules = Java26Rules::new(registry);
@@ -518,7 +567,9 @@ async fn observer_detects_piston_head_removal() {
     let observer_pos = BlockPos::new(1, 0, -1);
     let mut world = SparseWorld::new(registry.air_state());
     world.set_block(BlockPos::ZERO, piston).unwrap();
-    world.set_block(BlockPos::new(1, 0, 0), piston_head).unwrap();
+    world
+        .set_block(BlockPos::new(1, 0, 0), piston_head)
+        .unwrap();
     world.set_block(observer_pos, observer).unwrap();
     world.set_block(source_pos, source).unwrap();
     let rules = Java26Rules::new(registry);
@@ -672,7 +723,9 @@ async fn sticky_piston_does_not_pull_glazed_terracotta() {
     let glazed_pos = BlockPos::new(2, 0, 0);
     let mut world = SparseWorld::new(registry.air_state());
     world.set_block(BlockPos::ZERO, piston).unwrap();
-    world.set_block(BlockPos::new(1, 0, 0), piston_head).unwrap();
+    world
+        .set_block(BlockPos::new(1, 0, 0), piston_head)
+        .unwrap();
     world.set_block(glazed_pos, glazed).unwrap();
     world.set_block(source_pos, source).unwrap();
     let rules = Java26Rules::new(registry);
@@ -713,7 +766,12 @@ async fn powered_observer_resets_when_placed() {
 
     let placed = simulation.world().get_block(BlockPos::ZERO);
     assert_eq!(
-        simulation.rules().registry().state(placed).unwrap().property("powered"),
+        simulation
+            .rules()
+            .registry()
+            .state(placed)
+            .unwrap()
+            .property("powered"),
         Some("false")
     );
     assert_eq!(simulation.pending_scheduled_ticks(), 0);
@@ -728,7 +786,11 @@ async fn removing_active_observer_refreshes_output_neighbors() {
         &[("facing", "east"), ("powered", "false")],
     );
     let stone = state(&mut registry, "minecraft:stone", &[]);
-    let lamp = state(&mut registry, "minecraft:redstone_lamp", &[("lit", "false")]);
+    let lamp = state(
+        &mut registry,
+        "minecraft:redstone_lamp",
+        &[("lit", "false")],
+    );
     let output_pos = BlockPos::new(-1, 0, 0);
     let lamp_pos = BlockPos::new(-1, 1, 0);
     let mut world = SparseWorld::new(registry.air_state());
@@ -747,10 +809,18 @@ async fn removing_active_observer_refreshes_output_neighbors() {
         }])
         .await
         .unwrap();
-    simulation.run_until(redstone_core::GameTick(3)).await.unwrap();
+    simulation
+        .run_until(redstone_core::GameTick(3))
+        .await
+        .unwrap();
     let active = simulation.world().get_block(BlockPos::ZERO);
     assert_eq!(
-        simulation.rules().registry().state(active).unwrap().property("powered"),
+        simulation
+            .rules()
+            .registry()
+            .state(active)
+            .unwrap()
+            .property("powered"),
         Some("true")
     );
 
@@ -799,7 +869,9 @@ async fn observers_detect_triggered_containers_and_observer_state_changes() {
     let mut world = SparseWorld::new(registry.air_state());
     world.set_block(dropper_pos, dropper).unwrap();
     world.set_block(vertical_pos, vertical_observer).unwrap();
-    world.set_block(horizontal_pos, horizontal_observer).unwrap();
+    world
+        .set_block(horizontal_pos, horizontal_observer)
+        .unwrap();
     world.set_block_entity(dropper_pos, container("minecraft:dropper", &[]));
     let rules = Java26Rules::new(registry);
     let mut simulation = Simulation::load(rules, world, SimulationConfig::default())
@@ -814,16 +886,29 @@ async fn observers_detect_triggered_containers_and_observer_state_changes() {
         }])
         .await
         .unwrap();
-    simulation.run_until(redstone_core::GameTick(5)).await.unwrap();
+    simulation
+        .run_until(redstone_core::GameTick(5))
+        .await
+        .unwrap();
 
     let vertical = simulation.world().get_block(vertical_pos);
     assert_eq!(
-        simulation.rules().registry().state(vertical).unwrap().property("powered"),
+        simulation
+            .rules()
+            .registry()
+            .state(vertical)
+            .unwrap()
+            .property("powered"),
         Some("false")
     );
     let horizontal = simulation.world().get_block(horizontal_pos);
     assert_eq!(
-        simulation.rules().registry().state(horizontal).unwrap().property("powered"),
+        simulation
+            .rules()
+            .registry()
+            .state(horizontal)
+            .unwrap()
+            .property("powered"),
         Some("true")
     );
 }
@@ -851,11 +936,19 @@ async fn observer_ignores_secondary_updates_from_an_unchanged_conductor() {
         .unwrap();
 
     simulation.initialize().await.unwrap();
-    simulation.run_until(redstone_core::GameTick(2)).await.unwrap();
+    simulation
+        .run_until(redstone_core::GameTick(2))
+        .await
+        .unwrap();
 
     let observer = simulation.world().get_block(observer_pos);
     assert_eq!(
-        simulation.rules().registry().state(observer).unwrap().property("powered"),
+        simulation
+            .rules()
+            .registry()
+            .state(observer)
+            .unwrap()
+            .property("powered"),
         Some("false")
     );
 }
@@ -900,11 +993,19 @@ async fn observer_powers_a_quasi_connected_piston_through_slime() {
         }])
         .await
         .unwrap();
-    let deltas = simulation.run_until(redstone_core::GameTick(3)).await.unwrap();
+    let deltas = simulation
+        .run_until(redstone_core::GameTick(3))
+        .await
+        .unwrap();
 
     let observer = simulation.world().get_block(observer_pos);
     assert_eq!(
-        simulation.rules().registry().state(observer).unwrap().property("powered"),
+        simulation
+            .rules()
+            .registry()
+            .state(observer)
+            .unwrap()
+            .property("powered"),
         Some("true")
     );
     assert!(simulation.trace().events().iter().any(|event| {
@@ -913,10 +1014,18 @@ async fn observer_powers_a_quasi_connected_piston_through_slime() {
             TraceKind::NeighborUpdate { pos, .. } if pos == piston_pos
         )
     }));
-    assert_eq!(deltas.last().unwrap().probes[0].value, ProbeValue::Integer(15));
+    assert_eq!(
+        deltas.last().unwrap().probes[0].value,
+        ProbeValue::Integer(15)
+    );
     let piston = simulation.world().get_block(piston_pos);
     assert_eq!(
-        simulation.rules().registry().state(piston).unwrap().property("extended"),
+        simulation
+            .rules()
+            .registry()
+            .state(piston)
+            .unwrap()
+            .property("extended"),
         Some("true")
     );
 }
@@ -932,7 +1041,11 @@ async fn hopper_pulls_one_item_and_starts_an_eight_tick_cooldown() {
     let chest = state(
         &mut registry,
         "minecraft:chest",
-        &[("facing", "north"), ("type", "single"), ("waterlogged", "false")],
+        &[
+            ("facing", "north"),
+            ("type", "single"),
+            ("waterlogged", "false"),
+        ],
     );
     let hopper_pos = BlockPos::ZERO;
     let source_pos = hopper_pos.relative(Direction::Up);
@@ -942,7 +1055,10 @@ async fn hopper_pulls_one_item_and_starts_an_eight_tick_cooldown() {
     world.set_block(source_pos, chest).unwrap();
     world.set_block(target_pos, chest).unwrap();
     world.set_block_entity(hopper_pos, container("minecraft:hopper", &[]));
-    world.set_block_entity(source_pos, container("minecraft:chest", &[("minecraft:stone", 2)]));
+    world.set_block_entity(
+        source_pos,
+        container("minecraft:chest", &[("minecraft:stone", 2)]),
+    );
     world.set_block_entity(target_pos, container("minecraft:chest", &[]));
     let rules = Java26Rules::new(registry);
     let mut simulation = Simulation::load(rules, world, SimulationConfig::default())
@@ -951,10 +1067,22 @@ async fn hopper_pulls_one_item_and_starts_an_eight_tick_cooldown() {
 
     let delta = simulation.step().await.unwrap();
 
-    assert_eq!(simulation.world().block_entity(hopper_pos).unwrap().fields["item_count"], 1);
-    assert_eq!(simulation.world().block_entity(source_pos).unwrap().fields["item_count"], 1);
-    assert_eq!(simulation.world().block_entity(target_pos).unwrap().fields["item_count"], 0);
-    assert_eq!(simulation.world().block_entity(hopper_pos).unwrap().fields["cooldown"], 8);
+    assert_eq!(
+        simulation.world().block_entity(hopper_pos).unwrap().fields["item_count"],
+        1
+    );
+    assert_eq!(
+        simulation.world().block_entity(source_pos).unwrap().fields["item_count"],
+        1
+    );
+    assert_eq!(
+        simulation.world().block_entity(target_pos).unwrap().fields["item_count"],
+        0
+    );
+    assert_eq!(
+        simulation.world().block_entity(hopper_pos).unwrap().fields["cooldown"],
+        8
+    );
     let updates = delta
         .events
         .iter()
@@ -986,7 +1114,11 @@ async fn powered_dropper_transfers_into_the_facing_container_after_four_ticks() 
     let chest = state(
         &mut registry,
         "minecraft:chest",
-        &[("facing", "north"), ("type", "single"), ("waterlogged", "false")],
+        &[
+            ("facing", "north"),
+            ("type", "single"),
+            ("waterlogged", "false"),
+        ],
     );
     let target = BlockPos::new(1, 0, 0);
     let mut world = SparseWorld::new(registry.air_state());
@@ -1004,10 +1136,23 @@ async fn powered_dropper_transfers_into_the_facing_container_after_four_ticks() 
         .unwrap();
     simulation.initialize().await.unwrap();
 
-    simulation.run_until(redstone_core::GameTick(5)).await.unwrap();
+    simulation
+        .run_until(redstone_core::GameTick(5))
+        .await
+        .unwrap();
 
-    assert_eq!(simulation.world().block_entity(BlockPos::ZERO).unwrap().fields["item_count"], 1);
-    assert_eq!(simulation.world().block_entity(target).unwrap().fields["item_count"], 1);
+    assert_eq!(
+        simulation
+            .world()
+            .block_entity(BlockPos::ZERO)
+            .unwrap()
+            .fields["item_count"],
+        1
+    );
+    assert_eq!(
+        simulation.world().block_entity(target).unwrap().fields["item_count"],
+        1
+    );
 }
 
 #[tokio::test]
@@ -1026,17 +1171,27 @@ async fn dispenser_consumes_registered_items_but_preserves_unknown_items() {
         let mut world = SparseWorld::new(registry.air_state());
         world.set_block(BlockPos::ZERO, dispenser).unwrap();
         world.set_block(BlockPos::new(0, 1, 0), source).unwrap();
-        world.set_block_entity(BlockPos::ZERO, container("minecraft:dispenser", &[(item_id, 1)]));
+        world.set_block_entity(
+            BlockPos::ZERO,
+            container("minecraft:dispenser", &[(item_id, 1)]),
+        );
         let rules = Java26Rules::new(registry);
         let mut simulation = Simulation::load(rules, world, SimulationConfig::default())
             .await
             .unwrap();
         simulation.initialize().await.unwrap();
 
-        simulation.run_until(redstone_core::GameTick(5)).await.unwrap();
+        simulation
+            .run_until(redstone_core::GameTick(5))
+            .await
+            .unwrap();
 
         assert_eq!(
-            simulation.world().block_entity(BlockPos::ZERO).unwrap().fields["item_count"],
+            simulation
+                .world()
+                .block_entity(BlockPos::ZERO)
+                .unwrap()
+                .fields["item_count"],
             i64::from(!consumed)
         );
         assert_eq!(
@@ -1079,7 +1234,8 @@ async fn crafter_emits_output_and_clears_its_crafting_pulse() {
         "output_item_id".to_owned(),
         serde_json::Value::String("minecraft:redstone".to_owned()),
     );
-    data.fields.insert("output_count".to_owned(), serde_json::Value::from(2));
+    data.fields
+        .insert("output_count".to_owned(), serde_json::Value::from(2));
     world.set_block_entity(BlockPos::ZERO, data);
     let rules = Java26Rules::new(registry);
     let mut simulation = Simulation::load(rules, world, SimulationConfig::default())
@@ -1087,16 +1243,31 @@ async fn crafter_emits_output_and_clears_its_crafting_pulse() {
         .unwrap();
     simulation.initialize().await.unwrap();
 
-    simulation.run_until(redstone_core::GameTick(6)).await.unwrap();
+    simulation
+        .run_until(redstone_core::GameTick(6))
+        .await
+        .unwrap();
 
-    assert_eq!(simulation.world().block_entity(BlockPos::ZERO).unwrap().fields["item_count"], 0);
+    assert_eq!(
+        simulation
+            .world()
+            .block_entity(BlockPos::ZERO)
+            .unwrap()
+            .fields["item_count"],
+        0
+    );
     assert_eq!(simulation.world().entities().count(), 1);
     let output = simulation.world().entities().next().unwrap().1;
     assert_eq!(output.fields["item_id"], "minecraft:redstone");
     assert_eq!(output.fields["item_count"], 2);
     let final_state = simulation.world().get_block(BlockPos::ZERO);
     assert_eq!(
-        simulation.rules().registry().state(final_state).unwrap().property("crafting"),
+        simulation
+            .rules()
+            .registry()
+            .state(final_state)
+            .unwrap()
+            .property("crafting"),
         Some("false")
     );
 }
@@ -1110,7 +1281,11 @@ async fn floor_button_notifies_consumers_next_to_its_strongly_powered_support() 
         &[("face", "floor"), ("facing", "north"), ("powered", "false")],
     );
     let stone = state(&mut registry, "minecraft:stone", &[]);
-    let lamp = state(&mut registry, "minecraft:redstone_lamp", &[("lit", "false")]);
+    let lamp = state(
+        &mut registry,
+        "minecraft:redstone_lamp",
+        &[("lit", "false")],
+    );
     let button_pos = BlockPos::new(0, 1, 0);
     let lamp_pos = BlockPos::new(1, 0, 0);
     let mut world = SparseWorld::new(registry.air_state());
@@ -1129,13 +1304,26 @@ async fn floor_button_notifies_consumers_next_to_its_strongly_powered_support() 
 
     let lit = simulation.world().get_block(lamp_pos);
     assert_eq!(
-        simulation.rules().registry().state(lit).unwrap().property("lit"),
+        simulation
+            .rules()
+            .registry()
+            .state(lit)
+            .unwrap()
+            .property("lit"),
         Some("true")
     );
-    simulation.run_until(redstone_core::GameTick(35)).await.unwrap();
+    simulation
+        .run_until(redstone_core::GameTick(35))
+        .await
+        .unwrap();
     let unlit = simulation.world().get_block(lamp_pos);
     assert_eq!(
-        simulation.rules().registry().state(unlit).unwrap().property("lit"),
+        simulation
+            .rules()
+            .registry()
+            .state(unlit)
+            .unwrap()
+            .property("lit"),
         Some("false")
     );
 }
@@ -1151,20 +1339,36 @@ async fn floor_sources_strongly_power_the_block_below() {
     let detector_rail = state(
         &mut registry,
         "minecraft:detector_rail",
-        &[("powered", "true"), ("shape", "north_south"), ("waterlogged", "false")],
+        &[
+            ("powered", "true"),
+            ("shape", "north_south"),
+            ("waterlogged", "false"),
+        ],
     );
     let lectern = state(
         &mut registry,
         "minecraft:lectern",
-        &[("facing", "north"), ("has_book", "true"), ("powered", "true")],
+        &[
+            ("facing", "north"),
+            ("has_book", "true"),
+            ("powered", "true"),
+        ],
     );
     let trapped_chest = state(
         &mut registry,
         "minecraft:trapped_chest",
-        &[("facing", "north"), ("type", "single"), ("waterlogged", "false")],
+        &[
+            ("facing", "north"),
+            ("type", "single"),
+            ("waterlogged", "false"),
+        ],
     );
     let stone = state(&mut registry, "minecraft:stone", &[]);
-    let lamp = state(&mut registry, "minecraft:redstone_lamp", &[("lit", "false")]);
+    let lamp = state(
+        &mut registry,
+        "minecraft:redstone_lamp",
+        &[("lit", "false")],
+    );
     let trapped_chest_data = BlockEntityData {
         kind: "minecraft:trapped_chest".to_owned(),
         fields: BTreeMap::from([("open_count".to_owned(), serde_json::Value::from(1))]),
@@ -1194,7 +1398,12 @@ async fn floor_sources_strongly_power_the_block_below() {
 
         let lit = simulation.world().get_block(lamp_pos);
         assert_eq!(
-            simulation.rules().registry().state(lit).unwrap().property("lit"),
+            simulation
+                .rules()
+                .registry()
+                .state(lit)
+                .unwrap()
+                .property("lit"),
             Some("true")
         );
     }
@@ -1208,9 +1417,17 @@ async fn floor_torch_notifies_consumers_around_its_strongly_powered_block() {
         "minecraft:lever",
         &[("face", "wall"), ("facing", "north"), ("powered", "true")],
     );
-    let torch = state(&mut registry, "minecraft:redstone_torch", &[("lit", "false")]);
+    let torch = state(
+        &mut registry,
+        "minecraft:redstone_torch",
+        &[("lit", "false")],
+    );
     let stone = state(&mut registry, "minecraft:stone", &[]);
-    let lamp = state(&mut registry, "minecraft:redstone_lamp", &[("lit", "false")]);
+    let lamp = state(
+        &mut registry,
+        "minecraft:redstone_lamp",
+        &[("lit", "false")],
+    );
     let lever_pos = BlockPos::new(0, 0, -1);
     let support_pos = BlockPos::ZERO;
     let torch_pos = BlockPos::new(0, 1, 0);
@@ -1231,16 +1448,29 @@ async fn floor_torch_notifies_consumers_around_its_strongly_powered_block() {
         .step_with_actions(&[Action::PullLever { pos: lever_pos }])
         .await
         .unwrap();
-    simulation.run_until(redstone_core::GameTick(4)).await.unwrap();
+    simulation
+        .run_until(redstone_core::GameTick(4))
+        .await
+        .unwrap();
 
     let lit_torch = simulation.world().get_block(torch_pos);
     assert_eq!(
-        simulation.rules().registry().state(lit_torch).unwrap().property("lit"),
+        simulation
+            .rules()
+            .registry()
+            .state(lit_torch)
+            .unwrap()
+            .property("lit"),
         Some("true")
     );
     let lit_lamp = simulation.world().get_block(lamp_pos);
     assert_eq!(
-        simulation.rules().registry().state(lit_lamp).unwrap().property("lit"),
+        simulation
+            .rules()
+            .registry()
+            .state(lit_lamp)
+            .unwrap()
+            .property("lit"),
         Some("true")
     );
 }
@@ -1268,7 +1498,11 @@ async fn copper_bulb_updates_a_comparator_and_its_output_conductor() {
         ],
     );
     let stone = state(&mut registry, "minecraft:stone", &[]);
-    let lamp = state(&mut registry, "minecraft:redstone_lamp", &[("lit", "false")]);
+    let lamp = state(
+        &mut registry,
+        "minecraft:redstone_lamp",
+        &[("lit", "false")],
+    );
     let bulb_pos = BlockPos::ZERO;
     let lever_pos = BlockPos::new(0, 1, 0);
     let comparator_pos = BlockPos::new(1, 0, 0);
@@ -1289,11 +1523,19 @@ async fn copper_bulb_updates_a_comparator_and_its_output_conductor() {
         .step_with_actions(&[Action::PullLever { pos: lever_pos }])
         .await
         .unwrap();
-    simulation.run_until(redstone_core::GameTick(3)).await.unwrap();
+    simulation
+        .run_until(redstone_core::GameTick(3))
+        .await
+        .unwrap();
 
     let lit_bulb = simulation.world().get_block(bulb_pos);
     assert_eq!(
-        simulation.rules().registry().state(lit_bulb).unwrap().property("lit"),
+        simulation
+            .rules()
+            .registry()
+            .state(lit_bulb)
+            .unwrap()
+            .property("lit"),
         Some("true")
     );
     let powered_comparator = simulation.world().get_block(comparator_pos);
@@ -1308,7 +1550,12 @@ async fn copper_bulb_updates_a_comparator_and_its_output_conductor() {
     );
     let lit_lamp = simulation.world().get_block(lamp_pos);
     assert_eq!(
-        simulation.rules().registry().state(lit_lamp).unwrap().property("lit"),
+        simulation
+            .rules()
+            .registry()
+            .state(lit_lamp)
+            .unwrap()
+            .property("lit"),
         Some("true")
     );
 }
@@ -1318,17 +1565,10 @@ async fn state_backed_analog_sources_drive_comparators() {
     let mut registry = Java26Registry::new();
     let sources = [
         (
-            state(
-                &mut registry,
-                "minecraft:water_cauldron",
-                &[("level", "3")],
-            ),
+            state(&mut registry, "minecraft:water_cauldron", &[("level", "3")]),
             3,
         ),
-        (
-            state(&mut registry, "minecraft:lava_cauldron", &[]),
-            3,
-        ),
+        (state(&mut registry, "minecraft:lava_cauldron", &[]), 3),
         (
             state(
                 &mut registry,
@@ -1341,10 +1581,7 @@ async fn state_backed_analog_sources_drive_comparators() {
             state(&mut registry, "minecraft:composter", &[("level", "8")]),
             8,
         ),
-        (
-            state(&mut registry, "minecraft:cake", &[("bites", "6")]),
-            2,
-        ),
+        (state(&mut registry, "minecraft:cake", &[("bites", "6")]), 2),
         (
             state(
                 &mut registry,
@@ -1415,7 +1652,11 @@ async fn block_entity_backed_analog_sources_drive_comparators() {
             state(
                 &mut registry,
                 "minecraft:lectern",
-                &[("facing", "north"), ("has_book", "true"), ("powered", "false")],
+                &[
+                    ("facing", "north"),
+                    ("has_book", "true"),
+                    ("powered", "false"),
+                ],
             ),
             BlockEntityData {
                 kind: "minecraft:lectern".to_owned(),
@@ -1438,7 +1679,11 @@ async fn block_entity_backed_analog_sources_drive_comparators() {
             8,
         ),
         (
-            state(&mut registry, "minecraft:jukebox", &[("has_record", "true")]),
+            state(
+                &mut registry,
+                "minecraft:jukebox",
+                &[("has_record", "true")],
+            ),
             BlockEntityData {
                 kind: "minecraft:jukebox".to_owned(),
                 fields: BTreeMap::from([(
@@ -1455,7 +1700,11 @@ async fn block_entity_backed_analog_sources_drive_comparators() {
             state(
                 &mut registry,
                 "minecraft:decorated_pot",
-                &[("cracked", "false"), ("facing", "north"), ("waterlogged", "false")],
+                &[
+                    ("cracked", "false"),
+                    ("facing", "north"),
+                    ("waterlogged", "false"),
+                ],
             ),
             BlockEntityData {
                 kind: "minecraft:decorated_pot".to_owned(),
@@ -1508,17 +1757,29 @@ async fn comparator_reads_combined_copper_chest_inventory() {
     let comparator = state(
         &mut registry,
         "minecraft:comparator",
-        &[("facing", "north"), ("mode", "compare"), ("powered", "false")],
+        &[
+            ("facing", "north"),
+            ("mode", "compare"),
+            ("powered", "false"),
+        ],
     );
     let left = state(
         &mut registry,
         "minecraft:copper_chest",
-        &[("facing", "north"), ("type", "left"), ("waterlogged", "false")],
+        &[
+            ("facing", "north"),
+            ("type", "left"),
+            ("waterlogged", "false"),
+        ],
     );
     let right = state(
         &mut registry,
         "minecraft:exposed_copper_chest",
-        &[("facing", "north"), ("type", "right"), ("waterlogged", "false")],
+        &[
+            ("facing", "north"),
+            ("type", "right"),
+            ("waterlogged", "false"),
+        ],
     );
     let source_pos = BlockPos::new(0, 0, -1);
     let partner_pos = BlockPos::new(1, 0, -1);
@@ -1527,7 +1788,10 @@ async fn comparator_reads_combined_copper_chest_inventory() {
     world.set_block(source_pos, left).unwrap();
     world.set_block(partner_pos, right).unwrap();
     world.set_block_entity(source_pos, container("minecraft:chest", &[]));
-    world.set_block_entity(partner_pos, container("minecraft:chest", &[("minecraft:stone", 64)]));
+    world.set_block_entity(
+        partner_pos,
+        container("minecraft:chest", &[("minecraft:stone", 64)]),
+    );
     let rules = Java26Rules::new(registry);
     let mut simulation = Simulation::load(rules, world, SimulationConfig::default())
         .await
@@ -1563,7 +1827,11 @@ async fn remaining_analog_source_categories_drive_comparators() {
             state(
                 &mut registry,
                 "minecraft:crafter",
-                &[("crafting", "false"), ("orientation", "north_up"), ("triggered", "false")],
+                &[
+                    ("crafting", "false"),
+                    ("orientation", "north_up"),
+                    ("triggered", "false"),
+                ],
             ),
             BlockEntityData {
                 kind: "minecraft:crafter".to_owned(),
@@ -1582,10 +1850,7 @@ async fn remaining_analog_source_categories_drive_comparators() {
             ),
             BlockEntityData {
                 kind: "minecraft:command_block".to_owned(),
-                fields: BTreeMap::from([(
-                    "SuccessCount".to_owned(),
-                    serde_json::Value::from(9),
-                )]),
+                fields: BTreeMap::from([("SuccessCount".to_owned(), serde_json::Value::from(9))]),
             },
             9,
         ),
@@ -1593,7 +1858,11 @@ async fn remaining_analog_source_categories_drive_comparators() {
             state(
                 &mut registry,
                 "minecraft:sculk_sensor",
-                &[("power", "4"), ("sculk_sensor_phase", "active"), ("waterlogged", "false")],
+                &[
+                    ("power", "4"),
+                    ("sculk_sensor_phase", "active"),
+                    ("waterlogged", "false"),
+                ],
             ),
             BlockEntityData {
                 kind: "minecraft:sculk_sensor".to_owned(),
@@ -1608,14 +1877,15 @@ async fn remaining_analog_source_categories_drive_comparators() {
             state(
                 &mut registry,
                 "minecraft:creaking_heart",
-                &[("axis", "y"), ("creaking_heart_state", "awake"), ("natural", "true")],
+                &[
+                    ("axis", "y"),
+                    ("creaking_heart_state", "awake"),
+                    ("natural", "true"),
+                ],
             ),
             BlockEntityData {
                 kind: "minecraft:creaking_heart".to_owned(),
-                fields: BTreeMap::from([(
-                    "output_signal".to_owned(),
-                    serde_json::Value::from(6),
-                )]),
+                fields: BTreeMap::from([("output_signal".to_owned(), serde_json::Value::from(6))]),
             },
             6,
         ),
@@ -1635,7 +1905,11 @@ async fn shelf_output_depends_on_the_comparator_side() {
     let comparator = state(
         &mut registry,
         "minecraft:comparator",
-        &[("facing", "north"), ("mode", "compare"), ("powered", "false")],
+        &[
+            ("facing", "north"),
+            ("mode", "compare"),
+            ("powered", "false"),
+        ],
     );
     let shelf = state(
         &mut registry,
@@ -1688,22 +1962,27 @@ async fn detector_rail_reads_command_and_container_minecarts() {
     let comparator = state(
         &mut registry,
         "minecraft:comparator",
-        &[("facing", "north"), ("mode", "compare"), ("powered", "false")],
+        &[
+            ("facing", "north"),
+            ("mode", "compare"),
+            ("powered", "false"),
+        ],
     );
     let detector = state(
         &mut registry,
         "minecraft:detector_rail",
-        &[("powered", "true"), ("shape", "north_south"), ("waterlogged", "false")],
+        &[
+            ("powered", "true"),
+            ("shape", "north_south"),
+            ("waterlogged", "false"),
+        ],
     );
     let entities = [
         (
             EntityData {
                 kind: "minecraft:command_block_minecart".to_owned(),
                 position: [0.5, 0.1, -0.5],
-                fields: BTreeMap::from([(
-                    "SuccessCount".to_owned(),
-                    serde_json::Value::from(9),
-                )]),
+                fields: BTreeMap::from([("SuccessCount".to_owned(), serde_json::Value::from(9))]),
             },
             9,
         ),
@@ -1757,14 +2036,14 @@ async fn comparator_refreshes_when_a_direct_or_blocked_source_changes() {
         let comparator = state(
             &mut registry,
             "minecraft:comparator",
-            &[("facing", "north"), ("mode", "compare"), ("powered", "false")],
+            &[
+                ("facing", "north"),
+                ("mode", "compare"),
+                ("powered", "false"),
+            ],
         );
         let empty = state(&mut registry, "minecraft:cauldron", &[]);
-        let full = state(
-            &mut registry,
-            "minecraft:water_cauldron",
-            &[("level", "3")],
-        );
+        let full = state(&mut registry, "minecraft:water_cauldron", &[("level", "3")]);
         let stone = state(&mut registry, "minecraft:stone", &[]);
         let comparator_pos = BlockPos::ZERO;
         let source_pos = BlockPos::new(0, 0, if blocked { -2 } else { -1 });
@@ -1786,7 +2065,10 @@ async fn comparator_refreshes_when_a_direct_or_blocked_source_changes() {
             },
         );
         simulation.initialize().await.unwrap();
-        simulation.run_until(redstone_core::GameTick(3)).await.unwrap();
+        simulation
+            .run_until(redstone_core::GameTick(3))
+            .await
+            .unwrap();
 
         simulation
             .step_with_actions(&[Action::SetBlock {
@@ -1813,12 +2095,20 @@ async fn comparator_refreshes_after_a_hopper_transfer() {
     let comparator = state(
         &mut registry,
         "minecraft:comparator",
-        &[("facing", "west"), ("mode", "compare"), ("powered", "false")],
+        &[
+            ("facing", "west"),
+            ("mode", "compare"),
+            ("powered", "false"),
+        ],
     );
     let chest = state(
         &mut registry,
         "minecraft:chest",
-        &[("facing", "north"), ("type", "single"), ("waterlogged", "false")],
+        &[
+            ("facing", "north"),
+            ("type", "single"),
+            ("waterlogged", "false"),
+        ],
     );
     let hopper_pos = BlockPos::ZERO;
     let source_pos = BlockPos::new(0, 1, 0);
@@ -1828,7 +2118,10 @@ async fn comparator_refreshes_after_a_hopper_transfer() {
     world.set_block(source_pos, chest).unwrap();
     world.set_block(comparator_pos, comparator).unwrap();
     world.set_block_entity(hopper_pos, container("minecraft:hopper", &[]));
-    world.set_block_entity(source_pos, container("minecraft:chest", &[("minecraft:stone", 1)]));
+    world.set_block_entity(
+        source_pos,
+        container("minecraft:chest", &[("minecraft:stone", 1)]),
+    );
     let rules = Java26Rules::new(registry);
     let mut simulation = Simulation::load(rules, world, SimulationConfig::default())
         .await
@@ -1841,9 +2134,15 @@ async fn comparator_refreshes_after_a_hopper_transfer() {
         },
     );
     simulation.initialize().await.unwrap();
-    let deltas = simulation.run_until(redstone_core::GameTick(3)).await.unwrap();
+    let deltas = simulation
+        .run_until(redstone_core::GameTick(3))
+        .await
+        .unwrap();
 
-    assert_eq!(deltas.last().unwrap().probes[0].value, ProbeValue::Integer(1));
+    assert_eq!(
+        deltas.last().unwrap().probes[0].value,
+        ProbeValue::Integer(1)
+    );
 }
 
 #[tokio::test]
@@ -1862,7 +2161,11 @@ async fn weak_only_sources_and_lit_copper_bulbs_do_not_power_through_a_conductor
         &[("lit", "true"), ("powered", "false")],
     );
     let stone = state(&mut registry, "minecraft:stone", &[]);
-    let lamp = state(&mut registry, "minecraft:redstone_lamp", &[("lit", "false")]);
+    let lamp = state(
+        &mut registry,
+        "minecraft:redstone_lamp",
+        &[("lit", "false")],
+    );
 
     for source in [redstone_block, target, daylight_detector, copper_bulb] {
         let mut world = SparseWorld::new(registry.air_state());
@@ -1878,7 +2181,12 @@ async fn weak_only_sources_and_lit_copper_bulbs_do_not_power_through_a_conductor
 
         let unlit = simulation.world().get_block(BlockPos::new(1, 0, 0));
         assert_eq!(
-            simulation.rules().registry().state(unlit).unwrap().property("lit"),
+            simulation
+                .rules()
+                .registry()
+                .state(unlit)
+                .unwrap()
+                .property("lit"),
             Some("false")
         );
     }
@@ -1902,7 +2210,11 @@ async fn pistons_and_hoppers_do_not_relay_strong_power() {
         "minecraft:hopper",
         &[("enabled", "true"), ("facing", "down")],
     );
-    let redstone_lamp = state(&mut registry, "minecraft:redstone_lamp", &[("lit", "false")]);
+    let redstone_lamp = state(
+        &mut registry,
+        "minecraft:redstone_lamp",
+        &[("lit", "false")],
+    );
 
     for machine in [piston, hopper] {
         let output_pos = BlockPos::new(2, 0, 0);
@@ -1919,7 +2231,12 @@ async fn pistons_and_hoppers_do_not_relay_strong_power() {
 
         let output = simulation.world().get_block(output_pos);
         assert_eq!(
-            simulation.rules().registry().state(output).unwrap().property("lit"),
+            simulation
+                .rules()
+                .registry()
+                .state(output)
+                .unwrap()
+                .property("lit"),
             Some("false")
         );
     }
@@ -1934,7 +2251,11 @@ async fn wooden_pressure_plate_tracks_item_entities_and_releases_after_delay() {
         &[("powered", "false")],
     );
     let stone = state(&mut registry, "minecraft:stone", &[]);
-    let lamp = state(&mut registry, "minecraft:redstone_lamp", &[("lit", "false")]);
+    let lamp = state(
+        &mut registry,
+        "minecraft:redstone_lamp",
+        &[("lit", "false")],
+    );
     let mut world = SparseWorld::new(registry.air_state());
     world.set_block(BlockPos::ZERO, plate).unwrap();
     world.set_block(BlockPos::new(0, -1, 0), stone).unwrap();
@@ -1943,7 +2264,10 @@ async fn wooden_pressure_plate_tracks_item_entities_and_releases_after_delay() {
         kind: "minecraft:item".to_owned(),
         position: [0.5, 0.1, 0.5],
         fields: BTreeMap::from([
-            ("item_id".to_owned(), serde_json::Value::String("minecraft:stone".to_owned())),
+            (
+                "item_id".to_owned(),
+                serde_json::Value::String("minecraft:stone".to_owned()),
+            ),
             ("item_count".to_owned(), serde_json::Value::from(1)),
             ("age".to_owned(), serde_json::Value::from(5_998)),
         ]),
@@ -1956,18 +2280,36 @@ async fn wooden_pressure_plate_tracks_item_entities_and_releases_after_delay() {
     simulation.step().await.unwrap();
     let powered = simulation.world().get_block(BlockPos::ZERO);
     assert_eq!(
-        simulation.rules().registry().state(powered).unwrap().property("powered"),
+        simulation
+            .rules()
+            .registry()
+            .state(powered)
+            .unwrap()
+            .property("powered"),
         Some("true")
     );
     let lit = simulation.world().get_block(BlockPos::new(1, -1, 0));
     assert_eq!(
-        simulation.rules().registry().state(lit).unwrap().property("lit"),
+        simulation
+            .rules()
+            .registry()
+            .state(lit)
+            .unwrap()
+            .property("lit"),
         Some("true")
     );
-    simulation.run_until(redstone_core::GameTick(21)).await.unwrap();
+    simulation
+        .run_until(redstone_core::GameTick(21))
+        .await
+        .unwrap();
     let released = simulation.world().get_block(BlockPos::ZERO);
     assert_eq!(
-        simulation.rules().registry().state(released).unwrap().property("powered"),
+        simulation
+            .rules()
+            .registry()
+            .state(released)
+            .unwrap()
+            .property("powered"),
         Some("false")
     );
     assert_eq!(simulation.world().entities().count(), 0);
@@ -1979,10 +2321,18 @@ async fn detector_rail_responds_only_to_minecarts() {
     let rail = state(
         &mut registry,
         "minecraft:detector_rail",
-        &[("powered", "false"), ("shape", "north_south"), ("waterlogged", "false")],
+        &[
+            ("powered", "false"),
+            ("shape", "north_south"),
+            ("waterlogged", "false"),
+        ],
     );
     let stone = state(&mut registry, "minecraft:stone", &[]);
-    let lamp = state(&mut registry, "minecraft:redstone_lamp", &[("lit", "false")]);
+    let lamp = state(
+        &mut registry,
+        "minecraft:redstone_lamp",
+        &[("lit", "false")],
+    );
     let mut world = SparseWorld::new(registry.air_state());
     world.set_block(BlockPos::ZERO, rail).unwrap();
     world.set_block(BlockPos::new(0, -1, 0), stone).unwrap();
@@ -2002,12 +2352,22 @@ async fn detector_rail_responds_only_to_minecarts() {
 
     let powered = simulation.world().get_block(BlockPos::ZERO);
     assert_eq!(
-        simulation.rules().registry().state(powered).unwrap().property("powered"),
+        simulation
+            .rules()
+            .registry()
+            .state(powered)
+            .unwrap()
+            .property("powered"),
         Some("true")
     );
     let lit = simulation.world().get_block(BlockPos::new(1, -1, 0));
     assert_eq!(
-        simulation.rules().registry().state(lit).unwrap().property("lit"),
+        simulation
+            .rules()
+            .registry()
+            .state(lit)
+            .unwrap()
+            .property("lit"),
         Some("true")
     );
 }
@@ -2031,10 +2391,18 @@ async fn tripwire_powers_a_facing_hook_when_an_entity_intersects() {
     let hook = state(
         &mut registry,
         "minecraft:tripwire_hook",
-        &[("attached", "true"), ("facing", "west"), ("powered", "false")],
+        &[
+            ("attached", "true"),
+            ("facing", "west"),
+            ("powered", "false"),
+        ],
     );
     let stone = state(&mut registry, "minecraft:stone", &[]);
-    let lamp = state(&mut registry, "minecraft:redstone_lamp", &[("lit", "false")]);
+    let lamp = state(
+        &mut registry,
+        "minecraft:redstone_lamp",
+        &[("lit", "false")],
+    );
     let mut world = SparseWorld::new(registry.air_state());
     world.set_block(BlockPos::ZERO, wire).unwrap();
     world.set_block(BlockPos::new(1, 0, 0), hook).unwrap();
@@ -2055,12 +2423,22 @@ async fn tripwire_powers_a_facing_hook_when_an_entity_intersects() {
 
     let hook = simulation.world().get_block(BlockPos::new(1, 0, 0));
     assert_eq!(
-        simulation.rules().registry().state(hook).unwrap().property("powered"),
+        simulation
+            .rules()
+            .registry()
+            .state(hook)
+            .unwrap()
+            .property("powered"),
         Some("true")
     );
     let lit = simulation.world().get_block(BlockPos::new(2, 0, 1));
     assert_eq!(
-        simulation.rules().registry().state(lit).unwrap().property("lit"),
+        simulation
+            .rules()
+            .registry()
+            .state(lit)
+            .unwrap()
+            .property("lit"),
         Some("true")
     );
 }
@@ -2071,10 +2449,18 @@ async fn lectern_emits_a_two_tick_use_pulse() {
     let lectern = state(
         &mut registry,
         "minecraft:lectern",
-        &[("facing", "north"), ("has_book", "true"), ("powered", "false")],
+        &[
+            ("facing", "north"),
+            ("has_book", "true"),
+            ("powered", "false"),
+        ],
     );
     let stone = state(&mut registry, "minecraft:stone", &[]);
-    let lamp = state(&mut registry, "minecraft:redstone_lamp", &[("lit", "false")]);
+    let lamp = state(
+        &mut registry,
+        "minecraft:redstone_lamp",
+        &[("lit", "false")],
+    );
     let mut world = SparseWorld::new(registry.air_state());
     world.set_block(BlockPos::ZERO, lectern).unwrap();
     world.set_block(BlockPos::new(0, -1, 0), stone).unwrap();
@@ -2084,21 +2470,44 @@ async fn lectern_emits_a_two_tick_use_pulse() {
         .await
         .unwrap();
 
-    simulation.apply(Action::UseBlock { pos: BlockPos::ZERO }).await.unwrap();
+    simulation
+        .apply(Action::UseBlock {
+            pos: BlockPos::ZERO,
+        })
+        .await
+        .unwrap();
     let powered = simulation.world().get_block(BlockPos::ZERO);
     assert_eq!(
-        simulation.rules().registry().state(powered).unwrap().property("powered"),
+        simulation
+            .rules()
+            .registry()
+            .state(powered)
+            .unwrap()
+            .property("powered"),
         Some("true")
     );
     let lit = simulation.world().get_block(BlockPos::new(1, -1, 0));
     assert_eq!(
-        simulation.rules().registry().state(lit).unwrap().property("lit"),
+        simulation
+            .rules()
+            .registry()
+            .state(lit)
+            .unwrap()
+            .property("lit"),
         Some("true")
     );
-    simulation.run_until(redstone_core::GameTick(2)).await.unwrap();
+    simulation
+        .run_until(redstone_core::GameTick(2))
+        .await
+        .unwrap();
     let released = simulation.world().get_block(BlockPos::ZERO);
     assert_eq!(
-        simulation.rules().registry().state(released).unwrap().property("powered"),
+        simulation
+            .rules()
+            .registry()
+            .state(released)
+            .unwrap()
+            .property("powered"),
         Some("false")
     );
 }
@@ -2108,7 +2517,11 @@ async fn piston_rejects_block_entity_container_states_without_runtime_data() {
     let containers: &[(&str, &[(&str, &str)])] = &[
         (
             "minecraft:chest",
-            &[("facing", "north"), ("type", "single"), ("waterlogged", "false")],
+            &[
+                ("facing", "north"),
+                ("type", "single"),
+                ("waterlogged", "false"),
+            ],
         ),
         (
             "minecraft:hopper",
@@ -2154,7 +2567,9 @@ async fn piston_rejects_block_entity_container_states_without_runtime_data() {
         let mut world = SparseWorld::new(registry.air_state());
         world.set_block(BlockPos::ZERO, piston).unwrap();
         world.set_block(BlockPos::new(-1, 0, 0), source).unwrap();
-        world.set_block(BlockPos::new(1, 0, 0), container_state).unwrap();
+        world
+            .set_block(BlockPos::new(1, 0, 0), container_state)
+            .unwrap();
         let rules = Java26Rules::new(registry);
         let mut simulation = Simulation::load(rules, world, SimulationConfig::default())
             .await
@@ -2165,11 +2580,19 @@ async fn piston_rejects_block_entity_container_states_without_runtime_data() {
 
         let piston_state = simulation.world().get_block(BlockPos::ZERO);
         assert_eq!(
-            simulation.rules().registry().state(piston_state).unwrap().property("extended"),
+            simulation
+                .rules()
+                .registry()
+                .state(piston_state)
+                .unwrap()
+                .property("extended"),
             Some("false"),
             "{name}"
         );
-        assert_eq!(simulation.world().get_block(BlockPos::new(1, 0, 0)), container_state);
+        assert_eq!(
+            simulation.world().get_block(BlockPos::new(1, 0, 0)),
+            container_state
+        );
         assert_eq!(
             simulation.world().get_block(BlockPos::new(2, 0, 0)),
             simulation.rules().registry().air_state()
@@ -2221,20 +2644,24 @@ async fn piston_moves_slime_branches_without_sticking_to_honey() {
         .map(|(pos, data)| (*pos, data.fields["source"].as_bool().unwrap()))
         .collect::<Vec<_>>();
     assert!(moving_order.last().is_some_and(|(_, source)| *source));
-    assert!(moving_order[..moving_order.len() - 1]
-        .iter()
-        .all(|(_, source)| !source));
-    simulation.run_until(redstone_core::GameTick(4)).await.unwrap();
+    assert!(
+        moving_order[..moving_order.len() - 1]
+            .iter()
+            .all(|(_, source)| !source)
+    );
+    simulation
+        .run_until(redstone_core::GameTick(4))
+        .await
+        .unwrap();
 
     assert_eq!(simulation.world().get_block(BlockPos::new(2, 0, 0)), slime);
     assert_eq!(simulation.world().get_block(BlockPos::new(2, 1, 0)), stone);
     assert_eq!(simulation.world().get_block(BlockPos::new(1, -1, 0)), honey);
-    assert!(simulation.trace().events().iter().any(|event| {
-        matches!(
-            event.kind,
-            TraceKind::BlockEventExecuted { param_a: 0, .. }
-        )
-    }));
+    assert!(
+        simulation.trace().events().iter().any(|event| {
+            matches!(event.kind, TraceKind::BlockEventExecuted { param_a: 0, .. })
+        })
+    );
 }
 
 #[tokio::test]
@@ -2264,7 +2691,12 @@ async fn piston_rejects_a_sticky_structure_larger_than_twelve_blocks() {
 
     let piston_state = simulation.world().get_block(BlockPos::ZERO);
     assert_eq!(
-        simulation.rules().registry().state(piston_state).unwrap().property("extended"),
+        simulation
+            .rules()
+            .registry()
+            .state(piston_state)
+            .unwrap()
+            .property("extended"),
         Some("false")
     );
     assert_eq!(simulation.world().get_block(BlockPos::new(1, 0, 0)), slime);

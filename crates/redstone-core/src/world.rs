@@ -9,9 +9,7 @@ use crate::{BlockEntityData, BlockPos, BlockStateId, EntityData, EntityId};
 pub const SECTION_EDGE: i32 = 16;
 const SECTION_VOLUME: usize = 16 * 16 * 16;
 
-#[derive(
-    Clone, Copy, Debug, Deserialize, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize,
-)]
+#[derive(Clone, Copy, Debug, Deserialize, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize)]
 pub struct SectionPos {
     pub x: i32,
     pub y: i32,
@@ -66,7 +64,11 @@ impl PaletteSection {
             return Ok(old);
         }
 
-        let palette_index = match self.palette.iter().position(|candidate| *candidate == state) {
+        let palette_index = match self
+            .palette
+            .iter()
+            .position(|candidate| *candidate == state)
+        {
             Some(index) => index,
             None => {
                 if self.palette.len() > u16::MAX as usize {
@@ -126,9 +128,9 @@ impl SparseWorld {
 
     pub fn get_block(&self, pos: BlockPos) -> BlockStateId {
         let section_pos = SectionPos::from_block(pos);
-        self.sections
-            .get(&section_pos)
-            .map_or(self.air, |section| section.get(SectionPos::local_index(pos)))
+        self.sections.get(&section_pos).map_or(self.air, |section| {
+            section.get(SectionPos::local_index(pos))
+        })
     }
 
     pub fn set_block(
@@ -251,16 +253,17 @@ impl SparseWorld {
                 self.entity_sections.remove(&old_section);
             }
         }
-        self.entity_sections.entry(new_section).or_default().insert(id);
+        self.entity_sections
+            .entry(new_section)
+            .or_default()
+            .insert(id);
         true
     }
 
     pub fn entity_ids_in_aabb(&self, min: [f64; 3], max: [f64; 3]) -> Vec<EntityId> {
-        if min
-            .iter()
-            .zip(max)
-            .any(|(minimum, maximum)| !minimum.is_finite() || !maximum.is_finite() || *minimum >= maximum)
-        {
+        if min.iter().zip(max).any(|(minimum, maximum)| {
+            !minimum.is_finite() || !maximum.is_finite() || *minimum >= maximum
+        }) {
             return Vec::new();
         }
         let min_section = section_for_point(min);
@@ -308,25 +311,27 @@ impl SparseWorld {
     }
 
     pub fn iter_blocks(&self) -> impl Iterator<Item = (BlockPos, BlockStateId)> + '_ {
-        self.sections.iter().flat_map(move |(section_pos, section)| {
-            (0..SECTION_VOLUME).filter_map(move |index| {
-                let state = section.get(index);
-                if state == self.air {
-                    return None;
-                }
-                let x = index % 16;
-                let z = (index / 16) % 16;
-                let y = index / 256;
-                Some((
-                    BlockPos::new(
-                        section_pos.x * 16 + x as i32,
-                        section_pos.y * 16 + y as i32,
-                        section_pos.z * 16 + z as i32,
-                    ),
-                    state,
-                ))
+        self.sections
+            .iter()
+            .flat_map(move |(section_pos, section)| {
+                (0..SECTION_VOLUME).filter_map(move |index| {
+                    let state = section.get(index);
+                    if state == self.air {
+                        return None;
+                    }
+                    let x = index % 16;
+                    let z = (index / 16) % 16;
+                    let y = index / 256;
+                    Some((
+                        BlockPos::new(
+                            section_pos.x * 16 + x as i32,
+                            section_pos.y * 16 + y as i32,
+                            section_pos.z * 16 + z as i32,
+                        ),
+                        state,
+                    ))
+                })
             })
-        })
     }
 }
 
@@ -374,8 +379,12 @@ mod tests {
         let solid = BlockStateId(1);
         let mut world = SparseWorld::new(air);
         world.set_block(BlockPos::new(-1, -1, -1), solid).unwrap();
-        world.set_block(BlockPos::new(-16, -16, -16), solid).unwrap();
-        world.set_block(BlockPos::new(-17, -17, -17), solid).unwrap();
+        world
+            .set_block(BlockPos::new(-16, -16, -16), solid)
+            .unwrap();
+        world
+            .set_block(BlockPos::new(-17, -17, -17), solid)
+            .unwrap();
 
         assert_eq!(world.section_count(), 2);
         assert_eq!(world.get_block(BlockPos::new(-1, -1, -1)), solid);
@@ -409,7 +418,10 @@ mod tests {
         }
 
         assert_eq!(
-            world.block_entities().map(|(pos, _)| *pos).collect::<Vec<_>>(),
+            world
+                .block_entities()
+                .map(|(pos, _)| *pos)
+                .collect::<Vec<_>>(),
             vec![later_coordinate, earlier_coordinate]
         );
 
@@ -422,7 +434,10 @@ mod tests {
             },
         );
         assert_eq!(
-            world.block_entities().map(|(pos, _)| *pos).collect::<Vec<_>>(),
+            world
+                .block_entities()
+                .map(|(pos, _)| *pos)
+                .collect::<Vec<_>>(),
             vec![earlier_coordinate, later_coordinate]
         );
     }
@@ -441,17 +456,21 @@ mod tests {
         );
 
         assert!(world.move_entity(id, [16.5, 0.0, 0.5]));
-        assert!(world
-            .entity_ids_in_aabb([-1.0, 0.0, 0.0], [0.0, 1.0, 1.0])
-            .is_empty());
+        assert!(
+            world
+                .entity_ids_in_aabb([-1.0, 0.0, 0.0], [0.0, 1.0, 1.0])
+                .is_empty()
+        );
         assert_eq!(
             world.entity_ids_in_aabb([16.0, 0.0, 0.0], [17.0, 1.0, 1.0]),
             vec![id]
         );
 
         world.remove_entity(id);
-        assert!(world
-            .entity_ids_in_aabb([16.0, 0.0, 0.0], [17.0, 1.0, 1.0])
-            .is_empty());
+        assert!(
+            world
+                .entity_ids_in_aabb([16.0, 0.0, 0.0], [17.0, 1.0, 1.0])
+                .is_empty()
+        );
     }
 }
