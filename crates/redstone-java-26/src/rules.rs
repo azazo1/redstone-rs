@@ -13,6 +13,7 @@ use crate::orientation::{Orientation, SideBias};
 
 mod inventory;
 mod item;
+mod observer;
 mod piston;
 mod shape;
 mod consumer;
@@ -68,11 +69,23 @@ impl Java26Rules {
         cause: &str,
         orientation: Option<u8>,
     ) -> Result<bool, RulesError> {
-        let old = ctx.set_block(pos, state, cause)?;
-        if old == state {
+        let requested_state = state;
+        let old = ctx.set_block(pos, requested_state, cause)?;
+        if old == requested_state {
             return Ok(false);
         }
+        let state = self.apply_observer_lifecycle(
+            ctx,
+            pos,
+            old,
+            requested_state,
+            true,
+            true,
+        )?;
         self.sync_entity_sensor(pos, old, state);
+        if state != requested_state {
+            return Ok(true);
+        }
         let source_block = self.registry.state(state).map_or_else(
             || self.registry.state(old).map(|state| state.kind),
             |state| Some(state.kind),
@@ -142,6 +155,7 @@ impl Java26Rules {
                 }
             }
         }
+        self.queue_observer_shape_updates(ctx, pos);
         if self
             .registry
             .state(old)
@@ -196,16 +210,10 @@ impl Java26Rules {
         if old == state {
             return Ok(false);
         }
+        let state = self.apply_observer_lifecycle(ctx, pos, old, state, false, true)?;
         self.sync_entity_sensor(pos, old, state);
         let definition = self.state(state)?.clone();
-        let facing = definition
-            .direction_property("facing")
-            .unwrap_or(Direction::North);
-        self.notify_observers_of_shape_change(
-            ctx,
-            pos,
-            Some(pos.relative(facing.opposite())),
-        )?;
+        self.notify_observers_of_shape_change(ctx, pos)?;
         self.update_diode_output_neighbors(ctx, pos, &definition);
         Ok(true)
     }
@@ -221,31 +229,10 @@ impl Java26Rules {
         if old == state {
             return Ok(false);
         }
+        let state = self.apply_observer_lifecycle(ctx, pos, old, state, false, true)?;
         self.sync_entity_sensor(pos, old, state);
-        self.notify_observers_of_shape_change(ctx, pos, None)?;
+        self.notify_observers_of_shape_change(ctx, pos)?;
         Ok(true)
-    }
-
-    fn notify_observers_of_shape_change(
-        &mut self,
-        ctx: &mut EventContext<'_>,
-        source_pos: BlockPos,
-        skip_pos: Option<BlockPos>,
-    ) -> Result<(), RulesError> {
-        for direction in Direction::UPDATE_ORDER {
-            let observer_pos = source_pos.relative(direction);
-            if Some(observer_pos) == skip_pos {
-                continue;
-            }
-            let observer_state_id = ctx.world.get_block(observer_pos);
-            if self
-                .state(observer_state_id)
-                .is_ok_and(|state| matches!(state.behavior, BlockBehavior::Observer))
-            {
-                self.refresh_observer(ctx, observer_pos, observer_state_id, source_pos)?;
-            }
-        }
-        Ok(())
     }
 
     fn sync_entity_sensor(
@@ -548,6 +535,7 @@ impl Java26Rules {
                 let new_state = self.changed_state(state_id, "power", new_power.to_string())?;
                 let old_state = ctx.set_block(initial_pos, new_state, "default_wire")?;
                 self.sync_entity_sensor(initial_pos, old_state, new_state);
+                self.notify_observers_of_shape_change(ctx, initial_pos)?;
                 for candidate in default_wire_update_positions(initial_pos) {
                     ctx.update_neighbors(candidate, state.kind, None, None);
                 }
@@ -791,23 +779,6 @@ impl Java26Rules {
         Ok(())
     }
 
-    fn refresh_observer(
-        &mut self,
-        ctx: &mut EventContext<'_>,
-        pos: BlockPos,
-        state_id: BlockStateId,
-        source_pos: BlockPos,
-    ) -> Result<(), RulesError> {
-        let state = self.state(state_id)?.clone();
-        let facing = state.direction_property("facing").unwrap_or(Direction::South);
-        if pos.relative(facing) == source_pos
-            && !state.bool_property("powered")
-            && !ctx.has_scheduled_tick(pos, state.kind)
-        {
-            ctx.schedule_tick(pos, state.kind, 2, TickPriority::Normal);
-        }
-        Ok(())
-    }
 
     fn refresh_triggered_container(
         &mut self,
@@ -1170,15 +1141,7 @@ impl BlockRules for Java26Rules {
             BlockBehavior::Torch { .. } => self.refresh_torch(ctx, update.pos, state_id)?,
             BlockBehavior::Repeater => self.refresh_repeater(ctx, update.pos, state_id)?,
             BlockBehavior::Comparator => self.refresh_comparator(ctx, update.pos, state_id)?,
-            BlockBehavior::Observer => {
-                let source_matches = self
-                    .registry
-                    .state(ctx.world.get_block(update.source_pos))
-                    .is_some_and(|source| source.kind == update.source_block);
-                if source_matches {
-                    self.refresh_observer(ctx, update.pos, state_id, update.source_pos)?;
-                }
-            }
+            BlockBehavior::Observer => {}
             BlockBehavior::Dropper | BlockBehavior::Dispenser | BlockBehavior::Crafter => {
                 self.refresh_triggered_container(ctx, update.pos, state_id, true)?
             }
@@ -1372,6 +1335,12 @@ impl BlockRules for Java26Rules {
             }
             piston::SETTLE_MOVING_PISTON => {
                 self.settle_moving_piston(ctx, task.pos, task.param_a != 0)?;
+            }
+            piston::MOVE_RETRACTED_STRUCTURE => {
+                self.move_retracted_piston_structure(ctx, task.pos)?;
+            }
+            observer::NOTIFY_SHAPE_UPDATES => {
+                self.notify_observers_of_shape_change(ctx, task.pos)?;
             }
             shape::REPAIR_NEIGHBOR_SHAPES => {
                 self.repair_neighbor_shapes(ctx, task.pos)?;

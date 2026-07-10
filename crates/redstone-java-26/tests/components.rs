@@ -160,7 +160,6 @@ async fn default_wire_does_not_power_itself_through_a_conductor() {
     let mut simulation = Simulation::load(rules, world, SimulationConfig::default())
         .await
         .unwrap();
-
     simulation
         .step_with_actions(&[Action::BreakBlock {
             pos: BlockPos::ZERO,
@@ -328,7 +327,6 @@ async fn observer_emits_a_two_tick_pulse_after_observed_change() {
     let mut simulation = Simulation::load(rules, world, SimulationConfig::default())
         .await
         .unwrap();
-
     simulation
         .step_with_actions(&[Action::SetBlock {
             pos: BlockPos::new(0, 0, -1),
@@ -350,6 +348,143 @@ async fn observer_emits_a_two_tick_pulse_after_observed_change() {
         simulation.rules().registry().state(unpowered).unwrap().property("powered"),
         Some("false")
     );
+}
+
+#[tokio::test]
+async fn moved_observer_schedules_an_air_update_after_settling() {
+    let mut registry = Java26Registry::new();
+    let piston = state(
+        &mut registry,
+        "minecraft:piston",
+        &[("extended", "false"), ("facing", "east")],
+    );
+    let source = state(&mut registry, "minecraft:redstone_block", &[]);
+    let observer = state(
+        &mut registry,
+        "minecraft:observer",
+        &[("facing", "east"), ("powered", "false")],
+    );
+    let moved_pos = BlockPos::new(2, 0, 0);
+    let mut world = SparseWorld::new(registry.air_state());
+    world.set_block(BlockPos::ZERO, piston).unwrap();
+    world.set_block(BlockPos::new(-1, 0, 0), source).unwrap();
+    world.set_block(BlockPos::new(1, 0, 0), observer).unwrap();
+    let rules = Java26Rules::new(registry);
+    let mut simulation = Simulation::load(rules, world, SimulationConfig::default())
+        .await
+        .unwrap();
+    simulation.initialize().await.unwrap();
+
+    simulation.step().await.unwrap();
+    simulation.run_until(redstone_core::GameTick(3)).await.unwrap();
+
+    let moved = simulation.world().get_block(moved_pos);
+    assert_eq!(
+        simulation.rules().registry().state(moved).unwrap().property("powered"),
+        Some("false")
+    );
+    assert!(simulation.trace().events().iter().any(|event| {
+        matches!(
+            &event.kind,
+            TraceKind::ScheduledTickQueued {
+                pos,
+                trigger_tick,
+                ..
+            } if *pos == moved_pos && *trigger_tick == redstone_core::GameTick(5)
+        )
+    }));
+
+    simulation.run_until(redstone_core::GameTick(5)).await.unwrap();
+    let moved = simulation.world().get_block(moved_pos);
+    assert_eq!(
+        simulation.rules().registry().state(moved).unwrap().property("powered"),
+        Some("true")
+    );
+}
+
+#[tokio::test]
+async fn powered_observer_resets_when_placed() {
+    let mut registry = Java26Registry::new();
+    let observer = state(
+        &mut registry,
+        "minecraft:observer",
+        &[("facing", "east"), ("powered", "true")],
+    );
+    let world = SparseWorld::new(registry.air_state());
+    let rules = Java26Rules::new(registry);
+    let mut simulation = Simulation::load(rules, world, SimulationConfig::default())
+        .await
+        .unwrap();
+
+    simulation
+        .step_with_actions(&[Action::SetBlock {
+            pos: BlockPos::ZERO,
+            state: observer,
+        }])
+        .await
+        .unwrap();
+
+    let placed = simulation.world().get_block(BlockPos::ZERO);
+    assert_eq!(
+        simulation.rules().registry().state(placed).unwrap().property("powered"),
+        Some("false")
+    );
+    assert_eq!(simulation.pending_scheduled_ticks(), 0);
+}
+
+#[tokio::test]
+async fn removing_active_observer_refreshes_output_neighbors() {
+    let mut registry = Java26Registry::new();
+    let observer = state(
+        &mut registry,
+        "minecraft:observer",
+        &[("facing", "east"), ("powered", "false")],
+    );
+    let stone = state(&mut registry, "minecraft:stone", &[]);
+    let lamp = state(&mut registry, "minecraft:redstone_lamp", &[("lit", "false")]);
+    let output_pos = BlockPos::new(-1, 0, 0);
+    let lamp_pos = BlockPos::new(-1, 1, 0);
+    let mut world = SparseWorld::new(registry.air_state());
+    world.set_block(BlockPos::ZERO, observer).unwrap();
+    world.set_block(output_pos, stone).unwrap();
+    world.set_block(lamp_pos, lamp).unwrap();
+    let rules = Java26Rules::new(registry);
+    let mut simulation = Simulation::load(rules, world, SimulationConfig::default())
+        .await
+        .unwrap();
+
+    simulation
+        .step_with_actions(&[Action::SetBlock {
+            pos: BlockPos::new(1, 0, 0),
+            state: stone,
+        }])
+        .await
+        .unwrap();
+    simulation.run_until(redstone_core::GameTick(3)).await.unwrap();
+    let active = simulation.world().get_block(BlockPos::ZERO);
+    assert_eq!(
+        simulation.rules().registry().state(active).unwrap().property("powered"),
+        Some("true")
+    );
+
+    let trace_len = simulation.trace().events().len();
+    simulation
+        .apply(Action::BreakBlock {
+            pos: BlockPos::ZERO,
+        })
+        .await
+        .unwrap();
+    let trace = simulation.trace();
+    assert!(trace.events()[trace_len..].iter().any(|event| {
+        matches!(
+            event.kind,
+            TraceKind::NeighborUpdate {
+                pos,
+                source_pos,
+                ..
+            } if pos == lamp_pos && source_pos == output_pos
+        )
+    }));
 }
 
 #[tokio::test]
@@ -435,6 +570,67 @@ async fn observer_ignores_secondary_updates_from_an_unchanged_conductor() {
     assert_eq!(
         simulation.rules().registry().state(observer).unwrap().property("powered"),
         Some("false")
+    );
+}
+
+#[tokio::test]
+async fn observer_powers_a_quasi_connected_piston_through_slime() {
+    let mut registry = Java26Registry::new();
+    let observer = state(
+        &mut registry,
+        "minecraft:observer",
+        &[("facing", "west"), ("powered", "false")],
+    );
+    let slime = state(&mut registry, "minecraft:slime_block", &[]);
+    let piston = state(
+        &mut registry,
+        "minecraft:sticky_piston",
+        &[("extended", "false"), ("facing", "north")],
+    );
+    let stone = state(&mut registry, "minecraft:stone", &[]);
+    let observer_pos = BlockPos::ZERO;
+    let piston_pos = BlockPos::new(1, 1, 0);
+    let mut world = SparseWorld::new(registry.air_state());
+    world.set_block(observer_pos, observer).unwrap();
+    world.set_block(BlockPos::new(1, 0, 0), slime).unwrap();
+    world.set_block(piston_pos, piston).unwrap();
+    let rules = Java26Rules::new(registry);
+    let mut simulation = Simulation::load(rules, world, SimulationConfig::default())
+        .await
+        .unwrap();
+    simulation.add_probe(
+        "slime_signal",
+        Probe::Signal {
+            pos: BlockPos::new(1, 0, 0),
+            direction: Some(Direction::Down),
+        },
+    );
+
+    simulation
+        .step_with_actions(&[Action::SetBlock {
+            pos: BlockPos::new(-1, 0, 0),
+            state: stone,
+        }])
+        .await
+        .unwrap();
+    let deltas = simulation.run_until(redstone_core::GameTick(3)).await.unwrap();
+
+    let observer = simulation.world().get_block(observer_pos);
+    assert_eq!(
+        simulation.rules().registry().state(observer).unwrap().property("powered"),
+        Some("true")
+    );
+    assert!(simulation.trace().events().iter().any(|event| {
+        matches!(
+            event.kind,
+            TraceKind::NeighborUpdate { pos, .. } if pos == piston_pos
+        )
+    }));
+    assert_eq!(deltas.last().unwrap().probes[0].value, ProbeValue::Integer(15));
+    let piston = simulation.world().get_block(piston_pos);
+    assert_eq!(
+        simulation.rules().registry().state(piston).unwrap().property("extended"),
+        Some("true")
     );
 }
 

@@ -387,7 +387,6 @@ fn classify(name: &str, properties: &BTreeMap<String, String>) -> BlockTraits {
         && !matches!(
             path,
             "redstone_block"
-                | "slime_block"
                 | "honey_block"
                 | "piston"
                 | "sticky_piston"

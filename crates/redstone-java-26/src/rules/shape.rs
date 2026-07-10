@@ -61,7 +61,10 @@ impl Java26Rules {
             } else {
                 "shape_initialize"
             };
-            ctx.set_block(pos, repaired, cause)?;
+            let old = ctx.set_block(pos, repaired, cause)?;
+            if notify && old != repaired {
+                self.notify_observers_of_shape_change(ctx, pos)?;
+            }
         }
         Ok(repaired)
     }

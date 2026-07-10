@@ -32,3 +32,7 @@ tracing = "0.1.41"
 tracing-indicatif = "0.3.14"
 tracing-subscriber = { version = "0.3.19", features = ["env-filter"] }
 zip = { version = "2.4.2", default-features = false, features = ["deflate"] }
+
+[profile.samply]
+inherits = "release"
+debug = true
