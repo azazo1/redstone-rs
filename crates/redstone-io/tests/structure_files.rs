@@ -1,7 +1,7 @@
 use std::collections::{BTreeMap, HashMap};
 use std::io::Write;
 
-use fastnbt::{LongArray, Value};
+use fastnbt::{IntArray, LongArray, Value};
 use flate2::{Compression, write::GzEncoder};
 use redstone_core::{BlockPos, BlockStateId};
 use redstone_io::{
@@ -86,10 +86,21 @@ fn vanilla_structure_round_trip_loads_blocks_block_entities_and_entities() {
             ),
             (
                 "nbt".to_owned(),
-                Value::Compound(HashMap::from([(
-                    "id".to_owned(),
-                    Value::String("minecraft:item_frame".to_owned()),
-                )])),
+                Value::Compound(HashMap::from([
+                    (
+                        "id".to_owned(),
+                        Value::String("minecraft:item_frame".to_owned()),
+                    ),
+                    ("Facing".to_owned(), Value::Byte(2)),
+                    ("ItemRotation".to_owned(), Value::Byte(5)),
+                    (
+                        "Item".to_owned(),
+                        Value::Compound(HashMap::from([
+                            ("id".to_owned(), Value::String("minecraft:map".to_owned())),
+                            ("count".to_owned(), Value::Int(1)),
+                        ])),
+                    ),
+                ])),
             ),
         ]))]),
     );
@@ -118,6 +129,10 @@ fn vanilla_structure_round_trip_loads_blocks_block_entities_and_entities() {
     let entity = loaded.world.entities().next().unwrap().1;
     assert_eq!(entity.kind, "minecraft:item_frame");
     assert_eq!(entity.position, [9.5, 20.0, 30.5]);
+    assert_eq!(entity.fields["item_id"], "minecraft:map");
+    assert_eq!(entity.fields["item_count"], 1);
+    assert_eq!(entity.fields["rotation"], 5);
+    assert_eq!(entity.fields["facing"], "east");
 }
 
 #[test]
@@ -183,6 +198,62 @@ fn gzip_litematic_loads_negative_regions_from_their_minimum_corner() {
     assert_eq!(loaded.max, BlockPos::new(4, 0, 0));
     let entity = loaded.world.entities().next().unwrap().1;
     assert_eq!(entity.position, [4.25, 0.0, 0.5]);
+}
+
+#[test]
+fn vanilla_structure_preserves_crafter_disabled_slots() {
+    let root = HashMap::from([
+        ("DataVersion".to_owned(), Value::Int(4790)),
+        (
+            "size".to_owned(),
+            Value::List(vec![Value::Int(1), Value::Int(1), Value::Int(1)]),
+        ),
+        (
+            "palette".to_owned(),
+            Value::List(vec![block_state(
+                "minecraft:crafter",
+                &[
+                    ("crafting", "false"),
+                    ("orientation", "north_up"),
+                    ("triggered", "false"),
+                ],
+            )]),
+        ),
+        (
+            "blocks".to_owned(),
+            Value::List(vec![Value::Compound(HashMap::from([
+                (
+                    "pos".to_owned(),
+                    Value::List(vec![Value::Int(0), Value::Int(0), Value::Int(0)]),
+                ),
+                ("state".to_owned(), Value::Int(0)),
+                (
+                    "nbt".to_owned(),
+                    Value::Compound(HashMap::from([
+                        ("id".to_owned(), Value::String("minecraft:crafter".to_owned())),
+                        ("Items".to_owned(), Value::List(Vec::new())),
+                        (
+                            "disabled_slots".to_owned(),
+                            Value::IntArray(IntArray::new(vec![0, 3, 8])),
+                        ),
+                    ])),
+                ),
+            ]))]),
+        ),
+        ("entities".to_owned(), Value::List(Vec::new())),
+    ]);
+    let path = std::env::temp_dir().join(format!(
+        "redstone-crafter-{}.nbt",
+        std::process::id()
+    ));
+    std::fs::write(&path, fastnbt::to_bytes(&root).unwrap()).unwrap();
+    let mut resolver = TestResolver::default();
+    let loaded = StructureLoader::load(&path, BlockPos::ZERO, &mut resolver).unwrap();
+
+    assert_eq!(
+        loaded.world.block_entity(BlockPos::ZERO).unwrap().fields["disabled_slots"],
+        serde_json::json!([0, 3, 8])
+    );
 }
 
 fn xyz_compound(x: i32, y: i32, z: i32) -> Value {

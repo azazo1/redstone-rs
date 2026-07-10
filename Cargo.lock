@@ -389,11 +389,13 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "clap",
+ "fastnbt",
  "indicatif",
  "libc",
  "redstone-core",
  "redstone-io",
  "redstone-java-26",
+ "serde",
  "serde_json",
  "tokio",
  "tracing",

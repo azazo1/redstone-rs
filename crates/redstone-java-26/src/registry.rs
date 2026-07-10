@@ -37,6 +37,10 @@ pub enum BlockBehavior {
     Lamp,
     CopperBulb,
     PoweredConsumer,
+    Door,
+    PoweredRail,
+    NoteBlock,
+    Bell,
     Target,
     PressurePlate { max_weight: Option<u32>, detects_items: bool },
     Tripwire,
@@ -89,6 +93,17 @@ impl StateDefinition {
             "south" => Some(Direction::South),
             _ => None,
         }
+    }
+
+    pub fn sturdy(&self, direction: Direction) -> bool {
+        self.sturdy_faces[match direction {
+            Direction::West => 0,
+            Direction::East => 1,
+            Direction::Down => 2,
+            Direction::Up => 3,
+            Direction::North => 4,
+            Direction::South => 5,
+        }]
     }
 }
 
@@ -322,13 +337,13 @@ fn classify(name: &str, properties: &BTreeMap<String, String>) -> BlockTraits {
         "dispenser" => BlockBehavior::Dispenser,
         "crafter" => BlockBehavior::Crafter,
         "tnt" => BlockBehavior::Tnt,
-        value
-            if value.ends_with("_door")
-                || value.ends_with("_trapdoor")
-                || value.ends_with("_fence_gate") => BlockBehavior::PoweredConsumer,
-        "powered_rail" | "activator_rail" | "note_block" | "bell" => {
+        value if value.ends_with("_door") && !value.ends_with("_trapdoor") => BlockBehavior::Door,
+        value if value.ends_with("_trapdoor") || value.ends_with("_fence_gate") => {
             BlockBehavior::PoweredConsumer
         }
+        "powered_rail" | "activator_rail" => BlockBehavior::PoweredRail,
+        "note_block" => BlockBehavior::NoteBlock,
+        "bell" => BlockBehavior::Bell,
         _ => BlockBehavior::Static,
     };
 
@@ -343,6 +358,10 @@ fn classify(name: &str, properties: &BTreeMap<String, String>) -> BlockTraits {
             | BlockBehavior::Comparator
             | BlockBehavior::Observer
             | BlockBehavior::PoweredConsumer
+            | BlockBehavior::Door
+            | BlockBehavior::PoweredRail
+            | BlockBehavior::NoteBlock
+            | BlockBehavior::Bell
             | BlockBehavior::PressurePlate { .. }
             | BlockBehavior::Tripwire
             | BlockBehavior::TripwireHook

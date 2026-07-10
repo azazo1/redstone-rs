@@ -9,7 +9,7 @@ use anyhow::{Context, Result, anyhow, bail};
 use clap::{Parser, Subcommand};
 use redstone_core::{
     Action, BlockPos, BlockStateId, GameTick, ProbeValue, Simulation, SimulationConfig,
-    SparseWorld,
+    SparseWorld, TraceEvent, TraceKind,
 };
 use redstone_io::{
     InitializationMode, Scenario, ScenarioActionKind, StructureLoader, StructureStateResolver,
@@ -496,11 +496,84 @@ fn compare_with_oracle(scenario: &Path, rust_trace: &Path) -> Result<()> {
     let rust = std::fs::read(rust_trace)?;
     let java = std::fs::read(&oracle_trace)?;
     let _ = std::fs::remove_file(&oracle_trace);
-    if rust != java {
+    if is_probe_sample_oracle(&java)? {
+        compare_probe_samples(&rust, &java)?;
+    } else if rust != java {
         let line = first_different_line(&rust, &java);
         bail!("Rust 与 Java oracle 轨迹不一致, 首个差异位于第 {line} 行");
     }
     Ok(())
+}
+
+#[derive(Debug, serde::Deserialize, Eq, PartialEq)]
+struct OracleProbeSample {
+    tick: u64,
+    probe: String,
+    value: serde_json::Value,
+}
+
+fn is_probe_sample_oracle(output: &[u8]) -> Result<bool> {
+    let Some(first_line) = output.split(|byte| *byte == b'\n').next() else {
+        return Ok(false);
+    };
+    if first_line.is_empty() {
+        return Ok(false);
+    }
+    let marker = serde_json::from_slice::<serde_json::Value>(first_line)
+        .context("解析 Java oracle 格式标记失败")?;
+    Ok(marker.get("format").and_then(serde_json::Value::as_str) == Some("probe_samples_v1"))
+}
+
+fn compare_probe_samples(rust_trace: &[u8], java_output: &[u8]) -> Result<()> {
+    let rust_events = rust_trace
+        .split(|byte| *byte == b'\n')
+        .filter(|line| !line.is_empty())
+        .map(|line| serde_json::from_slice::<TraceEvent>(line).context("解析 Rust 轨迹失败"))
+        .collect::<Result<Vec<_>>>()?;
+    let rust_samples = rust_events
+        .into_iter()
+        .filter_map(|event| match event.kind {
+            TraceKind::ProbeSample { sample } => Some(OracleProbeSample {
+                tick: event.tick.0,
+                probe: sample.name,
+                value: probe_value_json(sample.value),
+            }),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    let java_samples = java_output
+        .split(|byte| *byte == b'\n')
+        .skip(1)
+        .filter(|line| !line.is_empty())
+        .map(|line| {
+            serde_json::from_slice::<OracleProbeSample>(line)
+                .context("解析 Java oracle 探针样本失败")
+        })
+        .collect::<Result<Vec<_>>>()?;
+    if rust_samples == java_samples {
+        return Ok(());
+    }
+    let difference = rust_samples
+        .iter()
+        .zip(&java_samples)
+        .position(|(rust, java)| rust != java)
+        .unwrap_or(rust_samples.len().min(java_samples.len()));
+    bail!(
+        "Rust 与 Java oracle 探针不一致, 样本 {}, Rust={:?}, Java={:?}",
+        difference + 1,
+        rust_samples.get(difference),
+        java_samples.get(difference)
+    )
+}
+
+fn probe_value_json(value: ProbeValue) -> serde_json::Value {
+    match value {
+        ProbeValue::Bool(value) => serde_json::Value::Bool(value),
+        ProbeValue::Integer(value) => serde_json::Value::from(value),
+        ProbeValue::String(value) => serde_json::Value::String(value),
+        ProbeValue::State(value) => serde_json::Value::from(value.0),
+        ProbeValue::None => serde_json::Value::Null,
+    }
 }
 
 fn first_different_line(left: &[u8], right: &[u8]) -> usize {
@@ -553,6 +626,36 @@ fn resolve_scenario_action(
             pos: *pos,
             data: data.clone(),
         },
+        ScenarioActionKind::SpawnEntity {
+            id,
+            kind,
+            position,
+            fields,
+        } => Action::SpawnEntity {
+            id: *id,
+            data: ScenarioActionKind::entity_data(kind.clone(), *position, fields.clone()),
+        },
+        ScenarioActionKind::MoveEntity { id, position } => Action::MoveEntity {
+            id: *id,
+            position: *position,
+        },
+        ScenarioActionKind::RemoveEntity { id } => Action::RemoveEntity { id: *id },
+        ScenarioActionKind::SetEntityField { id, field, value } => Action::SetEntityField {
+            id: *id,
+            field: field.clone(),
+            value: value.clone(),
+        },
+        ScenarioActionKind::HitTarget {
+            pos,
+            face,
+            location,
+            arrow,
+        } => Action::HitTarget {
+            pos: *pos,
+            face: *face,
+            location: *location,
+            arrow: *arrow,
+        },
     })
 }
 
@@ -586,5 +689,17 @@ mod tests {
     fn scenario_hash_is_stable() {
         let path = Path::new("examples/basic.toml");
         assert_eq!(stable_path_hash(path), stable_path_hash(path));
+    }
+
+    #[test]
+    fn probe_sample_format_compares_only_post_tick_samples() {
+        let rust = br#"{"tick":1,"micro_step":1,"phase":"pre_tick","event":"message","level":"info","message":"ignored"}
+{"tick":1,"micro_step":2,"phase":"post_tick","event":"probe_sample","sample":{"name":"power","probe":{"type":"property","pos":{"x":0,"y":0,"z":0},"property":"power"},"value":"15"}}
+"#;
+        let java = br#"{"format":"probe_samples_v1"}
+{"tick":1,"probe":"power","value":"15"}
+"#;
+        assert!(is_probe_sample_oracle(java).unwrap());
+        compare_probe_samples(rust, java).unwrap();
     }
 }

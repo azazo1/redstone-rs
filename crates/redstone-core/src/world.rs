@@ -182,13 +182,30 @@ impl SparseWorld {
 
     pub fn spawn_entity(&mut self, data: EntityData) -> EntityId {
         let id = EntityId(self.next_entity_id);
-        self.next_entity_id += 1;
+        self.next_entity_id = self.next_entity_id.saturating_add(1);
+        self.insert_entity(id, data);
+        id
+    }
+
+    pub fn spawn_entity_with_id(
+        &mut self,
+        id: EntityId,
+        data: EntityData,
+    ) -> Result<(), WorldError> {
+        if self.entities.contains_key(&id) {
+            return Err(WorldError::EntityAlreadyExists(id));
+        }
+        self.next_entity_id = self.next_entity_id.max(id.0.saturating_add(1));
+        self.insert_entity(id, data);
+        Ok(())
+    }
+
+    fn insert_entity(&mut self, id: EntityId, data: EntityData) {
         self.entity_sections
             .entry(section_for_point(data.position))
             .or_default()
             .insert(id);
         self.entities.insert(id, data);
-        id
     }
 
     pub fn remove_entity(&mut self, id: EntityId) -> Option<EntityData> {
@@ -343,6 +360,8 @@ fn previous_float(value: f64) -> f64 {
 pub enum WorldError {
     #[error("区段调色板超过 u16 容量")]
     PaletteOverflow,
+    #[error("实体 ID 已存在: {0:?}")]
+    EntityAlreadyExists(EntityId),
 }
 
 #[cfg(test)]

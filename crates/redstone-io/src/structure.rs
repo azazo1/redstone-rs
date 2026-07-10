@@ -402,6 +402,7 @@ fn entity_from_nbt(entity: &HashMap<String, Value>) -> Result<Option<EntityData>
         .collect::<BTreeMap<_, _>>();
     normalize_inventory_fields(&kind, nbt, &mut fields);
     normalize_item_entity_fields(&kind, nbt, &mut fields);
+    normalize_item_frame_fields(&kind, nbt, &mut fields);
     Ok(Some(EntityData {
         kind,
         position,
@@ -489,6 +490,8 @@ fn container_slot_count(
         "minecraft:dispenser" | "minecraft:dropper" | "minecraft:crafter" => Some(9),
         "minecraft:furnace" | "minecraft:blast_furnace" | "minecraft:smoker" => Some(3),
         "minecraft:chest" | "minecraft:trapped_chest" | "minecraft:barrel" => Some(27),
+        "minecraft:chest_minecart" => Some(27),
+        "minecraft:hopper_minecart" => Some(5),
         value if value.ends_with("_shulker_box") || value == "minecraft:shulker_box" => Some(27),
         _ => None,
     };
@@ -541,6 +544,44 @@ fn normalize_item_entity_fields(
     }
 }
 
+fn normalize_item_frame_fields(
+    kind: &str,
+    nbt: &HashMap<String, Value>,
+    fields: &mut BTreeMap<String, serde_json::Value>,
+) {
+    if !matches!(kind, "minecraft:item_frame" | "minecraft:glow_item_frame") {
+        return;
+    }
+    if let Some(Value::Compound(item)) = nbt.get("Item").or_else(|| nbt.get("item")) {
+        if let Some(Value::String(item_id)) = item.get("id") {
+            fields.insert("item_id".to_owned(), serde_json::Value::String(item_id.clone()));
+        }
+        if let Some(count) = item
+            .get("count")
+            .or_else(|| item.get("Count"))
+            .and_then(value_i32)
+        {
+            fields.insert("item_count".to_owned(), serde_json::Value::from(count));
+        }
+    }
+    if let Some(rotation) = nbt
+        .get("ItemRotation")
+        .or_else(|| nbt.get("item_rotation"))
+        .and_then(value_i32)
+    {
+        fields.insert("rotation".to_owned(), serde_json::Value::from(rotation.rem_euclid(8)));
+    }
+    if let Some(facing) = nbt.get("Facing").or_else(|| nbt.get("facing")) {
+        let facing = match facing {
+            Value::String(value) => Some(serde_json::Value::String(value.clone())),
+            value => value_i32(value).map(serde_json::Value::from),
+        };
+        if let Some(facing) = facing {
+            fields.insert("facing".to_owned(), facing);
+        }
+    }
+}
+
 fn transform_entity(
     mut entity: EntityData,
     transform: StructureTransform,
@@ -551,7 +592,31 @@ fn transform_entity(
         entity.position[1] + offset.y as f64,
         entity.position[2] + offset.z as f64,
     ]);
+    if let Some(facing) = entity.fields.get("facing").and_then(json_direction) {
+        entity.fields.insert(
+            "facing".to_owned(),
+            serde_json::Value::String(
+                direction_name(transform_direction(facing, transform)).to_owned(),
+            ),
+        );
+    }
     entity
+}
+
+fn json_direction(value: &serde_json::Value) -> Option<Direction> {
+    match value {
+        serde_json::Value::String(value) => parse_direction(value),
+        serde_json::Value::Number(value) => match value.as_i64()? {
+            0 => Some(Direction::Down),
+            1 => Some(Direction::Up),
+            2 => Some(Direction::North),
+            3 => Some(Direction::South),
+            4 => Some(Direction::West),
+            5 => Some(Direction::East),
+            _ => None,
+        },
+        _ => None,
+    }
 }
 
 fn transform_properties(

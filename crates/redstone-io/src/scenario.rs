@@ -3,7 +3,8 @@ use std::path::{Path, PathBuf};
 use std::collections::BTreeMap;
 
 use redstone_core::{
-    BlockEntityData, BlockPos, Expectation, GameTick, Probe, ProbeValue, RedstoneMode,
+    BlockEntityData, BlockPos, EntityData, EntityId, Expectation, GameTick, Probe, ProbeValue,
+    RedstoneMode,
 };
 use serde::Deserialize;
 use thiserror::Error;
@@ -92,6 +93,43 @@ pub enum ScenarioActionKind {
         pos: BlockPos,
         data: BlockEntityData,
     },
+    SpawnEntity {
+        #[serde(default)]
+        id: Option<EntityId>,
+        kind: String,
+        position: [f64; 3],
+        #[serde(default)]
+        fields: BTreeMap<String, serde_json::Value>,
+    },
+    MoveEntity {
+        id: EntityId,
+        position: [f64; 3],
+    },
+    RemoveEntity {
+        id: EntityId,
+    },
+    SetEntityField {
+        id: EntityId,
+        field: String,
+        value: serde_json::Value,
+    },
+    HitTarget {
+        pos: BlockPos,
+        face: redstone_core::Direction,
+        location: [f64; 3],
+        #[serde(default)]
+        arrow: bool,
+    },
+}
+
+impl ScenarioActionKind {
+    pub fn entity_data(kind: String, position: [f64; 3], fields: BTreeMap<String, serde_json::Value>) -> EntityData {
+        EntityData {
+            kind,
+            position,
+            fields,
+        }
+    }
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -174,6 +212,52 @@ property = "powered"
         assert!(matches!(
             &scenario.probes[0].probe,
             Probe::Property { property, .. } if property == "powered"
+        ));
+    }
+
+    #[test]
+    fn entity_actions_and_probes_parse_from_toml() {
+        let scenario = toml::from_str::<Scenario>(
+            r#"
+version = "26.1.2"
+mode = "default"
+
+[source]
+path = "machine.nbt"
+
+[[actions]]
+tick = 1
+type = "spawn_entity"
+id = 9
+kind = "minecraft:hopper_minecart"
+position = [0.5, 0.0, 0.5]
+fields = { enabled = true, capacity = 320 }
+
+[[actions]]
+tick = 2
+type = "move_entity"
+id = 9
+position = [1.5, 0.0, 0.5]
+
+[[probes]]
+name = "inventory"
+type = "entity_container_count"
+id = 9
+"#,
+        )
+        .unwrap();
+
+        assert!(matches!(
+            &scenario.actions[0].action,
+            ScenarioActionKind::SpawnEntity {
+                id: Some(EntityId(9)),
+                fields,
+                ..
+            } if fields["enabled"] == serde_json::Value::Bool(true)
+        ));
+        assert!(matches!(
+            scenario.probes[0].probe,
+            Probe::EntityContainerCount { id: EntityId(9) }
         ));
     }
 }

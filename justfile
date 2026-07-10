@@ -3,6 +3,8 @@ CLIENT_JAR := "assets/client-26.1.2.jar"
 OUT_DIR := "decompiled/client-26.1.2"
 RUNTIME_DIR := "assets/libraries/26.1.2"
 REPORT_DIR := "crates/redstone-java-26/data/26.1.2"
+ORACLE_DIR := "tools/vanilla-oracle"
+ORACLE_LIB_DIR := "assets/oracle-libraries"
 
 [private]
 default:
@@ -122,3 +124,46 @@ generate-reports: download-runtime
     classpath="{{ CLIENT_JAR }}:$(find "{{ RUNTIME_DIR }}" -name '*.jar' -type f | sort | paste -sd ':' -)"
     echo "生成 Minecraft 26.1.2 数据报告"
     java -Xmx4g -cp "$classpath" net.minecraft.data.Main --reports --output "{{ REPORT_DIR }}"
+
+# 下载 Java oracle 的 TOML 解析运行库.
+download-oracle-deps:
+    #!/usr/bin/env sh
+    set -eu
+    mkdir -p "{{ ORACLE_LIB_DIR }}"
+    download() {
+      name="$1"
+      url="$2"
+      target="{{ ORACLE_LIB_DIR }}/$name"
+      if [ ! -f "$target" ]; then
+        echo "下载 Java oracle 运行库: $name"
+        curl -fsSL "$url" -o "$target"
+      fi
+    }
+    download tomlj-1.1.1.jar https://repo1.maven.org/maven2/org/tomlj/tomlj/1.1.1/tomlj-1.1.1.jar
+    download antlr4-runtime-4.11.1.jar https://repo1.maven.org/maven2/org/antlr/antlr4-runtime/4.11.1/antlr4-runtime-4.11.1.jar
+    download checker-qual-3.21.2.jar https://repo1.maven.org/maven2/org/checkerframework/checker-qual/3.21.2/checker-qual-3.21.2.jar
+
+# 构建 Java 26.1.2 oracle JAR.
+oracle-build: download-runtime download-oracle-deps
+    sh {{ ORACLE_DIR }}/build.sh
+
+# 校验 Java 版本, Bootstrap 和注册表初始化.
+oracle-self-test: oracle-build
+    #!/usr/bin/env sh
+    set -eu
+    classpath="{{ ORACLE_DIR }}/build/vanilla-oracle.jar:{{ CLIENT_JAR }}:$(find "{{ RUNTIME_DIR }}" "{{ ORACLE_LIB_DIR }}" -name '*.jar' -type f | sort | paste -sd ':' -)"
+    java -Xmx2g -cp "$classpath" redstone.oracle.Main --self-test
+
+# 启动内置 always_pass GameTest 并等待原版服务端自动退出.
+oracle-server-self-test: oracle-build
+    #!/usr/bin/env sh
+    set -eu
+    classpath="{{ ORACLE_DIR }}/build/vanilla-oracle.jar:{{ CLIENT_JAR }}:$(find "{{ RUNTIME_DIR }}" "{{ ORACLE_LIB_DIR }}" -name '*.jar' -type f | sort | paste -sd ':' -)"
+    java -Xmx2g -cp "$classpath" redstone.oracle.Main --server-self-test
+
+# 执行真实 structure, 动作和探针场景并校验输出.
+oracle-scenario-self-test: oracle-build
+    #!/usr/bin/env sh
+    set -eu
+    classpath="{{ ORACLE_DIR }}/build/vanilla-oracle.jar:{{ CLIENT_JAR }}:$(find "{{ RUNTIME_DIR }}" "{{ ORACLE_LIB_DIR }}" -name '*.jar' -type f | sort | paste -sd ':' -)"
+    java -Xmx4g -cp "$classpath" redstone.oracle.Main --scenario-self-test

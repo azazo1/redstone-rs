@@ -3,8 +3,10 @@
 /decompiled/
 /assets/client-*.jar
 /tools/*.jar
+/tools/vanilla-oracle/build/
 /vendors/
 /assets/libraries/
+/assets/oracle-libraries/
 /crates/redstone-java-26/data/26.1.2/.cache/
 /crates/redstone-java-26/data/26.1.2/reports/biome_parameters/
 /crates/redstone-java-26/data/26.1.2/reports/minecraft/

@@ -40,8 +40,14 @@ impl Java26Rules {
             }
             let facing = state.direction_property("facing").unwrap_or(Direction::Down);
             let target = pos.relative(facing);
-            let moved = transfer_one_item(ctx.world, pos, target)
-                || transfer_one_item(ctx.world, pos.relative(Direction::Up), pos)
+            let moved = transfer_one_item(ctx.world, pos, target, None, Some(facing.opposite()))
+                || transfer_one_item(
+                    ctx.world,
+                    pos.relative(Direction::Up),
+                    pos,
+                    Some(Direction::Down),
+                    None,
+                )
                 || absorb_item_entity(ctx.world, pos);
             if moved {
                 set_block_entity_i64(ctx.world, pos, "cooldown", 8);
@@ -78,10 +84,12 @@ impl Java26Rules {
         let facing = state.direction_property("facing").unwrap_or(Direction::North);
         let target = pos.relative(facing);
         let item = inventory(ctx.world, pos)[index].item_id.clone();
-        if insert_item(ctx.world, target, &item, 1) == 1 {
+        if insert_item(ctx.world, target, &item, 1, Some(facing.opposite())) == 1 {
             take_item_at(ctx.world, pos, index, 1);
             *self.event_counts.entry("dropper_transfer".to_owned()).or_default() += 1;
-        } else if take_item_at(ctx.world, pos, index, 1).is_some() {
+        } else if !is_container(ctx.world, target)
+            && take_item_at(ctx.world, pos, index, 1).is_some()
+        {
             spawn_item(ctx.world, target, item, 1);
             *self.event_counts.entry("dropper_eject".to_owned()).or_default() += 1;
         }
@@ -102,18 +110,55 @@ impl Java26Rules {
         match dispenser_behavior(&item) {
             Some(DispenserBehavior::Projectile) => {
                 if take_item_at(ctx.world, pos, index, 1).is_some() {
+                    let velocity = facing.step();
                     ctx.world.spawn_entity(EntityData {
-                        kind: item,
+                        kind: projectile_entity_kind(&item).to_owned(),
                         position: block_center(target),
-                        fields: BTreeMap::new(),
+                        fields: BTreeMap::from([
+                            ("source_item".to_owned(), Value::String(item)),
+                            (
+                                "facing".to_owned(),
+                                Value::String(direction_name(facing).to_owned()),
+                            ),
+                            (
+                                "velocity".to_owned(),
+                                serde_json::json!([velocity.0, velocity.1, velocity.2]),
+                            ),
+                        ]),
                     });
                     *self.event_counts.entry("dispenser_projectile".to_owned()).or_default() += 1;
                 }
             }
             Some(DispenserBehavior::PrimeTnt) => {
                 if take_item_at(ctx.world, pos, index, 1).is_some() {
-                    ctx.unsupported(target, "dispenser_tnt_explosion");
+                    ctx.world.spawn_entity(EntityData {
+                        kind: "minecraft:tnt".to_owned(),
+                        position: [target.x as f64 + 0.5, target.y as f64, target.z as f64 + 0.5],
+                        fields: BTreeMap::from([
+                            ("fuse".to_owned(), Value::from(80)),
+                            ("explosion_power".to_owned(), Value::from(4)),
+                            ("ignited_by".to_owned(), Value::String("dispenser".to_owned())),
+                        ]),
+                    });
                     *self.event_counts.entry("dispenser_tnt".to_owned()).or_default() += 1;
+                }
+            }
+            Some(DispenserBehavior::Minecart) => {
+                if let Some(position) = minecart_spawn_position(self, ctx.world, pos, facing) {
+                    if take_item_at(ctx.world, pos, index, 1).is_some() {
+                    ctx.world.spawn_entity(EntityData {
+                            kind: item.clone(),
+                        position,
+                        fields: BTreeMap::new(),
+                    });
+                        *self
+                            .event_counts
+                            .entry("dispenser_minecart".to_owned())
+                            .or_default() += 1;
+                    }
+                } else if take_item_at(ctx.world, pos, index, 1).is_some() {
+                    spawn_item(ctx.world, target, item, 1);
+                    *self.event_counts.entry("dispenser_eject".to_owned()).or_default() += 1;
                 }
             }
             Some(DispenserBehavior::DefaultEject) => {
@@ -137,7 +182,7 @@ impl Java26Rules {
             self.set_state_and_notify(ctx, pos, idle, "crafter_idle", None)?;
             return Ok(());
         }
-        let Some(item) = take_first_item(ctx.world, pos, 1) else {
+        let Some(item) = take_first_enabled_item(ctx.world, pos, 1) else {
             return Ok(());
         };
         let output_item = block_entity_string(ctx.world, pos, "output_item_id")
@@ -145,7 +190,13 @@ impl Java26Rules {
         let output_count = block_entity_i64(ctx.world, pos, "output_count").unwrap_or(1).max(1);
         let front = crafter_front(state);
         let target = pos.relative(front);
-        let inserted = insert_item(ctx.world, target, &output_item, output_count);
+        let inserted = insert_item(
+            ctx.world,
+            target,
+            &output_item,
+            output_count,
+            Some(front.opposite()),
+        );
         if inserted < output_count {
             spawn_item(ctx.world, target, output_item, output_count - inserted);
         }
@@ -196,42 +247,72 @@ pub(super) fn container_signal(world: &SparseWorld, pos: BlockPos) -> Option<u8>
     })
 }
 
-fn transfer_one_item(world: &mut SparseWorld, source: BlockPos, target: BlockPos) -> bool {
-    let Some(stack) = inventory(world, source).first().cloned() else {
-        return false;
-    };
-    if insert_item(world, target, &stack.item_id, 1) != 1 {
-        return false;
+fn transfer_one_item(
+    world: &mut SparseWorld,
+    source: BlockPos,
+    target: BlockPos,
+    source_face: Option<Direction>,
+    target_face: Option<Direction>,
+) -> bool {
+    let stacks = inventory(world, source);
+    for slot in slots_for_face(world, source, source_face) {
+        let Some(stack) = stacks.iter().find(|stack| stack.slot == slot) else {
+            continue;
+        };
+        if !can_take_from_slot(world, source, stack, source_face) {
+            continue;
+        }
+        if insert_item(world, target, &stack.item_id, 1, target_face) != 1 {
+            continue;
+        }
+        return take_item_from_slot(world, source, stack.slot, 1).is_some();
     }
-    take_item_from_slot(world, source, stack.slot, 1).is_some()
+    false
 }
 
-fn insert_item(world: &mut SparseWorld, target: BlockPos, item_id: &str, count: i64) -> i64 {
+fn insert_item(
+    world: &mut SparseWorld,
+    target: BlockPos,
+    item_id: &str,
+    count: i64,
+    face: Option<Direction>,
+) -> i64 {
     if count <= 0 || !is_container(world, target) {
         return 0;
     }
     let mut stacks = inventory(world, target);
+    let slots = slots_for_face(world, target, face);
     let capacity = block_entity_i64(world, target, "capacity")
         .unwrap_or(DEFAULT_STACK_SIZE)
         .max(1);
     let current = stacks.iter().map(|stack| stack.count).sum::<i64>();
     let mut remaining = count.min(capacity.saturating_sub(current));
     let inserted = remaining;
-    for stack in stacks.iter_mut().filter(|stack| stack.item_id == item_id) {
-        let moved = remaining.min(DEFAULT_STACK_SIZE.saturating_sub(stack.count));
+    for stack in stacks.iter_mut().filter(|stack| {
+        stack.item_id == item_id
+            && slots.contains(&stack.slot)
+            && can_place_in_slot(world, target, stack.slot, item_id)
+    }) {
+        let available = slot_stack_limit(world, target, stack.slot, item_id)
+            .saturating_sub(stack.count)
+            .max(0);
+        let moved = remaining.min(available);
         stack.count += moved;
         remaining -= moved;
         if remaining == 0 {
             break;
         }
     }
-    let slot_count = container_slot_count(world, target, capacity);
     let mut used = stacks.iter().map(|stack| stack.slot).collect::<BTreeSet<_>>();
     while remaining > 0 {
-        let Some(slot) = (0..slot_count).find(|slot| !used.contains(slot)) else {
+        let Some(slot) = slots
+            .iter()
+            .copied()
+            .find(|slot| !used.contains(slot) && can_place_in_slot(world, target, *slot, item_id))
+        else {
             break;
         };
-        let moved = remaining.min(DEFAULT_STACK_SIZE);
+        let moved = remaining.min(slot_stack_limit(world, target, slot, item_id));
         stacks.push(ItemStack {
             slot,
             item_id: item_id.to_owned(),
@@ -249,8 +330,15 @@ fn random_stack_index(ctx: &mut EventContext<'_>, pos: BlockPos) -> Option<usize
     (len > 0).then(|| ctx.random_bounded(len as u32) as usize)
 }
 
-fn take_first_item(world: &mut SparseWorld, pos: BlockPos, count: i64) -> Option<ItemStack> {
-    let stack = inventory(world, pos).first().cloned()?;
+fn take_first_enabled_item(
+    world: &mut SparseWorld,
+    pos: BlockPos,
+    count: i64,
+) -> Option<ItemStack> {
+    let disabled = disabled_slots(world, pos);
+    let stack = inventory(world, pos)
+        .into_iter()
+        .find(|stack| !disabled.contains(&stack.slot))?;
     take_item_from_slot(world, pos, stack.slot, count)
 }
 
@@ -361,6 +449,305 @@ fn container_slot_count(world: &SparseWorld, pos: BlockPos, capacity: i64) -> u3
         })
 }
 
+fn slots_for_face(
+    world: &SparseWorld,
+    pos: BlockPos,
+    face: Option<Direction>,
+) -> Vec<u32> {
+    let capacity = block_entity_i64(world, pos, "capacity")
+        .unwrap_or(DEFAULT_STACK_SIZE)
+        .max(1);
+    let all = || (0..container_slot_count(world, pos, capacity)).collect::<Vec<_>>();
+    let Some(face) = face else {
+        return all();
+    };
+    match container_kind(world, pos) {
+        Some("minecraft:furnace" | "minecraft:blast_furnace" | "minecraft:smoker") => {
+            match face {
+                Direction::Up => vec![0],
+                Direction::Down => vec![2, 1],
+                _ => vec![1],
+            }
+        }
+        Some("minecraft:brewing_stand") => match face {
+            Direction::Up => vec![3],
+            Direction::Down => vec![0, 1, 2, 3],
+            _ => vec![0, 1, 2, 4],
+        },
+        _ => all(),
+    }
+}
+
+fn can_place_in_slot(world: &SparseWorld, pos: BlockPos, slot: u32, item_id: &str) -> bool {
+    let stacks = inventory(world, pos);
+    let current = stacks.iter().find(|stack| stack.slot == slot);
+    match container_kind(world, pos) {
+        Some("minecraft:furnace" | "minecraft:blast_furnace" | "minecraft:smoker") => {
+            match slot {
+                0 => true,
+                1 => {
+                    is_furnace_fuel(item_id)
+                        || item_id == "minecraft:bucket"
+                            && current.is_none_or(|stack| stack.item_id != "minecraft:bucket")
+                }
+                _ => false,
+            }
+        }
+        Some("minecraft:brewing_stand") => match slot {
+            0..=2 => is_brewing_bottle(item_id) && current.is_none(),
+            3 => is_brewing_ingredient(item_id),
+            4 => item_id == "minecraft:blaze_powder",
+            _ => false,
+        },
+        Some("minecraft:crafter") => {
+            if disabled_slots(world, pos).contains(&slot) {
+                return false;
+            }
+            let Some(current) = current else {
+                return true;
+            };
+            if current.item_id != item_id || current.count >= DEFAULT_STACK_SIZE {
+                return false;
+            }
+            !(slot + 1..9).any(|later_slot| {
+                if disabled_slots(world, pos).contains(&later_slot) {
+                    return false;
+                }
+                stacks
+                    .iter()
+                    .find(|stack| stack.slot == later_slot)
+                    .is_none_or(|later| {
+                        later.item_id == item_id && later.count < current.count
+                    })
+            })
+        }
+        Some(kind) if is_shulker_box_container(kind) => !is_shulker_box_item(item_id),
+        _ => true,
+    }
+}
+
+fn can_take_from_slot(
+    world: &SparseWorld,
+    pos: BlockPos,
+    stack: &ItemStack,
+    face: Option<Direction>,
+) -> bool {
+    match (container_kind(world, pos), face) {
+        (
+            Some("minecraft:furnace" | "minecraft:blast_furnace" | "minecraft:smoker"),
+            Some(Direction::Down),
+        ) if stack.slot == 1 => {
+            matches!(stack.item_id.as_str(), "minecraft:bucket" | "minecraft:water_bucket")
+        }
+        (Some("minecraft:brewing_stand"), _) if stack.slot == 3 => {
+            stack.item_id == "minecraft:glass_bottle"
+        }
+        _ => true,
+    }
+}
+
+fn slot_stack_limit(world: &SparseWorld, pos: BlockPos, slot: u32, item_id: &str) -> i64 {
+    if matches!(container_kind(world, pos), Some("minecraft:brewing_stand")) && slot <= 2
+        || is_unstackable_item(item_id)
+    {
+        1
+    } else {
+        DEFAULT_STACK_SIZE
+    }
+}
+
+fn container_kind(world: &SparseWorld, pos: BlockPos) -> Option<&str> {
+    world.block_entity(pos).map(|data| data.kind.as_str())
+}
+
+fn disabled_slots(world: &SparseWorld, pos: BlockPos) -> BTreeSet<u32> {
+    world
+        .block_entity(pos)
+        .and_then(|data| data.fields.get("disabled_slots"))
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(Value::as_u64)
+        .filter_map(|slot| u32::try_from(slot).ok())
+        .filter(|slot| *slot < 9)
+        .collect()
+}
+
+fn is_furnace_fuel(item_id: &str) -> bool {
+    matches!(
+        item_id,
+        "minecraft:lava_bucket"
+            | "minecraft:coal_block"
+            | "minecraft:blaze_rod"
+            | "minecraft:coal"
+            | "minecraft:charcoal"
+            | "minecraft:note_block"
+            | "minecraft:bookshelf"
+            | "minecraft:chiseled_bookshelf"
+            | "minecraft:lectern"
+            | "minecraft:jukebox"
+            | "minecraft:chest"
+            | "minecraft:trapped_chest"
+            | "minecraft:crafting_table"
+            | "minecraft:daylight_detector"
+            | "minecraft:bow"
+            | "minecraft:fishing_rod"
+            | "minecraft:ladder"
+            | "minecraft:wooden_shovel"
+            | "minecraft:wooden_sword"
+            | "minecraft:wooden_spear"
+            | "minecraft:wooden_hoe"
+            | "minecraft:wooden_axe"
+            | "minecraft:wooden_pickaxe"
+            | "minecraft:stick"
+            | "minecraft:bowl"
+            | "minecraft:crossbow"
+            | "minecraft:bamboo"
+            | "minecraft:dead_bush"
+            | "minecraft:short_dry_grass"
+            | "minecraft:tall_dry_grass"
+            | "minecraft:scaffolding"
+            | "minecraft:loom"
+            | "minecraft:barrel"
+            | "minecraft:cartography_table"
+            | "minecraft:fletching_table"
+            | "minecraft:smithing_table"
+            | "minecraft:composter"
+            | "minecraft:azalea"
+            | "minecraft:flowering_azalea"
+            | "minecraft:mangrove_roots"
+            | "minecraft:leaf_litter"
+            | "minecraft:dried_kelp_block"
+            | "minecraft:bamboo_mosaic"
+    ) || is_overworld_wood_item(item_id)
+        || item_id.ends_with("_wool")
+        || item_id.ends_with("_carpet")
+        || item_id.ends_with("_sapling")
+        || item_id.ends_with("_banner")
+}
+
+fn is_overworld_wood_item(item_id: &str) -> bool {
+    const WOOD_TYPES: [&str; 10] = [
+        "oak",
+        "spruce",
+        "birch",
+        "jungle",
+        "acacia",
+        "dark_oak",
+        "pale_oak",
+        "mangrove",
+        "cherry",
+        "bamboo",
+    ];
+    let path = item_id.strip_prefix("minecraft:").unwrap_or(item_id);
+    WOOD_TYPES.iter().any(|wood| {
+        path == format!("{wood}_planks")
+            || path == format!("{wood}_mosaic")
+            || path.starts_with(&format!("{wood}_"))
+                && matches!(
+                    path.strip_prefix(&format!("{wood}_")),
+                    Some(
+                        "stairs"
+                            | "slab"
+                            | "trapdoor"
+                            | "pressure_plate"
+                            | "shelf"
+                            | "fence"
+                            | "fence_gate"
+                            | "sign"
+                            | "hanging_sign"
+                            | "door"
+                            | "boat"
+                            | "chest_boat"
+                            | "raft"
+                            | "chest_raft"
+                            | "button"
+                    )
+                )
+    }) || matches!(
+        path,
+        "bamboo_block"
+            | "stripped_bamboo_block"
+            | "bamboo_mosaic"
+            | "bamboo_mosaic_stairs"
+            | "bamboo_mosaic_slab"
+    ) || is_overworld_log(path)
+}
+
+fn is_overworld_log(path: &str) -> bool {
+    const LOG_TYPES: [&str; 9] = [
+        "oak",
+        "spruce",
+        "birch",
+        "jungle",
+        "acacia",
+        "dark_oak",
+        "pale_oak",
+        "mangrove",
+        "cherry",
+    ];
+    LOG_TYPES.iter().any(|wood| {
+        matches!(
+            path,
+            value if value == format!("{wood}_log")
+                || value == format!("stripped_{wood}_log")
+                || value == format!("{wood}_wood")
+                || value == format!("stripped_{wood}_wood")
+        )
+    })
+}
+
+fn is_brewing_bottle(item_id: &str) -> bool {
+    matches!(
+        item_id,
+        "minecraft:potion"
+            | "minecraft:splash_potion"
+            | "minecraft:lingering_potion"
+            | "minecraft:glass_bottle"
+    )
+}
+
+fn is_brewing_ingredient(item_id: &str) -> bool {
+    matches!(
+        item_id,
+        "minecraft:nether_wart"
+            | "minecraft:redstone"
+            | "minecraft:glowstone_dust"
+            | "minecraft:fermented_spider_eye"
+            | "minecraft:gunpowder"
+            | "minecraft:dragon_breath"
+            | "minecraft:sugar"
+            | "minecraft:rabbit_foot"
+            | "minecraft:glistering_melon_slice"
+            | "minecraft:spider_eye"
+            | "minecraft:pufferfish"
+            | "minecraft:magma_cream"
+            | "minecraft:golden_carrot"
+            | "minecraft:blaze_powder"
+            | "minecraft:ghast_tear"
+            | "minecraft:turtle_helmet"
+            | "minecraft:phantom_membrane"
+            | "minecraft:stone"
+            | "minecraft:slime_block"
+            | "minecraft:cobweb"
+            | "minecraft:breeze_rod"
+    )
+}
+
+fn is_shulker_box_container(kind: &str) -> bool {
+    kind == "minecraft:shulker_box" || kind.ends_with("_shulker_box")
+}
+
+fn is_shulker_box_item(item_id: &str) -> bool {
+    item_id == "minecraft:shulker_box" || item_id.ends_with("_shulker_box")
+}
+
+fn is_unstackable_item(item_id: &str) -> bool {
+    is_shulker_box_item(item_id)
+        || is_brewing_bottle(item_id) && item_id != "minecraft:glass_bottle"
+        || matches!(item_id, "minecraft:water_bucket" | "minecraft:lava_bucket")
+}
+
 fn is_container(world: &SparseWorld, pos: BlockPos) -> bool {
     let Some(data) = world.block_entity(pos) else {
         return false;
@@ -426,7 +813,7 @@ fn absorb_item_entity(world: &mut SparseWorld, hopper: BlockPos) -> bool {
     let Some((entity_id, Some(item_id), entity_count)) = candidate else {
         return false;
     };
-    if insert_item(world, hopper, &item_id, 1) != 1 {
+    if insert_item(world, hopper, &item_id, 1, None) != 1 {
         return false;
     }
     if entity_count <= 1 {
@@ -460,6 +847,7 @@ fn crafter_front(state: &StateDefinition) -> Direction {
 enum DispenserBehavior {
     Projectile,
     PrimeTnt,
+    Minecart,
     DefaultEject,
 }
 
@@ -479,9 +867,88 @@ fn dispenser_behavior(item: &str) -> Option<DispenserBehavior> {
         | "minecraft:fire_charge"
         | "minecraft:wind_charge" => Some(DispenserBehavior::Projectile),
         "minecraft:tnt" => Some(DispenserBehavior::PrimeTnt),
-        item if item.ends_with("_boat")
-            || item.ends_with("_raft")
-            || item.ends_with("_minecart") => Some(DispenserBehavior::DefaultEject),
+        "minecraft:minecart"
+        | "minecraft:chest_minecart"
+        | "minecraft:furnace_minecart"
+        | "minecraft:tnt_minecart"
+        | "minecraft:hopper_minecart"
+        | "minecraft:command_block_minecart" => Some(DispenserBehavior::Minecart),
+        item if item.ends_with("_boat") || item.ends_with("_raft") => {
+            Some(DispenserBehavior::DefaultEject)
+        }
         _ => None,
+    }
+}
+
+fn projectile_entity_kind(item: &str) -> &str {
+    match item {
+        "minecraft:tipped_arrow" | "minecraft:spectral_arrow" => "minecraft:arrow",
+        "minecraft:experience_bottle" => "minecraft:experience_bottle",
+        "minecraft:splash_potion" | "minecraft:lingering_potion" => "minecraft:potion",
+        other => other,
+    }
+}
+
+fn minecart_spawn_position(
+    rules: &Java26Rules,
+    world: &SparseWorld,
+    source: BlockPos,
+    facing: Direction,
+) -> Option<[f64; 3]> {
+    let front = source.relative(facing);
+    let front_state = world.get_block(front);
+    let (rail_pos, offset) = if is_rail_state(rules, front_state) {
+        (front, if rail_is_slope(rules, front_state) { 0.6 } else { 0.1 })
+    } else if front_state == world.air()
+        && is_rail_state(rules, world.get_block(front.relative(Direction::Down)))
+    {
+        let below = front.relative(Direction::Down);
+        (
+            below,
+            if facing != Direction::Down && rail_is_slope(rules, world.get_block(below)) {
+                0.6
+            } else {
+                0.1
+            },
+        )
+    } else {
+        return None;
+    };
+    Some([
+        rail_pos.x as f64 + 0.5,
+        rail_pos.y as f64 + offset,
+        rail_pos.z as f64 + 0.5,
+    ])
+}
+
+fn is_rail_state(rules: &Java26Rules, state: redstone_core::BlockStateId) -> bool {
+    rules.state(state).is_ok_and(|state| {
+        let path = state.name.strip_prefix("minecraft:").unwrap_or(&state.name);
+        path == "rail" || path.ends_with("_rail")
+    })
+}
+
+fn rail_is_slope(rules: &Java26Rules, state: redstone_core::BlockStateId) -> bool {
+    rules.state(state).is_ok_and(|state| {
+        matches!(
+            state.property("shape"),
+            Some(
+                "ascending_east"
+                    | "ascending_west"
+                    | "ascending_north"
+                    | "ascending_south"
+            )
+        )
+    })
+}
+
+fn direction_name(direction: Direction) -> &'static str {
+    match direction {
+        Direction::West => "west",
+        Direction::East => "east",
+        Direction::Down => "down",
+        Direction::Up => "up",
+        Direction::North => "north",
+        Direction::South => "south",
     }
 }

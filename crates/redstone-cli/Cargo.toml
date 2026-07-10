@@ -17,8 +17,12 @@ libc.workspace = true
 redstone-core = { path = "../redstone-core" }
 redstone-io = { path = "../redstone-io" }
 redstone-java-26 = { path = "../redstone-java-26" }
+serde.workspace = true
 serde_json.workspace = true
 tokio.workspace = true
 tracing.workspace = true
 tracing-indicatif.workspace = true
 tracing-subscriber.workspace = true
+
+[dev-dependencies]
+fastnbt.workspace = true

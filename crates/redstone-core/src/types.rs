@@ -157,7 +157,7 @@ pub struct EntityData {
     pub fields: BTreeMap<String, serde_json::Value>,
 }
 
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum Action {
     SetBlock { pos: BlockPos, state: BlockStateId },
@@ -168,6 +168,30 @@ pub enum Action {
     SetBlockEntity {
         pos: BlockPos,
         data: BlockEntityData,
+    },
+    SpawnEntity {
+        #[serde(default)]
+        id: Option<EntityId>,
+        data: EntityData,
+    },
+    MoveEntity {
+        id: EntityId,
+        position: [f64; 3],
+    },
+    RemoveEntity {
+        id: EntityId,
+    },
+    SetEntityField {
+        id: EntityId,
+        field: String,
+        value: serde_json::Value,
+    },
+    HitTarget {
+        pos: BlockPos,
+        face: Direction,
+        location: [f64; 3],
+        #[serde(default)]
+        arrow: bool,
     },
 }
 
@@ -183,6 +207,8 @@ pub enum Probe {
     Property { pos: BlockPos, property: String },
     ContainerCount { pos: BlockPos },
     EntityCount { kind: Option<String> },
+    EntityField { id: EntityId, field: String },
+    EntityContainerCount { id: EntityId },
     EventCount { kind: String },
 }
 
@@ -224,7 +250,7 @@ pub struct WorldDelta {
     pub probes: Vec<ProbeSample>,
 }
 
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 pub struct TraceEvent {
     pub tick: GameTick,
     pub micro_step: MicroStep,
@@ -233,7 +259,7 @@ pub struct TraceEvent {
     pub kind: TraceKind,
 }
 
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 #[serde(tag = "event", rename_all = "snake_case")]
 pub enum TraceKind {
     Action { action: Action },

@@ -13,6 +13,8 @@ use crate::orientation::{Orientation, SideBias};
 
 mod inventory;
 mod piston;
+mod shape;
+mod consumer;
 
 use inventory::{block_entity_i64, container_signal};
 
@@ -593,7 +595,18 @@ impl Java26Rules {
         if let Some(value) = block_entity_i64(world, rear, "comparator_output") {
             return value.clamp(0, 15) as u8;
         }
-        self.signal(world, rear, facing)
+        let direct = self.signal(world, rear, facing);
+        let rear_state = self.state(world.get_block(rear)).ok();
+        if direct < 15 && rear_state.is_some_and(|state| state.redstone_conductor) {
+            let far = rear.relative(facing);
+            let far_output = container_signal(world, far)
+                .or_else(|| block_entity_i64(world, far, "comparator_output").map(|value| value.clamp(0, 15) as u8))
+                .or_else(|| item_frame_output(world, far, facing));
+            if let Some(output) = far_output {
+                return output;
+            }
+        }
+        direct
     }
 
     fn refresh_comparator(
@@ -676,6 +689,11 @@ impl Java26Rules {
                     let next = self.changed_state(state_id, "open", powered.to_string())?;
                     self.set_state_and_notify(ctx, pos, next, "powered_openable", None)?;
                 }
+            }
+            BlockBehavior::Door => self.refresh_door(ctx, pos, state_id)?,
+            BlockBehavior::PoweredRail => self.refresh_powered_rail(ctx, pos, state_id)?,
+            BlockBehavior::NoteBlock | BlockBehavior::Bell => {
+                self.refresh_edge_consumer(ctx, pos, state_id)?;
             }
             BlockBehavior::Tnt if powered => {
                 self.set_state_and_notify(
@@ -789,6 +807,9 @@ impl BlockRules for Java26Rules {
         positions: &[BlockPos],
     ) -> Result<(), RulesError> {
         for pos in positions {
+            self.repair_shape(ctx, *pos, false)?;
+        }
+        for pos in positions {
             let state_id = ctx.world.get_block(*pos);
             let state = self.state(state_id)?.clone();
             self.sync_entity_sensor(*pos, self.registry.air_state(), state_id);
@@ -801,6 +822,10 @@ impl BlockRules for Java26Rules {
                 BlockBehavior::Lamp
                 | BlockBehavior::CopperBulb
                 | BlockBehavior::PoweredConsumer
+                | BlockBehavior::Door
+                | BlockBehavior::PoweredRail
+                | BlockBehavior::NoteBlock
+                | BlockBehavior::Bell
                 | BlockBehavior::Tnt => self.refresh_powered_consumer(ctx, *pos, state_id)?,
                 _ => {}
             }
@@ -816,6 +841,7 @@ impl BlockRules for Java26Rules {
         match action {
             Action::SetBlock { pos, state } => {
                 self.set_state_and_notify(ctx, *pos, *state, "action_set_block", None)?;
+                self.repair_shape(ctx, *pos, true)?;
             }
             Action::BreakBlock { pos } => {
                 self.set_state_and_notify(
@@ -831,12 +857,53 @@ impl BlockRules for Java26Rules {
             Action::PullLever { pos } => self.use_block(ctx, *pos, false, true)?,
             Action::SetBlockEntity { pos, data } => {
                 ctx.world.set_block_entity(*pos, data.clone());
-                if let Ok(state) = self.state(ctx.world.get_block(*pos))
-                    && matches!(state.behavior, BlockBehavior::Comparator)
-                {
-                    self.refresh_comparator(ctx, *pos, state.id)?;
-                }
+                self.refresh_comparators_near(ctx, *pos)?;
             }
+            Action::SpawnEntity { id, data } => {
+                if let Some(id) = id {
+                    ctx.world.spawn_entity_with_id(*id, data.clone())?;
+                } else {
+                    ctx.world.spawn_entity(data.clone());
+                }
+                self.refresh_comparators_near(ctx, entity_block_pos(data.position))?;
+            }
+            Action::MoveEntity { id, position } => {
+                let old = ctx
+                    .world
+                    .entity(*id)
+                    .map(|entity| entity_block_pos(entity.position))
+                    .ok_or_else(|| RulesError::Message(format!("实体不存在: {id:?}")))?;
+                if !ctx.world.move_entity(*id, *position) {
+                    return Err(RulesError::Message(format!("实体不存在: {id:?}")));
+                }
+                self.refresh_comparators_near(ctx, old)?;
+                self.refresh_comparators_near(ctx, entity_block_pos(*position))?;
+            }
+            Action::RemoveEntity { id } => {
+                let entity = ctx
+                    .world
+                    .remove_entity(*id)
+                    .ok_or_else(|| RulesError::Message(format!("实体不存在: {id:?}")))?;
+                self.refresh_comparators_near(ctx, entity_block_pos(entity.position))?;
+            }
+            Action::SetEntityField { id, field, value } => {
+                let pos = ctx
+                    .world
+                    .entity(*id)
+                    .map(|entity| entity_block_pos(entity.position))
+                    .ok_or_else(|| RulesError::Message(format!("实体不存在: {id:?}")))?;
+                ctx.world
+                    .entity_fields_mut(*id)
+                    .expect("entity existence checked")
+                    .insert(field.clone(), value.clone());
+                self.refresh_comparators_near(ctx, pos)?;
+            }
+            Action::HitTarget {
+                pos,
+                face,
+                location,
+                arrow,
+            } => self.hit_target(ctx, *pos, *face, *location, *arrow)?,
         }
         Ok(())
     }
@@ -846,7 +913,7 @@ impl BlockRules for Java26Rules {
         ctx: &mut EventContext<'_>,
         update: NeighborUpdate,
     ) -> Result<(), RulesError> {
-        let state_id = ctx.world.get_block(update.pos);
+        let state_id = self.repair_shape(ctx, update.pos, true)?;
         let state = self.state(state_id)?.clone();
         match state.behavior {
             BlockBehavior::Wire => self.update_wire(ctx, update.pos, update.orientation)?,
@@ -860,6 +927,10 @@ impl BlockRules for Java26Rules {
             BlockBehavior::Lamp
             | BlockBehavior::CopperBulb
             | BlockBehavior::PoweredConsumer
+            | BlockBehavior::Door
+            | BlockBehavior::PoweredRail
+            | BlockBehavior::NoteBlock
+            | BlockBehavior::Bell
             | BlockBehavior::Tnt => self.refresh_powered_consumer(ctx, update.pos, state_id)?,
             _ => {}
         }
@@ -951,6 +1022,12 @@ impl BlockRules for Java26Rules {
                 if state.bool_property("powered") {
                     let next = self.changed_state(state_id, "powered", "false")?;
                     self.set_state_and_notify(ctx, tick.pos, next, "lectern_pulse_end", None)?;
+                }
+            }
+            BlockBehavior::Target => {
+                if state.int_property("power").unwrap_or(0) != 0 {
+                    let next = self.changed_state(state_id, "power", "0")?;
+                    self.set_state_and_notify(ctx, tick.pos, next, "target_release", None)?;
                 }
             }
             BlockBehavior::Lamp
@@ -1102,6 +1179,16 @@ impl BlockRules for Java26Rules {
                     .filter(|(_, entity)| kind.as_ref().is_none_or(|kind| &entity.kind == kind))
                     .count() as i64,
             ),
+            Probe::EntityField { id, field } => world
+                .entity(*id)
+                .and_then(|entity| entity.fields.get(field))
+                .map_or(ProbeValue::None, json_probe_value),
+            Probe::EntityContainerCount { id } => ProbeValue::Integer(
+                world
+                    .entity(*id)
+                    .map(entity_container_count)
+                    .unwrap_or(0),
+            ),
             Probe::EventCount { kind } => {
                 ProbeValue::Integer(self.event_counts.get(kind).copied().unwrap_or(0))
             }
@@ -1110,38 +1197,101 @@ impl BlockRules for Java26Rules {
 }
 
 impl Java26Rules {
+    fn refresh_comparators_near(
+        &mut self,
+        ctx: &mut EventContext<'_>,
+        changed: BlockPos,
+    ) -> Result<(), RulesError> {
+        for direction in Direction::HORIZONTAL {
+            for distance in 1..=2 {
+                let pos = BlockPos::new(
+                    changed.x - direction.step().0 * distance,
+                    changed.y,
+                    changed.z - direction.step().2 * distance,
+                );
+                let state_id = ctx.world.get_block(pos);
+                let state = self.state(state_id)?.clone();
+                if matches!(state.behavior, BlockBehavior::Comparator)
+                    && state.direction_property("facing") == Some(direction)
+                {
+                    self.refresh_comparator(ctx, pos, state_id)?;
+                }
+            }
+        }
+        Ok(())
+    }
+
     fn tick_minimal_entities(&mut self, ctx: &mut EventContext<'_>) {
         let mut expired = Vec::<EntityId>::new();
         let entity_ids = ctx.world.entities().map(|(id, _)| *id).collect::<Vec<_>>();
         for id in entity_ids {
-            if ctx
+            let kind = ctx
                 .world
                 .entity(id)
-                .is_none_or(|entity| entity.kind != "minecraft:item")
-            {
-                continue;
-            }
-            let Some(fields) = ctx.world.entity_fields_mut(id) else {
-                continue;
-            };
-            let age = fields.get("age").and_then(serde_json::Value::as_i64).unwrap_or(0) + 1;
-            let pickup_delay = fields
-                .get("pickup_delay")
-                .and_then(serde_json::Value::as_i64)
-                .unwrap_or(0)
-                .saturating_sub(1);
-            fields.insert("age".to_owned(), serde_json::Value::from(age));
-            fields.insert(
-                "pickup_delay".to_owned(),
-                serde_json::Value::from(pickup_delay),
-            );
-            if age >= 6_000 {
-                expired.push(id);
+                .map(|entity| entity.kind.clone());
+            match kind.as_deref() {
+                Some("minecraft:item") => {
+                    let Some(fields) = ctx.world.entity_fields_mut(id) else {
+                        continue;
+                    };
+                    let age = fields
+                        .get("age")
+                        .and_then(serde_json::Value::as_i64)
+                        .unwrap_or(0)
+                        + 1;
+                    let pickup_delay = fields
+                        .get("pickup_delay")
+                        .and_then(serde_json::Value::as_i64)
+                        .unwrap_or(0)
+                        .saturating_sub(1);
+                    fields.insert("age".to_owned(), serde_json::Value::from(age));
+                    fields.insert(
+                        "pickup_delay".to_owned(),
+                        serde_json::Value::from(pickup_delay),
+                    );
+                    if age >= 6_000 {
+                        expired.push(id);
+                    }
+                }
+                Some("minecraft:tnt") => {
+                    let Some(fields) = ctx.world.entity_fields_mut(id) else {
+                        continue;
+                    };
+                    let fuse = fields
+                        .get("fuse")
+                        .and_then(serde_json::Value::as_i64)
+                        .unwrap_or(80)
+                        - 1;
+                    fields.insert("fuse".to_owned(), serde_json::Value::from(fuse));
+                    if fuse <= 0 {
+                        expired.push(id);
+                    }
+                }
+                Some("minecraft:hopper_minecart")
+                    if minecart_enabled(ctx.world, id)
+                        && absorb_into_hopper_minecart(ctx.world, id) =>
+                {
+                    *self
+                        .event_counts
+                        .entry("hopper_minecart_transfer".to_owned())
+                        .or_default() += 1;
+                }
+                _ => {}
             }
         }
         for id in expired {
+            let kind = ctx.world.entity(id).map(|entity| entity.kind.clone());
+            let pos = ctx
+                .world
+                .entity(id)
+                .map(|entity| entity_block_pos(entity.position));
             ctx.world.remove_entity(id);
-            *self.event_counts.entry("item_despawn".to_owned()).or_default() += 1;
+            if kind.as_deref() == Some("minecraft:tnt") {
+                ctx.unsupported(pos.unwrap_or(BlockPos::ZERO), "tnt_explosion");
+                *self.event_counts.entry("tnt_explosion".to_owned()).or_default() += 1;
+            } else {
+                *self.event_counts.entry("item_despawn".to_owned()).or_default() += 1;
+            }
         }
     }
 
@@ -1239,6 +1389,220 @@ impl Java26Rules {
         }
         Ok(())
     }
+}
+
+fn item_frame_output(world: &SparseWorld, pos: BlockPos, facing: Direction) -> Option<u8> {
+    let frames = world
+        .entity_ids_in_aabb(
+            [pos.x as f64, pos.y as f64, pos.z as f64],
+            [pos.x as f64 + 1.0, pos.y as f64 + 1.0, pos.z as f64 + 1.0],
+        )
+        .into_iter()
+        .filter_map(|id| world.entity(id))
+        .filter(|entity| {
+            matches!(
+                entity.kind.as_str(),
+                "minecraft:item_frame" | "minecraft:glow_item_frame"
+            ) && entity_direction(entity) == Some(facing)
+        })
+        .collect::<Vec<_>>();
+    if frames.len() != 1 {
+        return None;
+    }
+    let frame = frames[0];
+    let has_item = frame
+        .fields
+        .get("item_count")
+        .and_then(serde_json::Value::as_i64)
+        .unwrap_or(0)
+        > 0
+        || frame
+            .fields
+            .get("item_id")
+            .and_then(serde_json::Value::as_str)
+            .is_some();
+    if !has_item {
+        return Some(0);
+    }
+    let rotation = frame
+        .fields
+        .get("rotation")
+        .and_then(serde_json::Value::as_i64)
+        .unwrap_or(0);
+    Some(rotation.rem_euclid(8) as u8 + 1)
+}
+
+fn entity_direction(entity: &redstone_core::EntityData) -> Option<Direction> {
+    match entity.fields.get("facing")? {
+        serde_json::Value::String(value) => match value.as_str() {
+            "west" => Some(Direction::West),
+            "east" => Some(Direction::East),
+            "down" => Some(Direction::Down),
+            "up" => Some(Direction::Up),
+            "north" => Some(Direction::North),
+            "south" => Some(Direction::South),
+            _ => None,
+        },
+        serde_json::Value::Number(value) => match value.as_i64()? {
+            0 => Some(Direction::Down),
+            1 => Some(Direction::Up),
+            2 => Some(Direction::North),
+            3 => Some(Direction::South),
+            4 => Some(Direction::West),
+            5 => Some(Direction::East),
+            _ => None,
+        },
+        _ => None,
+    }
+}
+
+fn entity_block_pos(position: [f64; 3]) -> BlockPos {
+    BlockPos::new(
+        position[0].floor().clamp(i32::MIN as f64, i32::MAX as f64) as i32,
+        position[1].floor().clamp(i32::MIN as f64, i32::MAX as f64) as i32,
+        position[2].floor().clamp(i32::MIN as f64, i32::MAX as f64) as i32,
+    )
+}
+
+fn json_probe_value(value: &serde_json::Value) -> ProbeValue {
+    match value {
+        serde_json::Value::Bool(value) => ProbeValue::Bool(*value),
+        serde_json::Value::Number(value) => value
+            .as_i64()
+            .map_or(ProbeValue::None, ProbeValue::Integer),
+        serde_json::Value::String(value) => ProbeValue::String(value.clone()),
+        _ => ProbeValue::String(value.to_string()),
+    }
+}
+
+fn entity_container_count(entity: &redstone_core::EntityData) -> i64 {
+    entity
+        .fields
+        .get("inventory")
+        .and_then(serde_json::Value::as_array)
+        .map(|inventory| {
+            inventory
+                .iter()
+                .filter_map(|entry| entry.get("count").and_then(serde_json::Value::as_i64))
+                .sum()
+        })
+        .or_else(|| entity.fields.get("item_count").and_then(serde_json::Value::as_i64))
+        .unwrap_or(0)
+}
+
+fn minecart_enabled(world: &SparseWorld, id: EntityId) -> bool {
+    world
+        .entity(id)
+        .and_then(|entity| entity.fields.get("enabled"))
+        .and_then(serde_json::Value::as_bool)
+        .unwrap_or(true)
+}
+
+fn absorb_into_hopper_minecart(world: &mut SparseWorld, id: EntityId) -> bool {
+    let Some(position) = world.entity(id).map(|entity| entity.position) else {
+        return false;
+    };
+    let item = world
+        .entity_ids_in_aabb(
+            [position[0] - 0.75, position[1] - 0.25, position[2] - 0.75],
+            [position[0] + 0.75, position[1] + 1.25, position[2] + 0.75],
+        )
+        .into_iter()
+        .filter(|candidate| *candidate != id)
+        .find_map(|candidate| {
+            let entity = world.entity(candidate)?;
+            (entity.kind == "minecraft:item").then(|| {
+                (
+                    candidate,
+                    entity
+                        .fields
+                        .get("item_id")
+                        .and_then(serde_json::Value::as_str)
+                        .map(ToOwned::to_owned),
+                    entity
+                        .fields
+                        .get("item_count")
+                        .and_then(serde_json::Value::as_i64)
+                        .unwrap_or(1),
+                )
+            })
+        });
+    let Some((item_id, Some(item_name), item_count)) = item else {
+        return false;
+    };
+    if !insert_entity_item(world, id, &item_name) {
+        return false;
+    }
+    if item_count <= 1 {
+        world.remove_entity(item_id);
+    } else if let Some(fields) = world.entity_fields_mut(item_id) {
+        fields.insert("item_count".to_owned(), serde_json::Value::from(item_count - 1));
+    }
+    true
+}
+
+fn insert_entity_item(world: &mut SparseWorld, id: EntityId, item_id: &str) -> bool {
+    let Some(entity) = world.entity(id) else {
+        return false;
+    };
+    let mut inventory = entity
+        .fields
+        .get("inventory")
+        .and_then(serde_json::Value::as_array)
+        .cloned()
+        .unwrap_or_default();
+    let capacity = entity
+        .fields
+        .get("capacity")
+        .and_then(serde_json::Value::as_i64)
+        .unwrap_or(5 * 64);
+    if entity_container_count(entity) >= capacity {
+        return false;
+    }
+    if let Some(stack) = inventory.iter_mut().find(|stack| {
+        stack.get("item_id").and_then(serde_json::Value::as_str) == Some(item_id)
+            && stack
+                .get("count")
+                .and_then(serde_json::Value::as_i64)
+                .unwrap_or(0)
+                < 64
+    }) {
+        let count = stack
+            .get("count")
+            .and_then(serde_json::Value::as_i64)
+            .unwrap_or(0)
+            + 1;
+        stack["count"] = serde_json::Value::from(count);
+    } else {
+        let used = inventory
+            .iter()
+            .filter_map(|stack| stack.get("slot").and_then(serde_json::Value::as_u64))
+            .collect::<BTreeSet<_>>();
+        let Some(slot) = (0..5u64).find(|slot| !used.contains(slot)) else {
+            return false;
+        };
+        inventory.push(serde_json::json!({
+            "slot": slot,
+            "item_id": item_id,
+            "count": 1,
+        }));
+        inventory.sort_by_key(|stack| {
+            stack
+                .get("slot")
+                .and_then(serde_json::Value::as_u64)
+                .unwrap_or(u64::MAX)
+        });
+    }
+    let count = inventory
+        .iter()
+        .filter_map(|stack| stack.get("count").and_then(serde_json::Value::as_i64))
+        .sum::<i64>();
+    if let Some(fields) = world.entity_fields_mut(id) {
+        fields.insert("inventory".to_owned(), serde_json::Value::Array(inventory));
+        fields.insert("item_count".to_owned(), serde_json::Value::from(count));
+        fields.entry("capacity".to_owned()).or_insert_with(|| serde_json::Value::from(320));
+    }
+    true
 }
 
 fn tracks_entity_collisions(behavior: &BlockBehavior) -> bool {
