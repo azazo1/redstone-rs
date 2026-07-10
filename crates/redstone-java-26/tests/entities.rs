@@ -18,8 +18,8 @@ fn state(registry: &mut Java26Registry, name: &str, properties: &[(&str, &str)])
         .unwrap()
 }
 
-#[tokio::test]
-async fn entity_actions_move_a_generic_collision_onto_a_pressure_plate() {
+#[test]
+fn entity_actions_move_a_generic_collision_onto_a_pressure_plate() {
     let mut registry = Java26Registry::new();
     let plate = state(
         &mut registry,
@@ -30,7 +30,6 @@ async fn entity_actions_move_a_generic_collision_onto_a_pressure_plate() {
     world.set_block(BlockPos::ZERO, plate).unwrap();
     let rules = Java26Rules::new(registry);
     let mut simulation = Simulation::load(rules, world, SimulationConfig::default())
-        .await
         .unwrap();
     simulation.add_probe(
         "entity_x",
@@ -52,14 +51,12 @@ async fn entity_actions_move_a_generic_collision_onto_a_pressure_plate() {
                 )]),
             },
         }])
-        .await
         .unwrap();
     simulation
         .step_with_actions(&[Action::MoveEntity {
             id: EntityId(50),
             position: [0.5, 0.1, 0.5],
         }])
-        .await
         .unwrap();
 
     let plate = simulation
@@ -68,7 +65,7 @@ async fn entity_actions_move_a_generic_collision_onto_a_pressure_plate() {
         .state(simulation.world().get_block(BlockPos::ZERO))
         .unwrap();
     assert_eq!(plate.property("powered"), Some("true"));
-    let latest = simulation.step().await.unwrap();
+    let latest = simulation.step().unwrap();
     assert_eq!(
         latest.probes[0].value,
         ProbeValue::String("test".to_owned())
@@ -76,13 +73,12 @@ async fn entity_actions_move_a_generic_collision_onto_a_pressure_plate() {
 
     simulation
         .apply(Action::RemoveEntity { id: EntityId(50) })
-        .await
         .unwrap();
     assert!(simulation.world().entity(EntityId(50)).is_none());
 }
 
-#[tokio::test]
-async fn comparator_reads_and_tracks_a_unique_item_frame_through_a_conductor() {
+#[test]
+fn comparator_reads_and_tracks_a_unique_item_frame_through_a_conductor() {
     let mut registry = Java26Registry::new();
     let comparator = state(
         &mut registry,
@@ -99,7 +95,6 @@ async fn comparator_reads_and_tracks_a_unique_item_frame_through_a_conductor() {
     world.set_block(BlockPos::new(1, 0, 0), stone).unwrap();
     let rules = Java26Rules::new(registry);
     let mut simulation = Simulation::load(rules, world, SimulationConfig::default())
-        .await
         .unwrap();
     simulation.add_probe(
         "output",
@@ -108,7 +103,7 @@ async fn comparator_reads_and_tracks_a_unique_item_frame_through_a_conductor() {
             direction: Some(Direction::East),
         },
     );
-    simulation.initialize().await.unwrap();
+    simulation.initialize().unwrap();
 
     simulation
         .step_with_actions(&[Action::SpawnEntity {
@@ -130,10 +125,9 @@ async fn comparator_reads_and_tracks_a_unique_item_frame_through_a_conductor() {
                 ]),
             },
         }])
-        .await
         .unwrap();
-    simulation.step().await.unwrap();
-    let delta = simulation.step().await.unwrap();
+    simulation.step().unwrap();
+    let delta = simulation.step().unwrap();
     assert_eq!(delta.probes[0].value, ProbeValue::Integer(6));
 
     simulation
@@ -142,15 +136,14 @@ async fn comparator_reads_and_tracks_a_unique_item_frame_through_a_conductor() {
             field: "rotation".to_owned(),
             value: serde_json::Value::from(7),
         }])
-        .await
         .unwrap();
-    simulation.step().await.unwrap();
-    let delta = simulation.step().await.unwrap();
+    simulation.step().unwrap();
+    let delta = simulation.step().unwrap();
     assert_eq!(delta.probes[0].value, ProbeValue::Integer(8));
 }
 
-#[tokio::test]
-async fn hopper_minecart_absorbs_one_item_per_entity_tick() {
+#[test]
+fn hopper_minecart_absorbs_one_item_per_entity_tick() {
     let registry = Java26Registry::new();
     let mut world = SparseWorld::new(registry.air_state());
     world
@@ -185,26 +178,25 @@ async fn hopper_minecart_absorbs_one_item_per_entity_tick() {
         .unwrap();
     let rules = Java26Rules::new(registry);
     let mut simulation = Simulation::load(rules, world, SimulationConfig::default())
-        .await
         .unwrap();
     simulation.add_probe(
         "minecart_count",
         Probe::EntityContainerCount { id: EntityId(1) },
     );
 
-    let first = simulation.step().await.unwrap();
+    let first = simulation.step().unwrap();
     assert_eq!(first.probes[0].value, ProbeValue::Integer(1));
     assert_eq!(
         simulation.world().entity(EntityId(2)).unwrap().fields["item_count"],
         1
     );
-    let second = simulation.step().await.unwrap();
+    let second = simulation.step().unwrap();
     assert_eq!(second.probes[0].value, ProbeValue::Integer(2));
     assert!(simulation.world().entity(EntityId(2)).is_none());
 }
 
-#[tokio::test]
-async fn item_pickup_delay_stops_at_zero_and_preserves_never_pickup() {
+#[test]
+fn item_pickup_delay_stops_at_zero_and_preserves_never_pickup() {
     let registry = Java26Registry::new();
     let mut world = SparseWorld::new(registry.air_state());
     world
@@ -235,10 +227,9 @@ async fn item_pickup_delay_stops_at_zero_and_preserves_never_pickup() {
         .unwrap();
     let rules = Java26Rules::new(registry);
     let mut simulation = Simulation::load(rules, world, SimulationConfig::default())
-        .await
         .unwrap();
 
-    simulation.step().await.unwrap();
+    simulation.step().unwrap();
 
     assert_eq!(
         simulation.world().entity(EntityId(1)).unwrap().fields["pickup_delay"],

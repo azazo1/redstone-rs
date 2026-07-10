@@ -27,8 +27,8 @@ impl StructureStateResolver for RegistryResolver {
     }
 }
 
-#[tokio::test]
-async fn button_moves_wool_three_blocks_out_and_back() {
+#[test]
+fn button_moves_wool_three_blocks_out_and_back() {
     let schematic = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("../../assets/schematics/tripple-piston-extender.litematic");
     let mut resolver = RegistryResolver(Java26Registry::new());
@@ -40,25 +40,23 @@ async fn button_moves_wool_three_blocks_out_and_back() {
 
     let rules = Java26Rules::new(resolver.0);
     let mut simulation = Simulation::load(rules, loaded.world, SimulationConfig::default())
-        .await
         .unwrap();
 
     assert_settled_wool_at(&simulation, wool, RETRACTED_WOOL_POS);
 
-    press_button_and_settle(&mut simulation).await;
+    press_button_and_settle(&mut simulation);
     assert_settled_wool_at(&simulation, wool, EXTENDED_WOOL_POS);
 
-    press_button_and_settle(&mut simulation).await;
+    press_button_and_settle(&mut simulation);
     assert_settled_wool_at(&simulation, wool, RETRACTED_WOOL_POS);
 }
 
-async fn press_button_and_settle(simulation: &mut Simulation<Java26Rules>) {
+fn press_button_and_settle(simulation: &mut Simulation<Java26Rules>) {
     simulation
         .step_with_actions(&[Action::PressButton { pos: BUTTON_POS }])
-        .await
         .unwrap();
     let settled_tick = GameTick(simulation.current_tick().0 + 50);
-    simulation.run_until(settled_tick).await.unwrap();
+    simulation.run_until(settled_tick).unwrap();
 }
 
 fn assert_settled_wool_at(

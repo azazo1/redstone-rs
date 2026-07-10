@@ -18,8 +18,8 @@ fn state(registry: &mut Java26Registry, name: &str, properties: &[(&str, &str)])
         .unwrap()
 }
 
-#[tokio::test]
-async fn a_powered_door_updates_both_halves_and_closes_together() {
+#[test]
+fn a_powered_door_updates_both_halves_and_closes_together() {
     let mut registry = Java26Registry::new();
     let lower = state(
         &mut registry,
@@ -53,10 +53,9 @@ async fn a_powered_door_updates_both_halves_and_closes_together() {
     world.set_block(source_pos, source).unwrap();
     let rules = Java26Rules::new(registry);
     let mut simulation = Simulation::load(rules, world, SimulationConfig::default())
-        .await
         .unwrap();
 
-    simulation.initialize().await.unwrap();
+    simulation.initialize().unwrap();
     for pos in [lower_pos, upper_pos] {
         let state = simulation
             .rules()
@@ -69,7 +68,6 @@ async fn a_powered_door_updates_both_halves_and_closes_together() {
 
     simulation
         .apply(Action::BreakBlock { pos: source_pos })
-        .await
         .unwrap();
     for pos in [lower_pos, upper_pos] {
         let state = simulation
@@ -82,8 +80,8 @@ async fn a_powered_door_updates_both_halves_and_closes_together() {
     }
 }
 
-#[tokio::test]
-async fn powered_rail_signal_stops_after_eight_connected_rails() {
+#[test]
+fn powered_rail_signal_stops_after_eight_connected_rails() {
     let mut registry = Java26Registry::new();
     let rail = state(
         &mut registry,
@@ -102,10 +100,9 @@ async fn powered_rail_signal_stops_after_eight_connected_rails() {
     }
     let rules = Java26Rules::new(registry);
     let mut simulation = Simulation::load(rules, world, SimulationConfig::default())
-        .await
         .unwrap();
 
-    simulation.initialize().await.unwrap();
+    simulation.initialize().unwrap();
 
     for x in 0..=8 {
         let state = simulation
@@ -123,8 +120,8 @@ async fn powered_rail_signal_stops_after_eight_connected_rails() {
     assert_eq!(ninth.property("powered"), Some("false"));
 }
 
-#[tokio::test]
-async fn note_block_and_bell_emit_events_only_on_rising_edges() {
+#[test]
+fn note_block_and_bell_emit_events_only_on_rising_edges() {
     let mut registry = Java26Registry::new();
     let note = state(
         &mut registry,
@@ -147,7 +144,6 @@ async fn note_block_and_bell_emit_events_only_on_rising_edges() {
     world.set_block(BlockPos::new(-1, 0, 0), bell).unwrap();
     let rules = Java26Rules::new(registry);
     let mut simulation = Simulation::load(rules, world, SimulationConfig::default())
-        .await
         .unwrap();
     simulation.add_probe(
         "notes",
@@ -167,31 +163,28 @@ async fn note_block_and_bell_emit_events_only_on_rising_edges() {
             pos: source_pos,
             state: source,
         }])
-        .await
         .unwrap();
     assert_eq!(first.probes[0].value, ProbeValue::Integer(1));
     assert_eq!(first.probes[1].value, ProbeValue::Integer(1));
-    let held = simulation.step().await.unwrap();
+    let held = simulation.step().unwrap();
     assert_eq!(held.probes[0].value, ProbeValue::Integer(1));
     assert_eq!(held.probes[1].value, ProbeValue::Integer(1));
 
     simulation
         .step_with_actions(&[Action::BreakBlock { pos: source_pos }])
-        .await
         .unwrap();
     let second = simulation
         .step_with_actions(&[Action::SetBlock {
             pos: source_pos,
             state: source,
         }])
-        .await
         .unwrap();
     assert_eq!(second.probes[0].value, ProbeValue::Integer(2));
     assert_eq!(second.probes[1].value, ProbeValue::Integer(2));
 }
 
-#[tokio::test]
-async fn using_a_note_block_cycles_its_note_and_plays_once() {
+#[test]
+fn using_a_note_block_cycles_its_note_and_plays_once() {
     let mut registry = Java26Registry::new();
     let note = state(
         &mut registry,
@@ -202,7 +195,6 @@ async fn using_a_note_block_cycles_its_note_and_plays_once() {
     world.set_block(BlockPos::ZERO, note).unwrap();
     let rules = Java26Rules::new(registry);
     let mut simulation = Simulation::load(rules, world, SimulationConfig::default())
-        .await
         .unwrap();
     simulation.add_probe(
         "notes",
@@ -215,7 +207,6 @@ async fn using_a_note_block_cycles_its_note_and_plays_once() {
         .step_with_actions(&[Action::UseBlock {
             pos: BlockPos::ZERO,
         }])
-        .await
         .unwrap();
 
     let state = simulation
@@ -227,15 +218,14 @@ async fn using_a_note_block_cycles_its_note_and_plays_once() {
     assert_eq!(delta.probes[0].value, ProbeValue::Integer(1));
 }
 
-#[tokio::test]
-async fn target_strength_uses_hit_location_and_releases_after_eight_ticks() {
+#[test]
+fn target_strength_uses_hit_location_and_releases_after_eight_ticks() {
     let mut registry = Java26Registry::new();
     let target = state(&mut registry, "minecraft:target", &[("power", "0")]);
     let mut world = SparseWorld::new(registry.air_state());
     world.set_block(BlockPos::ZERO, target).unwrap();
     let rules = Java26Rules::new(registry);
     let mut simulation = Simulation::load(rules, world, SimulationConfig::default())
-        .await
         .unwrap();
     simulation.add_probe(
         "power",
@@ -252,12 +242,10 @@ async fn target_strength_uses_hit_location_and_releases_after_eight_ticks() {
             location: [0.9, 0.5, 0.0],
             arrow: false,
         }])
-        .await
         .unwrap();
     assert_eq!(hit.probes[0].value, ProbeValue::String("3".to_owned()));
     simulation
         .run_until(redstone_core::GameTick(8))
-        .await
         .unwrap();
     assert_eq!(
         simulation
@@ -268,6 +256,6 @@ async fn target_strength_uses_hit_location_and_releases_after_eight_ticks() {
             .property("power"),
         Some("3")
     );
-    let released = simulation.step().await.unwrap();
+    let released = simulation.step().unwrap();
     assert_eq!(released.probes[0].value, ProbeValue::String("0".to_owned()));
 }

@@ -48,7 +48,7 @@ pub fn run(
         .0
         .states()
         .filter(|state| !state.supported)
-        .map(|state| state.name.clone())
+        .map(|state| state.name.to_string())
         .collect::<BTreeSet<_>>()
         .into_iter()
         .collect::<Vec<_>>();
@@ -119,7 +119,7 @@ fn selected_positions(
             }
             registry
                 .state(state_id)
-                .is_some_and(|state| requested_types.contains(&state.name))
+                .is_some_and(|state| requested_types.contains(state.name.as_ref()))
                 .then_some(pos)
         })
         .collect::<Vec<_>>();
@@ -163,8 +163,8 @@ fn inspect_block(
 fn state_inspection(state: &StateDefinition) -> BlockStateInspection {
     BlockStateInspection {
         id: state.id,
-        name: state.name.clone(),
-        properties: state.properties.clone(),
+        name: state.name.to_string(),
+        properties: state.properties.as_ref().clone(),
         supported: state.supported,
     }
 }

@@ -68,14 +68,14 @@ fn container(kind: &str, slots: &[(&str, i64)]) -> BlockEntityData {
     }
 }
 
-async fn comparator_output_for_source(
+fn comparator_output_for_source(
     registry: Java26Registry,
     source: BlockStateId,
 ) -> ProbeValue {
-    comparator_output_for_source_with_data(registry, source, None).await
+    comparator_output_for_source_with_data(registry, source, None)
 }
 
-async fn comparator_output_for_source_with_data(
+fn comparator_output_for_source_with_data(
     mut registry: Java26Registry,
     source: BlockStateId,
     data: Option<BlockEntityData>,
@@ -97,7 +97,6 @@ async fn comparator_output_for_source_with_data(
     }
     let rules = Java26Rules::new(registry);
     let mut simulation = Simulation::load(rules, world, SimulationConfig::default())
-        .await
         .unwrap();
     simulation.add_probe(
         "output",
@@ -106,13 +105,13 @@ async fn comparator_output_for_source_with_data(
             direction: Some(Direction::North),
         },
     );
-    simulation.initialize().await.unwrap();
-    simulation.step().await.unwrap();
-    simulation.step().await.unwrap().probes[0].value.clone()
+    simulation.initialize().unwrap();
+    simulation.step().unwrap();
+    simulation.step().unwrap().probes[0].value.clone()
 }
 
-#[tokio::test]
-async fn redstone_block_powers_a_wire_in_both_modes() {
+#[test]
+fn redstone_block_powers_a_wire_in_both_modes() {
     for mode in [RedstoneMode::Default, RedstoneMode::Experimental] {
         let mut registry = Java26Registry::new();
         let source = state(&mut registry, "minecraft:redstone_block", &[]);
@@ -130,10 +129,9 @@ async fn redstone_block_powers_a_wire_in_both_modes() {
                 ..SimulationConfig::default()
             },
         )
-        .await
         .unwrap();
 
-        simulation.initialize().await.unwrap();
+        simulation.initialize().unwrap();
         let state_id = simulation.world().get_block(BlockPos::new(1, 0, 0));
         assert_eq!(
             simulation
@@ -147,8 +145,8 @@ async fn redstone_block_powers_a_wire_in_both_modes() {
     }
 }
 
-#[tokio::test]
-async fn default_wire_does_not_power_itself_through_a_conductor() {
+#[test]
+fn default_wire_does_not_power_itself_through_a_conductor() {
     let mut registry = Java26Registry::new();
     let source = state(&mut registry, "minecraft:redstone_block", &[]);
     let stone = state(&mut registry, "minecraft:stone", &[]);
@@ -161,13 +159,11 @@ async fn default_wire_does_not_power_itself_through_a_conductor() {
         .unwrap();
     let rules = Java26Rules::new(registry);
     let mut simulation = Simulation::load(rules, world, SimulationConfig::default())
-        .await
         .unwrap();
     simulation
         .step_with_actions(&[Action::BreakBlock {
             pos: BlockPos::ZERO,
         }])
-        .await
         .unwrap();
 
     let wire_id = simulation.world().get_block(BlockPos::new(1, 0, 0));
@@ -182,8 +178,8 @@ async fn default_wire_does_not_power_itself_through_a_conductor() {
     );
 }
 
-#[tokio::test]
-async fn repeater_waits_for_its_configured_delay_and_outputs_forward() {
+#[test]
+fn repeater_waits_for_its_configured_delay_and_outputs_forward() {
     let mut registry = Java26Registry::new();
     let source = state(&mut registry, "minecraft:redstone_block", &[]);
     let repeater = state(
@@ -205,7 +201,6 @@ async fn repeater_waits_for_its_configured_delay_and_outputs_forward() {
         .unwrap();
     let rules = Java26Rules::new(registry);
     let mut simulation = Simulation::load(rules, world, SimulationConfig::default())
-        .await
         .unwrap();
     simulation.add_probe(
         "output",
@@ -214,8 +209,8 @@ async fn repeater_waits_for_its_configured_delay_and_outputs_forward() {
             direction: Some(Direction::North),
         },
     );
-    simulation.initialize().await.unwrap();
-    simulation.step().await.unwrap();
+    simulation.initialize().unwrap();
+    simulation.step().unwrap();
     let state_id = simulation.world().get_block(BlockPos::ZERO);
     assert_eq!(
         simulation
@@ -227,7 +222,7 @@ async fn repeater_waits_for_its_configured_delay_and_outputs_forward() {
         Some("false")
     );
 
-    let delta = simulation.step().await.unwrap();
+    let delta = simulation.step().unwrap();
     assert_eq!(delta.probes[0].value, ProbeValue::Integer(15),);
     let wire_id = simulation.world().get_block(BlockPos::new(0, 0, 1));
     assert_eq!(
@@ -241,8 +236,8 @@ async fn repeater_waits_for_its_configured_delay_and_outputs_forward() {
     );
 }
 
-#[tokio::test]
-async fn a_side_signal_from_a_non_diode_does_not_lock_a_repeater() {
+#[test]
+fn a_side_signal_from_a_non_diode_does_not_lock_a_repeater() {
     let mut registry = Java26Registry::new();
     let source = state(&mut registry, "minecraft:redstone_block", &[]);
     let repeater = state(
@@ -261,13 +256,11 @@ async fn a_side_signal_from_a_non_diode_does_not_lock_a_repeater() {
     world.set_block(BlockPos::new(0, 0, -1), source).unwrap();
     let rules = Java26Rules::new(registry);
     let mut simulation = Simulation::load(rules, world, SimulationConfig::default())
-        .await
         .unwrap();
 
-    simulation.initialize().await.unwrap();
+    simulation.initialize().unwrap();
     simulation
         .run_until(redstone_core::GameTick(2))
-        .await
         .unwrap();
 
     let state_id = simulation.world().get_block(BlockPos::ZERO);
@@ -282,8 +275,8 @@ async fn a_side_signal_from_a_non_diode_does_not_lock_a_repeater() {
     );
 }
 
-#[tokio::test]
-async fn comparator_reads_explicit_block_entity_output_from_a_lectern() {
+#[test]
+fn comparator_reads_explicit_block_entity_output_from_a_lectern() {
     let mut registry = Java26Registry::new();
     let comparator = state(
         &mut registry,
@@ -316,7 +309,6 @@ async fn comparator_reads_explicit_block_entity_output_from_a_lectern() {
     );
     let rules = Java26Rules::new(registry);
     let mut simulation = Simulation::load(rules, world, SimulationConfig::default())
-        .await
         .unwrap();
     simulation.add_probe(
         "output",
@@ -325,16 +317,16 @@ async fn comparator_reads_explicit_block_entity_output_from_a_lectern() {
             direction: Some(Direction::North),
         },
     );
-    simulation.initialize().await.unwrap();
+    simulation.initialize().unwrap();
 
-    simulation.step().await.unwrap();
-    let delta = simulation.step().await.unwrap();
+    simulation.step().unwrap();
+    let delta = simulation.step().unwrap();
 
     assert_eq!(delta.probes[0].value, ProbeValue::Integer(7));
 }
 
-#[tokio::test]
-async fn observer_emits_a_two_tick_pulse_after_observed_change() {
+#[test]
+fn observer_emits_a_two_tick_pulse_after_observed_change() {
     let mut registry = Java26Registry::new();
     let observer = state(
         &mut registry,
@@ -346,17 +338,15 @@ async fn observer_emits_a_two_tick_pulse_after_observed_change() {
     world.set_block(BlockPos::ZERO, observer).unwrap();
     let rules = Java26Rules::new(registry);
     let mut simulation = Simulation::load(rules, world, SimulationConfig::default())
-        .await
         .unwrap();
     simulation
         .step_with_actions(&[Action::SetBlock {
             pos: BlockPos::new(0, 0, -1),
             state: stone,
         }])
-        .await
         .unwrap();
-    simulation.step().await.unwrap();
-    simulation.step().await.unwrap();
+    simulation.step().unwrap();
+    simulation.step().unwrap();
     let powered = simulation.world().get_block(BlockPos::ZERO);
     assert_eq!(
         simulation
@@ -367,8 +357,8 @@ async fn observer_emits_a_two_tick_pulse_after_observed_change() {
             .property("powered"),
         Some("true")
     );
-    simulation.step().await.unwrap();
-    simulation.step().await.unwrap();
+    simulation.step().unwrap();
+    simulation.step().unwrap();
     let unpowered = simulation.world().get_block(BlockPos::ZERO);
     assert_eq!(
         simulation
@@ -381,8 +371,8 @@ async fn observer_emits_a_two_tick_pulse_after_observed_change() {
     );
 }
 
-#[tokio::test]
-async fn moved_observer_schedules_an_air_update_after_settling() {
+#[test]
+fn moved_observer_schedules_an_air_update_after_settling() {
     let mut registry = Java26Registry::new();
     let piston = state(
         &mut registry,
@@ -402,14 +392,13 @@ async fn moved_observer_schedules_an_air_update_after_settling() {
     world.set_block(BlockPos::new(1, 0, 0), observer).unwrap();
     let rules = Java26Rules::new(registry);
     let mut simulation = Simulation::load(rules, world, SimulationConfig::default())
-        .await
         .unwrap();
-    simulation.initialize().await.unwrap();
+    simulation.set_trace_enabled(true);
+    simulation.initialize().unwrap();
 
-    simulation.step().await.unwrap();
+    simulation.step().unwrap();
     simulation
         .run_until(redstone_core::GameTick(3))
-        .await
         .unwrap();
 
     let moved = simulation.world().get_block(moved_pos);
@@ -435,7 +424,6 @@ async fn moved_observer_schedules_an_air_update_after_settling() {
 
     simulation
         .run_until(redstone_core::GameTick(5))
-        .await
         .unwrap();
     let moved = simulation.world().get_block(moved_pos);
     assert_eq!(
@@ -449,8 +437,8 @@ async fn moved_observer_schedules_an_air_update_after_settling() {
     );
 }
 
-#[tokio::test]
-async fn observer_detects_piston_base_extension() {
+#[test]
+fn observer_detects_piston_base_extension() {
     let mut registry = Java26Registry::new();
     let piston = state(
         &mut registry,
@@ -469,16 +457,15 @@ async fn observer_detects_piston_base_extension() {
     world.set_block(observer_pos, observer).unwrap();
     let rules = Java26Rules::new(registry);
     let mut simulation = Simulation::load(rules, world, SimulationConfig::default())
-        .await
         .unwrap();
-    simulation.initialize().await.unwrap();
+    simulation.set_trace_enabled(true);
+    simulation.initialize().unwrap();
 
     simulation
         .step_with_actions(&[Action::SetBlock {
             pos: BlockPos::new(-1, 0, 0),
             state: source,
         }])
-        .await
         .unwrap();
 
     assert!(simulation.trace().events().iter().any(|event| {
@@ -493,8 +480,8 @@ async fn observer_detects_piston_base_extension() {
     }));
 }
 
-#[tokio::test]
-async fn observer_detects_piston_base_retraction() {
+#[test]
+fn observer_detects_piston_base_retraction() {
     let mut registry = Java26Registry::new();
     let piston = state(
         &mut registry,
@@ -523,13 +510,12 @@ async fn observer_detects_piston_base_retraction() {
     world.set_block(source_pos, source).unwrap();
     let rules = Java26Rules::new(registry);
     let mut simulation = Simulation::load(rules, world, SimulationConfig::default())
-        .await
         .unwrap();
-    simulation.initialize().await.unwrap();
+    simulation.set_trace_enabled(true);
+    simulation.initialize().unwrap();
 
     simulation
         .step_with_actions(&[Action::BreakBlock { pos: source_pos }])
-        .await
         .unwrap();
 
     assert!(simulation.trace().events().iter().any(|event| {
@@ -544,8 +530,8 @@ async fn observer_detects_piston_base_retraction() {
     }));
 }
 
-#[tokio::test]
-async fn observer_detects_piston_head_removal() {
+#[test]
+fn observer_detects_piston_head_removal() {
     let mut registry = Java26Registry::new();
     let piston = state(
         &mut registry,
@@ -574,13 +560,12 @@ async fn observer_detects_piston_head_removal() {
     world.set_block(source_pos, source).unwrap();
     let rules = Java26Rules::new(registry);
     let mut simulation = Simulation::load(rules, world, SimulationConfig::default())
-        .await
         .unwrap();
-    simulation.initialize().await.unwrap();
+    simulation.set_trace_enabled(true);
+    simulation.initialize().unwrap();
 
     simulation
         .step_with_actions(&[Action::BreakBlock { pos: source_pos }])
-        .await
         .unwrap();
 
     assert!(simulation.trace().events().iter().any(|event| {
@@ -595,8 +580,8 @@ async fn observer_detects_piston_head_removal() {
     }));
 }
 
-#[tokio::test]
-async fn piston_destroyed_repeater_notifies_with_the_removed_block_kind() {
+#[test]
+fn piston_destroyed_repeater_notifies_with_the_removed_block_kind() {
     let mut registry = Java26Registry::new();
     let piston = state(
         &mut registry,
@@ -624,11 +609,11 @@ async fn piston_destroyed_repeater_notifies_with_the_removed_block_kind() {
     world.set_block(BlockPos::new(1, -1, 0), stone).unwrap();
     let rules = Java26Rules::new(registry);
     let mut simulation = Simulation::load(rules, world, SimulationConfig::default())
-        .await
         .unwrap();
+    simulation.set_trace_enabled(true);
 
-    simulation.initialize().await.unwrap();
-    simulation.step().await.unwrap();
+    simulation.initialize().unwrap();
+    simulation.step().unwrap();
 
     assert!(simulation.trace().events().iter().any(|event| {
         matches!(
@@ -646,8 +631,8 @@ async fn piston_destroyed_repeater_notifies_with_the_removed_block_kind() {
     );
 }
 
-#[tokio::test]
-async fn piston_destroying_a_door_repairs_the_other_half() {
+#[test]
+fn piston_destroying_a_door_repairs_the_other_half() {
     let mut registry = Java26Registry::new();
     let piston = state(
         &mut registry,
@@ -688,11 +673,10 @@ async fn piston_destroying_a_door_repairs_the_other_half() {
     world.set_block(BlockPos::new(1, -1, 0), stone).unwrap();
     let rules = Java26Rules::new(registry);
     let mut simulation = Simulation::load(rules, world, SimulationConfig::default())
-        .await
         .unwrap();
 
-    simulation.initialize().await.unwrap();
-    simulation.step().await.unwrap();
+    simulation.initialize().unwrap();
+    simulation.step().unwrap();
 
     assert_eq!(
         simulation.world().get_block(upper_pos),
@@ -700,8 +684,8 @@ async fn piston_destroying_a_door_repairs_the_other_half() {
     );
 }
 
-#[tokio::test]
-async fn sticky_piston_does_not_pull_glazed_terracotta() {
+#[test]
+fn sticky_piston_does_not_pull_glazed_terracotta() {
     let mut registry = Java26Registry::new();
     let piston = state(
         &mut registry,
@@ -730,20 +714,18 @@ async fn sticky_piston_does_not_pull_glazed_terracotta() {
     world.set_block(source_pos, source).unwrap();
     let rules = Java26Rules::new(registry);
     let mut simulation = Simulation::load(rules, world, SimulationConfig::default())
-        .await
         .unwrap();
-    simulation.initialize().await.unwrap();
+    simulation.initialize().unwrap();
 
     simulation
         .step_with_actions(&[Action::BreakBlock { pos: source_pos }])
-        .await
         .unwrap();
 
     assert_eq!(simulation.world().get_block(glazed_pos), glazed);
 }
 
-#[tokio::test]
-async fn powered_observer_resets_when_placed() {
+#[test]
+fn powered_observer_resets_when_placed() {
     let mut registry = Java26Registry::new();
     let observer = state(
         &mut registry,
@@ -753,7 +735,6 @@ async fn powered_observer_resets_when_placed() {
     let world = SparseWorld::new(registry.air_state());
     let rules = Java26Rules::new(registry);
     let mut simulation = Simulation::load(rules, world, SimulationConfig::default())
-        .await
         .unwrap();
 
     simulation
@@ -761,7 +742,6 @@ async fn powered_observer_resets_when_placed() {
             pos: BlockPos::ZERO,
             state: observer,
         }])
-        .await
         .unwrap();
 
     let placed = simulation.world().get_block(BlockPos::ZERO);
@@ -777,8 +757,8 @@ async fn powered_observer_resets_when_placed() {
     assert_eq!(simulation.pending_scheduled_ticks(), 0);
 }
 
-#[tokio::test]
-async fn removing_active_observer_refreshes_output_neighbors() {
+#[test]
+fn removing_active_observer_refreshes_output_neighbors() {
     let mut registry = Java26Registry::new();
     let observer = state(
         &mut registry,
@@ -799,19 +779,17 @@ async fn removing_active_observer_refreshes_output_neighbors() {
     world.set_block(lamp_pos, lamp).unwrap();
     let rules = Java26Rules::new(registry);
     let mut simulation = Simulation::load(rules, world, SimulationConfig::default())
-        .await
         .unwrap();
+    simulation.set_trace_enabled(true);
 
     simulation
         .step_with_actions(&[Action::SetBlock {
             pos: BlockPos::new(1, 0, 0),
             state: stone,
         }])
-        .await
         .unwrap();
     simulation
         .run_until(redstone_core::GameTick(3))
-        .await
         .unwrap();
     let active = simulation.world().get_block(BlockPos::ZERO);
     assert_eq!(
@@ -829,7 +807,6 @@ async fn removing_active_observer_refreshes_output_neighbors() {
         .apply(Action::BreakBlock {
             pos: BlockPos::ZERO,
         })
-        .await
         .unwrap();
     let trace = simulation.trace();
     assert!(trace.events()[trace_len..].iter().any(|event| {
@@ -844,8 +821,8 @@ async fn removing_active_observer_refreshes_output_neighbors() {
     }));
 }
 
-#[tokio::test]
-async fn observers_detect_triggered_containers_and_observer_state_changes() {
+#[test]
+fn observers_detect_triggered_containers_and_observer_state_changes() {
     let mut registry = Java26Registry::new();
     let dropper = state(
         &mut registry,
@@ -875,20 +852,17 @@ async fn observers_detect_triggered_containers_and_observer_state_changes() {
     world.set_block_entity(dropper_pos, container("minecraft:dropper", &[]));
     let rules = Java26Rules::new(registry);
     let mut simulation = Simulation::load(rules, world, SimulationConfig::default())
-        .await
         .unwrap();
 
-    simulation.initialize().await.unwrap();
+    simulation.initialize().unwrap();
     simulation
         .step_with_actions(&[Action::SetBlock {
             pos: BlockPos::new(-1, 0, 0),
             state: source,
         }])
-        .await
         .unwrap();
     simulation
         .run_until(redstone_core::GameTick(5))
-        .await
         .unwrap();
 
     let vertical = simulation.world().get_block(vertical_pos);
@@ -913,8 +887,8 @@ async fn observers_detect_triggered_containers_and_observer_state_changes() {
     );
 }
 
-#[tokio::test]
-async fn observer_ignores_secondary_updates_from_an_unchanged_conductor() {
+#[test]
+fn observer_ignores_secondary_updates_from_an_unchanged_conductor() {
     let mut registry = Java26Registry::new();
     let source = state(&mut registry, "minecraft:redstone_block", &[]);
     let wire = wire(&mut registry, 0);
@@ -932,13 +906,11 @@ async fn observer_ignores_secondary_updates_from_an_unchanged_conductor() {
     world.set_block(BlockPos::new(2, 0, 0), source).unwrap();
     let rules = Java26Rules::new(registry);
     let mut simulation = Simulation::load(rules, world, SimulationConfig::default())
-        .await
         .unwrap();
 
-    simulation.initialize().await.unwrap();
+    simulation.initialize().unwrap();
     simulation
         .run_until(redstone_core::GameTick(2))
-        .await
         .unwrap();
 
     let observer = simulation.world().get_block(observer_pos);
@@ -953,8 +925,8 @@ async fn observer_ignores_secondary_updates_from_an_unchanged_conductor() {
     );
 }
 
-#[tokio::test]
-async fn observer_powers_a_quasi_connected_piston_through_slime() {
+#[test]
+fn observer_powers_a_quasi_connected_piston_through_slime() {
     let mut registry = Java26Registry::new();
     let observer = state(
         &mut registry,
@@ -976,8 +948,8 @@ async fn observer_powers_a_quasi_connected_piston_through_slime() {
     world.set_block(piston_pos, piston).unwrap();
     let rules = Java26Rules::new(registry);
     let mut simulation = Simulation::load(rules, world, SimulationConfig::default())
-        .await
         .unwrap();
+    simulation.set_trace_enabled(true);
     simulation.add_probe(
         "slime_signal",
         Probe::Signal {
@@ -991,11 +963,9 @@ async fn observer_powers_a_quasi_connected_piston_through_slime() {
             pos: BlockPos::new(-1, 0, 0),
             state: stone,
         }])
-        .await
         .unwrap();
     let deltas = simulation
         .run_until(redstone_core::GameTick(3))
-        .await
         .unwrap();
 
     let observer = simulation.world().get_block(observer_pos);
@@ -1030,8 +1000,8 @@ async fn observer_powers_a_quasi_connected_piston_through_slime() {
     );
 }
 
-#[tokio::test]
-async fn hopper_pulls_one_item_and_starts_an_eight_tick_cooldown() {
+#[test]
+fn hopper_pulls_one_item_and_starts_an_eight_tick_cooldown() {
     let mut registry = Java26Registry::new();
     let hopper = state(
         &mut registry,
@@ -1062,10 +1032,9 @@ async fn hopper_pulls_one_item_and_starts_an_eight_tick_cooldown() {
     world.set_block_entity(target_pos, container("minecraft:chest", &[]));
     let rules = Java26Rules::new(registry);
     let mut simulation = Simulation::load(rules, world, SimulationConfig::default())
-        .await
         .unwrap();
 
-    let delta = simulation.step().await.unwrap();
+    let delta = simulation.step().unwrap();
 
     assert_eq!(
         simulation.world().block_entity(hopper_pos).unwrap().fields["item_count"],
@@ -1102,8 +1071,8 @@ async fn hopper_pulls_one_item_and_starts_an_eight_tick_cooldown() {
     assert_eq!(updates[2].1.fields["cooldown"], 8);
 }
 
-#[tokio::test]
-async fn powered_dropper_transfers_into_the_facing_container_after_four_ticks() {
+#[test]
+fn powered_dropper_transfers_into_the_facing_container_after_four_ticks() {
     let mut registry = Java26Registry::new();
     let dropper = state(
         &mut registry,
@@ -1132,13 +1101,11 @@ async fn powered_dropper_transfers_into_the_facing_container_after_four_ticks() 
     world.set_block_entity(target, container("minecraft:chest", &[]));
     let rules = Java26Rules::new(registry);
     let mut simulation = Simulation::load(rules, world, SimulationConfig::default())
-        .await
         .unwrap();
-    simulation.initialize().await.unwrap();
+    simulation.initialize().unwrap();
 
     simulation
         .run_until(redstone_core::GameTick(5))
-        .await
         .unwrap();
 
     assert_eq!(
@@ -1155,8 +1122,8 @@ async fn powered_dropper_transfers_into_the_facing_container_after_four_ticks() 
     );
 }
 
-#[tokio::test]
-async fn dispenser_consumes_registered_items_but_preserves_unknown_items() {
+#[test]
+fn dispenser_consumes_registered_items_but_preserves_unknown_items() {
     for (item_id, consumed, entity_kind) in [
         ("minecraft:arrow", true, Some("minecraft:arrow")),
         ("minecraft:stone", false, None),
@@ -1177,13 +1144,12 @@ async fn dispenser_consumes_registered_items_but_preserves_unknown_items() {
         );
         let rules = Java26Rules::new(registry);
         let mut simulation = Simulation::load(rules, world, SimulationConfig::default())
-            .await
             .unwrap();
-        simulation.initialize().await.unwrap();
+        simulation.set_trace_enabled(true);
+        simulation.initialize().unwrap();
 
         simulation
             .run_until(redstone_core::GameTick(5))
-            .await
             .unwrap();
 
         assert_eq!(
@@ -1213,8 +1179,8 @@ async fn dispenser_consumes_registered_items_but_preserves_unknown_items() {
     }
 }
 
-#[tokio::test]
-async fn crafter_emits_output_and_clears_its_crafting_pulse() {
+#[test]
+fn crafter_emits_output_and_clears_its_crafting_pulse() {
     let mut registry = Java26Registry::new();
     let crafter = state(
         &mut registry,
@@ -1239,13 +1205,11 @@ async fn crafter_emits_output_and_clears_its_crafting_pulse() {
     world.set_block_entity(BlockPos::ZERO, data);
     let rules = Java26Rules::new(registry);
     let mut simulation = Simulation::load(rules, world, SimulationConfig::default())
-        .await
         .unwrap();
-    simulation.initialize().await.unwrap();
+    simulation.initialize().unwrap();
 
     simulation
         .run_until(redstone_core::GameTick(6))
-        .await
         .unwrap();
 
     assert_eq!(
@@ -1272,8 +1236,8 @@ async fn crafter_emits_output_and_clears_its_crafting_pulse() {
     );
 }
 
-#[tokio::test]
-async fn floor_button_notifies_consumers_next_to_its_strongly_powered_support() {
+#[test]
+fn floor_button_notifies_consumers_next_to_its_strongly_powered_support() {
     let mut registry = Java26Registry::new();
     let button = state(
         &mut registry,
@@ -1294,12 +1258,10 @@ async fn floor_button_notifies_consumers_next_to_its_strongly_powered_support() 
     world.set_block(lamp_pos, lamp).unwrap();
     let rules = Java26Rules::new(registry);
     let mut simulation = Simulation::load(rules, world, SimulationConfig::default())
-        .await
         .unwrap();
 
     simulation
         .step_with_actions(&[Action::PressButton { pos: button_pos }])
-        .await
         .unwrap();
 
     let lit = simulation.world().get_block(lamp_pos);
@@ -1314,7 +1276,6 @@ async fn floor_button_notifies_consumers_next_to_its_strongly_powered_support() 
     );
     simulation
         .run_until(redstone_core::GameTick(35))
-        .await
         .unwrap();
     let unlit = simulation.world().get_block(lamp_pos);
     assert_eq!(
@@ -1328,8 +1289,8 @@ async fn floor_button_notifies_consumers_next_to_its_strongly_powered_support() 
     );
 }
 
-#[tokio::test]
-async fn floor_sources_strongly_power_the_block_below() {
+#[test]
+fn floor_sources_strongly_power_the_block_below() {
     let mut registry = Java26Registry::new();
     let pressure_plate = state(
         &mut registry,
@@ -1391,10 +1352,9 @@ async fn floor_sources_strongly_power_the_block_below() {
         }
         let rules = Java26Rules::new(registry.clone());
         let mut simulation = Simulation::load(rules, world, SimulationConfig::default())
-            .await
             .unwrap();
 
-        simulation.initialize().await.unwrap();
+        simulation.initialize().unwrap();
 
         let lit = simulation.world().get_block(lamp_pos);
         assert_eq!(
@@ -1409,8 +1369,8 @@ async fn floor_sources_strongly_power_the_block_below() {
     }
 }
 
-#[tokio::test]
-async fn floor_torch_notifies_consumers_around_its_strongly_powered_block() {
+#[test]
+fn floor_torch_notifies_consumers_around_its_strongly_powered_block() {
     let mut registry = Java26Registry::new();
     let lever = state(
         &mut registry,
@@ -1441,16 +1401,13 @@ async fn floor_torch_notifies_consumers_around_its_strongly_powered_block() {
     world.set_block(lamp_pos, lamp).unwrap();
     let rules = Java26Rules::new(registry);
     let mut simulation = Simulation::load(rules, world, SimulationConfig::default())
-        .await
         .unwrap();
 
     simulation
         .step_with_actions(&[Action::PullLever { pos: lever_pos }])
-        .await
         .unwrap();
     simulation
         .run_until(redstone_core::GameTick(4))
-        .await
         .unwrap();
 
     let lit_torch = simulation.world().get_block(torch_pos);
@@ -1475,8 +1432,8 @@ async fn floor_torch_notifies_consumers_around_its_strongly_powered_block() {
     );
 }
 
-#[tokio::test]
-async fn copper_bulb_updates_a_comparator_and_its_output_conductor() {
+#[test]
+fn copper_bulb_updates_a_comparator_and_its_output_conductor() {
     let mut registry = Java26Registry::new();
     let lever = state(
         &mut registry,
@@ -1516,16 +1473,13 @@ async fn copper_bulb_updates_a_comparator_and_its_output_conductor() {
     world.set_block(lamp_pos, lamp).unwrap();
     let rules = Java26Rules::new(registry);
     let mut simulation = Simulation::load(rules, world, SimulationConfig::default())
-        .await
         .unwrap();
 
     simulation
         .step_with_actions(&[Action::PullLever { pos: lever_pos }])
-        .await
         .unwrap();
     simulation
         .run_until(redstone_core::GameTick(3))
-        .await
         .unwrap();
 
     let lit_bulb = simulation.world().get_block(bulb_pos);
@@ -1560,8 +1514,8 @@ async fn copper_bulb_updates_a_comparator_and_its_output_conductor() {
     );
 }
 
-#[tokio::test]
-async fn state_backed_analog_sources_drive_comparators() {
+#[test]
+fn state_backed_analog_sources_drive_comparators() {
     let mut registry = Java26Registry::new();
     let sources = [
         (
@@ -1638,14 +1592,14 @@ async fn state_backed_analog_sources_drive_comparators() {
 
     for (source, expected) in sources {
         assert_eq!(
-            comparator_output_for_source(registry.clone(), source).await,
+            comparator_output_for_source(registry.clone(), source),
             ProbeValue::Integer(expected)
         );
     }
 }
 
-#[tokio::test]
-async fn block_entity_backed_analog_sources_drive_comparators() {
+#[test]
+fn block_entity_backed_analog_sources_drive_comparators() {
     let mut registry = Java26Registry::new();
     let sources = [
         (
@@ -1745,14 +1699,14 @@ async fn block_entity_backed_analog_sources_drive_comparators() {
 
     for (source, data, expected) in sources {
         assert_eq!(
-            comparator_output_for_source_with_data(registry.clone(), source, Some(data)).await,
+            comparator_output_for_source_with_data(registry.clone(), source, Some(data)),
             ProbeValue::Integer(expected)
         );
     }
 }
 
-#[tokio::test]
-async fn comparator_reads_combined_copper_chest_inventory() {
+#[test]
+fn comparator_reads_combined_copper_chest_inventory() {
     let mut registry = Java26Registry::new();
     let comparator = state(
         &mut registry,
@@ -1794,7 +1748,6 @@ async fn comparator_reads_combined_copper_chest_inventory() {
     );
     let rules = Java26Rules::new(registry);
     let mut simulation = Simulation::load(rules, world, SimulationConfig::default())
-        .await
         .unwrap();
     simulation.add_probe(
         "output",
@@ -1803,15 +1756,15 @@ async fn comparator_reads_combined_copper_chest_inventory() {
             direction: Some(Direction::North),
         },
     );
-    simulation.initialize().await.unwrap();
-    simulation.step().await.unwrap();
-    let delta = simulation.step().await.unwrap();
+    simulation.initialize().unwrap();
+    simulation.step().unwrap();
+    let delta = simulation.step().unwrap();
 
     assert_eq!(delta.probes[0].value, ProbeValue::Integer(1));
 }
 
-#[tokio::test]
-async fn remaining_analog_source_categories_drive_comparators() {
+#[test]
+fn remaining_analog_source_categories_drive_comparators() {
     let mut registry = Java26Registry::new();
     let sources = [
         (
@@ -1893,14 +1846,14 @@ async fn remaining_analog_source_categories_drive_comparators() {
 
     for (source, data, expected) in sources {
         assert_eq!(
-            comparator_output_for_source_with_data(registry.clone(), source, Some(data)).await,
+            comparator_output_for_source_with_data(registry.clone(), source, Some(data)),
             ProbeValue::Integer(expected)
         );
     }
 }
 
-#[tokio::test]
-async fn shelf_output_depends_on_the_comparator_side() {
+#[test]
+fn shelf_output_depends_on_the_comparator_side() {
     let mut registry = Java26Registry::new();
     let comparator = state(
         &mut registry,
@@ -1940,7 +1893,6 @@ async fn shelf_output_depends_on_the_comparator_side() {
     );
     let rules = Java26Rules::new(registry);
     let mut simulation = Simulation::load(rules, world, SimulationConfig::default())
-        .await
         .unwrap();
     simulation.add_probe(
         "output",
@@ -1949,15 +1901,15 @@ async fn shelf_output_depends_on_the_comparator_side() {
             direction: Some(Direction::North),
         },
     );
-    simulation.initialize().await.unwrap();
-    simulation.step().await.unwrap();
-    let delta = simulation.step().await.unwrap();
+    simulation.initialize().unwrap();
+    simulation.step().unwrap();
+    let delta = simulation.step().unwrap();
 
     assert_eq!(delta.probes[0].value, ProbeValue::Integer(5));
 }
 
-#[tokio::test]
-async fn detector_rail_reads_command_and_container_minecarts() {
+#[test]
+fn detector_rail_reads_command_and_container_minecarts() {
     let mut registry = Java26Registry::new();
     let comparator = state(
         &mut registry,
@@ -2012,7 +1964,6 @@ async fn detector_rail_reads_command_and_container_minecarts() {
         world.spawn_entity(entity);
         let rules = Java26Rules::new(registry.clone());
         let mut simulation = Simulation::load(rules, world, SimulationConfig::default())
-            .await
             .unwrap();
         simulation.add_probe(
             "output",
@@ -2021,16 +1972,16 @@ async fn detector_rail_reads_command_and_container_minecarts() {
                 direction: Some(Direction::North),
             },
         );
-        simulation.initialize().await.unwrap();
-        simulation.step().await.unwrap();
-        let delta = simulation.step().await.unwrap();
+        simulation.initialize().unwrap();
+        simulation.step().unwrap();
+        let delta = simulation.step().unwrap();
 
         assert_eq!(delta.probes[0].value, ProbeValue::Integer(expected));
     }
 }
 
-#[tokio::test]
-async fn comparator_refreshes_when_a_direct_or_blocked_source_changes() {
+#[test]
+fn comparator_refreshes_when_a_direct_or_blocked_source_changes() {
     for blocked in [false, true] {
         let mut registry = Java26Registry::new();
         let comparator = state(
@@ -2055,7 +2006,6 @@ async fn comparator_refreshes_when_a_direct_or_blocked_source_changes() {
         }
         let rules = Java26Rules::new(registry);
         let mut simulation = Simulation::load(rules, world, SimulationConfig::default())
-            .await
             .unwrap();
         simulation.add_probe(
             "output",
@@ -2064,10 +2014,9 @@ async fn comparator_refreshes_when_a_direct_or_blocked_source_changes() {
                 direction: Some(Direction::North),
             },
         );
-        simulation.initialize().await.unwrap();
+        simulation.initialize().unwrap();
         simulation
             .run_until(redstone_core::GameTick(3))
-            .await
             .unwrap();
 
         simulation
@@ -2075,17 +2024,16 @@ async fn comparator_refreshes_when_a_direct_or_blocked_source_changes() {
                 pos: source_pos,
                 state: full,
             }])
-            .await
             .unwrap();
-        simulation.step().await.unwrap();
-        let delta = simulation.step().await.unwrap();
+        simulation.step().unwrap();
+        let delta = simulation.step().unwrap();
 
         assert_eq!(delta.probes[0].value, ProbeValue::Integer(3));
     }
 }
 
-#[tokio::test]
-async fn comparator_refreshes_after_a_hopper_transfer() {
+#[test]
+fn comparator_refreshes_after_a_hopper_transfer() {
     let mut registry = Java26Registry::new();
     let hopper = state(
         &mut registry,
@@ -2124,7 +2072,6 @@ async fn comparator_refreshes_after_a_hopper_transfer() {
     );
     let rules = Java26Rules::new(registry);
     let mut simulation = Simulation::load(rules, world, SimulationConfig::default())
-        .await
         .unwrap();
     simulation.add_probe(
         "output",
@@ -2133,10 +2080,9 @@ async fn comparator_refreshes_after_a_hopper_transfer() {
             direction: Some(Direction::West),
         },
     );
-    simulation.initialize().await.unwrap();
+    simulation.initialize().unwrap();
     let deltas = simulation
         .run_until(redstone_core::GameTick(3))
-        .await
         .unwrap();
 
     assert_eq!(
@@ -2145,8 +2091,8 @@ async fn comparator_refreshes_after_a_hopper_transfer() {
     );
 }
 
-#[tokio::test]
-async fn weak_only_sources_and_lit_copper_bulbs_do_not_power_through_a_conductor() {
+#[test]
+fn weak_only_sources_and_lit_copper_bulbs_do_not_power_through_a_conductor() {
     let mut registry = Java26Registry::new();
     let redstone_block = state(&mut registry, "minecraft:redstone_block", &[]);
     let target = state(&mut registry, "minecraft:target", &[("power", "15")]);
@@ -2174,10 +2120,9 @@ async fn weak_only_sources_and_lit_copper_bulbs_do_not_power_through_a_conductor
         world.set_block(BlockPos::new(1, 0, 0), lamp).unwrap();
         let rules = Java26Rules::new(registry.clone());
         let mut simulation = Simulation::load(rules, world, SimulationConfig::default())
-            .await
             .unwrap();
 
-        simulation.initialize().await.unwrap();
+        simulation.initialize().unwrap();
 
         let unlit = simulation.world().get_block(BlockPos::new(1, 0, 0));
         assert_eq!(
@@ -2192,8 +2137,8 @@ async fn weak_only_sources_and_lit_copper_bulbs_do_not_power_through_a_conductor
     }
 }
 
-#[tokio::test]
-async fn pistons_and_hoppers_do_not_relay_strong_power() {
+#[test]
+fn pistons_and_hoppers_do_not_relay_strong_power() {
     let mut registry = Java26Registry::new();
     let source = state(
         &mut registry,
@@ -2224,10 +2169,9 @@ async fn pistons_and_hoppers_do_not_relay_strong_power() {
         world.set_block(output_pos, redstone_lamp).unwrap();
         let rules = Java26Rules::new(registry.clone());
         let mut simulation = Simulation::load(rules, world, SimulationConfig::default())
-            .await
             .unwrap();
 
-        simulation.initialize().await.unwrap();
+        simulation.initialize().unwrap();
 
         let output = simulation.world().get_block(output_pos);
         assert_eq!(
@@ -2242,8 +2186,8 @@ async fn pistons_and_hoppers_do_not_relay_strong_power() {
     }
 }
 
-#[tokio::test]
-async fn wooden_pressure_plate_tracks_item_entities_and_releases_after_delay() {
+#[test]
+fn wooden_pressure_plate_tracks_item_entities_and_releases_after_delay() {
     let mut registry = Java26Registry::new();
     let plate = state(
         &mut registry,
@@ -2274,10 +2218,9 @@ async fn wooden_pressure_plate_tracks_item_entities_and_releases_after_delay() {
     });
     let rules = Java26Rules::new(registry);
     let mut simulation = Simulation::load(rules, world, SimulationConfig::default())
-        .await
         .unwrap();
 
-    simulation.step().await.unwrap();
+    simulation.step().unwrap();
     let powered = simulation.world().get_block(BlockPos::ZERO);
     assert_eq!(
         simulation
@@ -2300,7 +2243,6 @@ async fn wooden_pressure_plate_tracks_item_entities_and_releases_after_delay() {
     );
     simulation
         .run_until(redstone_core::GameTick(21))
-        .await
         .unwrap();
     let released = simulation.world().get_block(BlockPos::ZERO);
     assert_eq!(
@@ -2315,8 +2257,8 @@ async fn wooden_pressure_plate_tracks_item_entities_and_releases_after_delay() {
     assert_eq!(simulation.world().entities().count(), 0);
 }
 
-#[tokio::test]
-async fn detector_rail_responds_only_to_minecarts() {
+#[test]
+fn detector_rail_responds_only_to_minecarts() {
     let mut registry = Java26Registry::new();
     let rail = state(
         &mut registry,
@@ -2344,11 +2286,10 @@ async fn detector_rail_responds_only_to_minecarts() {
     });
     let rules = Java26Rules::new(registry);
     let mut simulation = Simulation::load(rules, world, SimulationConfig::default())
-        .await
         .unwrap();
-    simulation.initialize().await.unwrap();
+    simulation.initialize().unwrap();
 
-    simulation.step().await.unwrap();
+    simulation.step().unwrap();
 
     let powered = simulation.world().get_block(BlockPos::ZERO);
     assert_eq!(
@@ -2372,8 +2313,8 @@ async fn detector_rail_responds_only_to_minecarts() {
     );
 }
 
-#[tokio::test]
-async fn tripwire_powers_a_facing_hook_when_an_entity_intersects() {
+#[test]
+fn tripwire_powers_a_facing_hook_when_an_entity_intersects() {
     let mut registry = Java26Registry::new();
     let wire = state(
         &mut registry,
@@ -2415,11 +2356,10 @@ async fn tripwire_powers_a_facing_hook_when_an_entity_intersects() {
     });
     let rules = Java26Rules::new(registry);
     let mut simulation = Simulation::load(rules, world, SimulationConfig::default())
-        .await
         .unwrap();
-    simulation.initialize().await.unwrap();
+    simulation.initialize().unwrap();
 
-    simulation.step().await.unwrap();
+    simulation.step().unwrap();
 
     let hook = simulation.world().get_block(BlockPos::new(1, 0, 0));
     assert_eq!(
@@ -2443,8 +2383,8 @@ async fn tripwire_powers_a_facing_hook_when_an_entity_intersects() {
     );
 }
 
-#[tokio::test]
-async fn lectern_emits_a_two_tick_use_pulse() {
+#[test]
+fn lectern_emits_a_two_tick_use_pulse() {
     let mut registry = Java26Registry::new();
     let lectern = state(
         &mut registry,
@@ -2467,14 +2407,12 @@ async fn lectern_emits_a_two_tick_use_pulse() {
     world.set_block(BlockPos::new(1, -1, 0), lamp).unwrap();
     let rules = Java26Rules::new(registry);
     let mut simulation = Simulation::load(rules, world, SimulationConfig::default())
-        .await
         .unwrap();
 
     simulation
         .apply(Action::UseBlock {
             pos: BlockPos::ZERO,
         })
-        .await
         .unwrap();
     let powered = simulation.world().get_block(BlockPos::ZERO);
     assert_eq!(
@@ -2498,7 +2436,6 @@ async fn lectern_emits_a_two_tick_use_pulse() {
     );
     simulation
         .run_until(redstone_core::GameTick(2))
-        .await
         .unwrap();
     let released = simulation.world().get_block(BlockPos::ZERO);
     assert_eq!(
@@ -2512,8 +2449,8 @@ async fn lectern_emits_a_two_tick_use_pulse() {
     );
 }
 
-#[tokio::test]
-async fn piston_rejects_block_entity_container_states_without_runtime_data() {
+#[test]
+fn piston_rejects_block_entity_container_states_without_runtime_data() {
     let containers: &[(&str, &[(&str, &str)])] = &[
         (
             "minecraft:chest",
@@ -2572,11 +2509,10 @@ async fn piston_rejects_block_entity_container_states_without_runtime_data() {
             .unwrap();
         let rules = Java26Rules::new(registry);
         let mut simulation = Simulation::load(rules, world, SimulationConfig::default())
-            .await
             .unwrap();
-        simulation.initialize().await.unwrap();
+        simulation.initialize().unwrap();
 
-        simulation.step().await.unwrap();
+        simulation.step().unwrap();
 
         let piston_state = simulation.world().get_block(BlockPos::ZERO);
         assert_eq!(
@@ -2600,8 +2536,8 @@ async fn piston_rejects_block_entity_container_states_without_runtime_data() {
     }
 }
 
-#[tokio::test]
-async fn piston_moves_slime_branches_without_sticking_to_honey() {
+#[test]
+fn piston_moves_slime_branches_without_sticking_to_honey() {
     let mut registry = Java26Registry::new();
     let piston = state(
         &mut registry,
@@ -2620,11 +2556,11 @@ async fn piston_moves_slime_branches_without_sticking_to_honey() {
     world.set_block(BlockPos::new(1, -1, 0), honey).unwrap();
     let rules = Java26Rules::new(registry);
     let mut simulation = Simulation::load(rules, world, SimulationConfig::default())
-        .await
         .unwrap();
-    simulation.initialize().await.unwrap();
+    simulation.set_trace_enabled(true);
+    simulation.initialize().unwrap();
 
-    simulation.step().await.unwrap();
+    simulation.step().unwrap();
 
     let moving_slime = simulation
         .world()
@@ -2651,7 +2587,6 @@ async fn piston_moves_slime_branches_without_sticking_to_honey() {
     );
     simulation
         .run_until(redstone_core::GameTick(4))
-        .await
         .unwrap();
 
     assert_eq!(simulation.world().get_block(BlockPos::new(2, 0, 0)), slime);
@@ -2664,8 +2599,8 @@ async fn piston_moves_slime_branches_without_sticking_to_honey() {
     );
 }
 
-#[tokio::test]
-async fn piston_rejects_a_sticky_structure_larger_than_twelve_blocks() {
+#[test]
+fn piston_rejects_a_sticky_structure_larger_than_twelve_blocks() {
     let mut registry = Java26Registry::new();
     let piston = state(
         &mut registry,
@@ -2683,11 +2618,10 @@ async fn piston_rejects_a_sticky_structure_larger_than_twelve_blocks() {
     }
     let rules = Java26Rules::new(registry);
     let mut simulation = Simulation::load(rules, world, SimulationConfig::default())
-        .await
         .unwrap();
-    simulation.initialize().await.unwrap();
+    simulation.initialize().unwrap();
 
-    simulation.step().await.unwrap();
+    simulation.step().unwrap();
 
     let piston_state = simulation.world().get_block(BlockPos::ZERO);
     assert_eq!(

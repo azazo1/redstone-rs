@@ -1,17 +1,30 @@
-use std::io::Write;
+use std::borrow::Cow;
+use std::io::{BufWriter, Write};
 
 use thiserror::Error;
 
 use crate::{GameTick, ProbeValue, TraceEvent, TraceKind};
 
+const TRACE_BUFFER_CAPACITY: usize = 64 * 1024;
+
 #[derive(Clone, Debug, Default)]
-pub struct TraceLog {
-    events: Vec<TraceEvent>,
+pub struct TraceLog<'a> {
+    events: Cow<'a, [TraceEvent]>,
 }
 
-impl TraceLog {
+impl TraceLog<'static> {
     pub fn new(events: Vec<TraceEvent>) -> Self {
-        Self { events }
+        Self {
+            events: Cow::Owned(events),
+        }
+    }
+}
+
+impl<'a> TraceLog<'a> {
+    pub fn borrowed(events: &'a [TraceEvent]) -> Self {
+        Self {
+            events: Cow::Borrowed(events),
+        }
     }
 
     pub fn events(&self) -> &[TraceEvent] {
@@ -19,20 +32,23 @@ impl TraceLog {
     }
 
     pub fn into_events(self) -> Vec<TraceEvent> {
-        self.events
+        self.events.into_owned()
     }
 
-    pub fn write_jsonl(&self, mut output: impl Write) -> Result<(), TraceError> {
-        for event in &self.events {
+    pub fn write_jsonl(&self, output: impl Write) -> Result<(), TraceError> {
+        let mut output = BufWriter::with_capacity(TRACE_BUFFER_CAPACITY, output);
+        for event in self.events.iter() {
             serde_json::to_writer(&mut output, event)?;
             output.write_all(b"\n")?;
         }
+        output.flush()?;
         Ok(())
     }
 
-    pub fn write_vcd(&self, mut output: impl Write) -> Result<(), TraceError> {
+    pub fn write_vcd(&self, output: impl Write) -> Result<(), TraceError> {
+        let mut output = BufWriter::with_capacity(TRACE_BUFFER_CAPACITY, output);
         let mut probes = Vec::<(String, u8)>::new();
-        for event in &self.events {
+        for event in self.events.iter() {
             if let TraceKind::ProbeSample { sample } = &event.kind {
                 let width = probe_width(&sample.value);
                 if let Some((_, current_width)) =
@@ -56,7 +72,7 @@ impl TraceLog {
         writeln!(output, "$enddefinitions $end")?;
 
         let mut current_tick = None;
-        for event in &self.events {
+        for event in self.events.iter() {
             let TraceKind::ProbeSample { sample } = &event.kind else {
                 continue;
             };
@@ -95,6 +111,7 @@ impl TraceLog {
         if current_tick.is_none() {
             writeln!(output, "#{}", GameTick(0).0)?;
         }
+        output.flush()?;
         Ok(())
     }
 }

@@ -1,4 +1,4 @@
-use std::collections::{BTreeMap, BTreeSet, VecDeque};
+use std::collections::{BTreeSet, VecDeque};
 
 use thiserror::Error;
 
@@ -94,7 +94,7 @@ pub struct EventContext<'a> {
     scheduled_keys: &'a mut BTreeSet<(BlockPos, BlockKindId)>,
     block_events: &'a mut VecDeque<BlockEvent>,
     block_event_keys: &'a mut BTreeSet<BlockEvent>,
-    trace: &'a mut Vec<TraceEvent>,
+    trace: Option<&'a mut Vec<TraceEvent>>,
     events: &'a mut Vec<WorldEvent>,
     neighbor_tasks: Vec<NeighborTask>,
 }
@@ -113,7 +113,7 @@ impl<'a> EventContext<'a> {
         scheduled_keys: &'a mut BTreeSet<(BlockPos, BlockKindId)>,
         block_events: &'a mut VecDeque<BlockEvent>,
         block_event_keys: &'a mut BTreeSet<BlockEvent>,
-        trace: &'a mut Vec<TraceEvent>,
+        trace: Option<&'a mut Vec<TraceEvent>>,
         events: &'a mut Vec<WorldEvent>,
     ) -> Self {
         Self {
@@ -219,55 +219,6 @@ impl<'a> EventContext<'a> {
             },
         });
         true
-    }
-
-    pub(crate) fn record_untracked_block_entity_changes(
-        &mut self,
-        before: &BTreeMap<BlockPos, BlockEntityData>,
-    ) {
-        let current = self
-            .world
-            .block_entities()
-            .map(|(pos, data)| (*pos, data.clone()))
-            .collect::<BTreeMap<_, _>>();
-        let positions = before
-            .keys()
-            .chain(current.keys())
-            .copied()
-            .collect::<BTreeSet<_>>();
-        for pos in positions {
-            let old_data = before.get(&pos);
-            let new_data = current.get(&pos);
-            if old_data == new_data || self.last_recorded_block_entity_data(pos) == Some(new_data) {
-                continue;
-            }
-            let change = match (old_data, new_data) {
-                (None, Some(data)) => BlockEntityChange::Create {
-                    pos,
-                    data: data.clone(),
-                },
-                (Some(old_data), Some(new_data)) => BlockEntityChange::Update {
-                    pos,
-                    old_data: old_data.clone(),
-                    new_data: new_data.clone(),
-                },
-                (Some(data), None) => BlockEntityChange::Remove {
-                    pos,
-                    data: data.clone(),
-                },
-                (None, None) => continue,
-            };
-            self.events.push(WorldEvent::BlockEntity { change });
-        }
-    }
-
-    fn last_recorded_block_entity_data(&self, pos: BlockPos) -> Option<Option<&BlockEntityData>> {
-        self.events.iter().rev().find_map(|event| match event {
-            WorldEvent::BlockEntity { change } if change.pos() == pos => {
-                Some(change.current_data())
-            }
-            _ => None,
-        })
     }
 
     pub fn schedule_tick(
@@ -425,8 +376,11 @@ impl<'a> EventContext<'a> {
     }
 
     pub fn push_trace(&mut self, kind: TraceKind) {
+        let Some(trace) = self.trace.as_mut() else {
+            return;
+        };
         self.micro_step.0 += 1;
-        self.trace.push(TraceEvent {
+        trace.push(TraceEvent {
             tick: self.tick,
             micro_step: *self.micro_step,
             phase: self.phase,

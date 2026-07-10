@@ -23,8 +23,8 @@ impl StructureStateResolver for RegistryResolver {
     }
 }
 
-#[tokio::test]
-async fn each_note_block_selects_only_the_lamp_above_it_with_initialized_droppers() {
+#[test]
+fn each_note_block_selects_only_the_lamp_above_it_with_initialized_droppers() {
     let schematic = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("../../assets/schematics/one-chooser.litematic");
     let mut resolver = RegistryResolver(Java26Registry::new());
@@ -34,7 +34,7 @@ async fn each_note_block_selects_only_the_lamp_above_it_with_initialized_dropper
     let mut lamps = Vec::new();
     for (pos, state_id) in loaded.world.iter_blocks() {
         let state = resolver.0.state(state_id).unwrap();
-        match state.name.as_str() {
+        match state.name.as_ref() {
             "minecraft:note_block" => note_blocks.push(pos),
             "minecraft:redstone_lamp" => lamps.push(pos),
             _ => {}
@@ -68,18 +68,16 @@ async fn each_note_block_selects_only_the_lamp_above_it_with_initialized_dropper
 
     let rules = Java26Rules::new(resolver.0);
     let mut simulation = Simulation::load(rules, loaded.world, SimulationConfig::default())
-        .await
         .unwrap();
-    simulation.initialize().await.unwrap();
-    simulation.run_until(GameTick(12)).await.unwrap();
+    simulation.initialize().unwrap();
+    simulation.run_until(GameTick(12)).unwrap();
 
     for note_pos in note_blocks {
         simulation
             .step_with_actions(&[Action::UseBlock { pos: note_pos }])
-            .await
             .unwrap();
         let settled_tick = GameTick(simulation.current_tick().0 + 20);
-        simulation.run_until(settled_tick).await.unwrap();
+        simulation.run_until(settled_tick).unwrap();
 
         let lit = lamps
             .iter()

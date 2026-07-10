@@ -37,7 +37,7 @@ fn dispenser_inventory(item: &str) -> BlockEntityData {
     }
 }
 
-async fn dispenser_world(item: &str, rail_in_front: bool) -> Simulation<Java26Rules> {
+fn dispenser_world(item: &str, rail_in_front: bool) -> Simulation<Java26Rules> {
     let mut registry = Java26Registry::new();
     let dispenser = state(
         &mut registry,
@@ -61,17 +61,16 @@ async fn dispenser_world(item: &str, rail_in_front: bool) -> Simulation<Java26Ru
     world.set_block_entity(BlockPos::ZERO, dispenser_inventory(item));
     let rules = Java26Rules::new(registry);
     let mut simulation = Simulation::load(rules, world, SimulationConfig::default())
-        .await
         .unwrap();
-    simulation.initialize().await.unwrap();
+    simulation.initialize().unwrap();
     simulation
 }
 
-#[tokio::test]
-async fn projectile_entity_records_the_original_dispensed_item() {
-    let mut simulation = dispenser_world("minecraft:tipped_arrow", false).await;
+#[test]
+fn projectile_entity_records_the_original_dispensed_item() {
+    let mut simulation = dispenser_world("minecraft:tipped_arrow", false);
 
-    simulation.run_until(GameTick(5)).await.unwrap();
+    simulation.run_until(GameTick(5)).unwrap();
 
     let entity = simulation.world().entities().next().unwrap().1;
     assert_eq!(entity.kind, "minecraft:arrow");
@@ -80,35 +79,36 @@ async fn projectile_entity_records_the_original_dispensed_item() {
     assert_eq!(entity.fields["velocity"], serde_json::json!([1, 0, 0]));
 }
 
-#[tokio::test]
-async fn minecart_spawns_on_a_rail_and_falls_back_to_an_item_without_one() {
-    let mut on_rail = dispenser_world("minecraft:hopper_minecart", true).await;
+#[test]
+fn minecart_spawns_on_a_rail_and_falls_back_to_an_item_without_one() {
+    let mut on_rail = dispenser_world("minecraft:hopper_minecart", true);
 
-    on_rail.run_until(GameTick(5)).await.unwrap();
+    on_rail.run_until(GameTick(5)).unwrap();
 
     let minecart = on_rail.world().entities().next().unwrap().1;
     assert_eq!(minecart.kind, "minecraft:hopper_minecart");
     assert_eq!(minecart.position, [1.5, 0.1, 0.5]);
 
-    let mut fallback = dispenser_world("minecraft:hopper_minecart", false).await;
-    fallback.run_until(GameTick(5)).await.unwrap();
+    let mut fallback = dispenser_world("minecraft:hopper_minecart", false);
+    fallback.run_until(GameTick(5)).unwrap();
     let item = fallback.world().entities().next().unwrap().1;
     assert_eq!(item.kind, "minecraft:item");
     assert_eq!(item.fields["item_id"], "minecraft:hopper_minecart");
 }
 
-#[tokio::test]
-async fn dispensed_tnt_counts_down_and_records_an_unsupported_explosion() {
-    let mut simulation = dispenser_world("minecraft:tnt", false).await;
+#[test]
+fn dispensed_tnt_counts_down_and_records_an_unsupported_explosion() {
+    let mut simulation = dispenser_world("minecraft:tnt", false);
+    simulation.set_trace_enabled(true);
 
-    simulation.run_until(GameTick(5)).await.unwrap();
+    simulation.run_until(GameTick(5)).unwrap();
 
     let tnt = simulation.world().entities().next().unwrap().1;
     assert_eq!(tnt.kind, "minecraft:tnt");
     assert_eq!(tnt.fields["fuse"], 78);
     assert_eq!(tnt.fields["ignited_by"], "dispenser");
 
-    simulation.run_until(GameTick(84)).await.unwrap();
+    simulation.run_until(GameTick(84)).unwrap();
     assert!(
         simulation
             .world()

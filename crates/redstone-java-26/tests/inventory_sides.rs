@@ -56,8 +56,8 @@ fn slot_item(world: &SparseWorld, pos: BlockPos, slot: u64) -> Option<(&str, i64
         .and_then(|entry| Some((entry["item_id"].as_str()?, entry["count"].as_i64()?)))
 }
 
-#[tokio::test]
-async fn hoppers_use_the_furnace_slots_exposed_by_each_face() {
+#[test]
+fn hoppers_use_the_furnace_slots_exposed_by_each_face() {
     let mut registry = Java26Registry::new();
     let hopper_east = state(
         &mut registry,
@@ -108,10 +108,9 @@ async fn hoppers_use_the_furnace_slots_exposed_by_each_face() {
     world.set_block_entity(rejected_furnace, container("minecraft:furnace", 3, &[]));
     let rules = Java26Rules::new(registry);
     let mut simulation = Simulation::load(rules, world, SimulationConfig::default())
-        .await
         .unwrap();
 
-    simulation.step().await.unwrap();
+    simulation.step().unwrap();
 
     assert_eq!(
         slot_item(simulation.world(), side_furnace, 1),
@@ -128,8 +127,8 @@ async fn hoppers_use_the_furnace_slots_exposed_by_each_face() {
     assert_eq!(slot_item(simulation.world(), rejected_furnace, 1), None);
 }
 
-#[tokio::test]
-async fn brewing_stands_expose_ingredient_fuel_and_output_slots_by_face() {
+#[test]
+fn brewing_stands_expose_ingredient_fuel_and_output_slots_by_face() {
     let mut registry = Java26Registry::new();
     let hopper_east = state(
         &mut registry,
@@ -193,10 +192,9 @@ async fn brewing_stands_expose_ingredient_fuel_and_output_slots_by_face() {
     );
     let rules = Java26Rules::new(registry);
     let mut simulation = Simulation::load(rules, world, SimulationConfig::default())
-        .await
         .unwrap();
 
-    simulation.step().await.unwrap();
+    simulation.step().unwrap();
 
     assert_eq!(
         slot_item(simulation.world(), top_brewing, 3),
@@ -220,8 +218,8 @@ async fn brewing_stands_expose_ingredient_fuel_and_output_slots_by_face() {
     );
 }
 
-#[tokio::test]
-async fn hopper_insertion_skips_disabled_crafter_slots() {
+#[test]
+fn hopper_insertion_skips_disabled_crafter_slots() {
     let mut registry = Java26Registry::new();
     let hopper = state(
         &mut registry,
@@ -254,10 +252,9 @@ async fn hopper_insertion_skips_disabled_crafter_slots() {
     world.set_block_entity(crafter_pos, crafter_data);
     let rules = Java26Rules::new(registry);
     let mut simulation = Simulation::load(rules, world, SimulationConfig::default())
-        .await
         .unwrap();
 
-    simulation.step().await.unwrap();
+    simulation.step().unwrap();
 
     assert_eq!(slot_item(simulation.world(), crafter_pos, 0), None);
     assert_eq!(
@@ -266,8 +263,8 @@ async fn hopper_insertion_skips_disabled_crafter_slots() {
     );
 }
 
-#[tokio::test]
-async fn dropper_preserves_a_shulker_box_rejected_by_an_existing_container() {
+#[test]
+fn dropper_preserves_a_shulker_box_rejected_by_an_existing_container() {
     let mut registry = Java26Registry::new();
     let dropper = state(
         &mut registry,
@@ -292,12 +289,10 @@ async fn dropper_preserves_a_shulker_box_rejected_by_an_existing_container() {
     world.set_block_entity(target, container("minecraft:shulker_box", 27, &[]));
     let rules = Java26Rules::new(registry);
     let mut simulation = Simulation::load(rules, world, SimulationConfig::default())
-        .await
         .unwrap();
 
     simulation
         .run_until(redstone_core::GameTick(5))
-        .await
         .unwrap();
 
     assert_eq!(

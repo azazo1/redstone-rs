@@ -29,8 +29,8 @@ fn wire(registry: &mut Java26Registry) -> BlockStateId {
     )
 }
 
-#[tokio::test]
-async fn isolated_pair_of_wires_becomes_an_east_west_line() {
+#[test]
+fn isolated_pair_of_wires_becomes_an_east_west_line() {
     let mut registry = Java26Registry::new();
     let wire = wire(&mut registry);
     let mut world = SparseWorld::new(registry.air_state());
@@ -38,10 +38,9 @@ async fn isolated_pair_of_wires_becomes_an_east_west_line() {
     world.set_block(BlockPos::new(1, 0, 0), wire).unwrap();
     let rules = Java26Rules::new(registry);
     let mut simulation = Simulation::load(rules, world, SimulationConfig::default())
-        .await
         .unwrap();
 
-    simulation.initialize().await.unwrap();
+    simulation.initialize().unwrap();
 
     for pos in [BlockPos::ZERO, BlockPos::new(1, 0, 0)] {
         let state = simulation
@@ -56,8 +55,8 @@ async fn isolated_pair_of_wires_becomes_an_east_west_line() {
     }
 }
 
-#[tokio::test]
-async fn wire_climbs_a_sturdy_block_to_reach_an_upper_wire() {
+#[test]
+fn wire_climbs_a_sturdy_block_to_reach_an_upper_wire() {
     let mut registry = Java26Registry::new();
     let wire = wire(&mut registry);
     let stone = state(&mut registry, "minecraft:stone", &[]);
@@ -67,10 +66,9 @@ async fn wire_climbs_a_sturdy_block_to_reach_an_upper_wire() {
     world.set_block(BlockPos::new(1, 1, 0), wire).unwrap();
     let rules = Java26Rules::new(registry);
     let mut simulation = Simulation::load(rules, world, SimulationConfig::default())
-        .await
         .unwrap();
 
-    simulation.initialize().await.unwrap();
+    simulation.initialize().unwrap();
 
     let state = simulation
         .rules()
@@ -81,24 +79,22 @@ async fn wire_climbs_a_sturdy_block_to_reach_an_upper_wire() {
     assert_eq!(state.property("west"), Some("side"));
 }
 
-#[tokio::test]
-async fn adding_a_wire_repairs_the_existing_neighbors_shape() {
+#[test]
+fn adding_a_wire_repairs_the_existing_neighbors_shape() {
     let mut registry = Java26Registry::new();
     let wire = wire(&mut registry);
     let mut world = SparseWorld::new(registry.air_state());
     world.set_block(BlockPos::ZERO, wire).unwrap();
     let rules = Java26Rules::new(registry);
     let mut simulation = Simulation::load(rules, world, SimulationConfig::default())
-        .await
         .unwrap();
-    simulation.initialize().await.unwrap();
+    simulation.initialize().unwrap();
 
     simulation
         .apply(Action::SetBlock {
             pos: BlockPos::new(1, 0, 0),
             state: wire,
         })
-        .await
         .unwrap();
 
     let existing = simulation
@@ -110,8 +106,8 @@ async fn adding_a_wire_repairs_the_existing_neighbors_shape() {
     assert_eq!(existing.property("west"), Some("side"));
 }
 
-#[tokio::test]
-async fn tripwire_connects_only_to_an_aligned_hook() {
+#[test]
+fn tripwire_connects_only_to_an_aligned_hook() {
     let mut registry = Java26Registry::new();
     let tripwire = state(
         &mut registry,
@@ -154,10 +150,9 @@ async fn tripwire_connects_only_to_an_aligned_hook() {
         .unwrap();
     let rules = Java26Rules::new(registry);
     let mut simulation = Simulation::load(rules, world, SimulationConfig::default())
-        .await
         .unwrap();
 
-    simulation.initialize().await.unwrap();
+    simulation.initialize().unwrap();
 
     let state = simulation
         .rules()
@@ -168,8 +163,8 @@ async fn tripwire_connects_only_to_an_aligned_hook() {
     assert_eq!(state.property("south"), Some("false"));
 }
 
-#[tokio::test]
-async fn fence_pane_and_wall_connections_are_repaired() {
+#[test]
+fn fence_pane_and_wall_connections_are_repaired() {
     let mut registry = Java26Registry::new();
     let fence = state(
         &mut registry,
@@ -227,10 +222,9 @@ async fn fence_pane_and_wall_connections_are_repaired() {
     world.set_block(BlockPos::new(0, 1, 6), stone).unwrap();
     let rules = Java26Rules::new(registry);
     let mut simulation = Simulation::load(rules, world, SimulationConfig::default())
-        .await
         .unwrap();
 
-    simulation.initialize().await.unwrap();
+    simulation.initialize().unwrap();
 
     let fence = simulation
         .rules()

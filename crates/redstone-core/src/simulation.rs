@@ -20,6 +20,7 @@ pub struct SimulationConfig {
     pub mode: RedstoneMode,
     pub seed: u64,
     pub strict: bool,
+    pub trace: bool,
     pub max_scheduled_ticks_per_tick: usize,
     pub max_chained_neighbor_updates: usize,
 }
@@ -30,6 +31,7 @@ impl Default for SimulationConfig {
             mode: RedstoneMode::Default,
             seed: 0,
             strict: true,
+            trace: false,
             max_scheduled_ticks_per_tick: DEFAULT_MAX_SCHEDULED_TICKS_PER_TICK,
             max_chained_neighbor_updates: DEFAULT_MAX_CHAINED_NEIGHBOR_UPDATES,
         }
@@ -60,7 +62,7 @@ pub struct Simulation<R: BlockRules> {
 }
 
 impl<R: BlockRules> Simulation<R> {
-    pub async fn load(
+    pub fn load(
         mut rules: R,
         world: SparseWorld,
         config: SimulationConfig,
@@ -111,7 +113,14 @@ impl<R: BlockRules> Simulation<R> {
         self.tick
     }
 
-    pub async fn initialize(&mut self) -> Result<(), SimulationError> {
+    pub fn set_trace_enabled(&mut self, enabled: bool) {
+        self.config.trace = enabled;
+        if !enabled {
+            self.trace.clear();
+        }
+    }
+
+    pub fn initialize(&mut self) -> Result<(), SimulationError> {
         let positions = self
             .world
             .iter_blocks()
@@ -124,7 +133,7 @@ impl<R: BlockRules> Simulation<R> {
         Ok(())
     }
 
-    pub async fn apply(&mut self, action: Action) -> Result<WorldDelta, SimulationError> {
+    pub fn apply(&mut self, action: Action) -> Result<WorldDelta, SimulationError> {
         let mut changes = Vec::new();
         self.push_trace(
             SimulationPhase::PreTick,
@@ -142,15 +151,17 @@ impl<R: BlockRules> Simulation<R> {
             events: changes,
             probes: Vec::new(),
         };
-        let _ = self.delta_tx.send(delta.clone());
+        if self.delta_tx.receiver_count() > 0 {
+            let _ = self.delta_tx.send(delta.clone());
+        }
         Ok(delta)
     }
 
-    pub async fn step(&mut self) -> Result<WorldDelta, SimulationError> {
-        self.step_with_actions(&[]).await
+    pub fn step(&mut self) -> Result<WorldDelta, SimulationError> {
+        self.step_with_actions(&[])
     }
 
-    pub async fn step_with_actions(
+    pub fn step_with_actions(
         &mut self,
         actions: &[Action],
     ) -> Result<WorldDelta, SimulationError> {
@@ -195,22 +206,24 @@ impl<R: BlockRules> Simulation<R> {
             events: changes,
             probes,
         };
-        let _ = self.delta_tx.send(delta.clone());
+        if self.delta_tx.receiver_count() > 0 {
+            let _ = self.delta_tx.send(delta.clone());
+        }
         Ok(delta)
     }
 
-    pub async fn run_until(
+    pub fn run_until(
         &mut self,
         target: GameTick,
     ) -> Result<Vec<WorldDelta>, SimulationError> {
         let mut deltas = Vec::new();
         while self.tick < target {
-            deltas.push(self.step().await?);
+            deltas.push(self.step()?);
         }
         Ok(deltas)
     }
 
-    pub async fn snapshot(&self) -> Snapshot {
+    pub fn snapshot(&self) -> Snapshot {
         Snapshot {
             tick: self.tick,
             world: self.world.clone(),
@@ -225,8 +238,8 @@ impl<R: BlockRules> Simulation<R> {
         self.delta_tx.subscribe()
     }
 
-    pub fn trace(&self) -> TraceLog {
-        TraceLog::new(self.trace.clone())
+    pub fn trace(&self) -> TraceLog<'_> {
+        TraceLog::borrowed(&self.trace)
     }
 
     pub fn pending_scheduled_ticks(&self) -> usize {
@@ -543,11 +556,7 @@ impl<R: BlockRules> Simulation<R> {
         changes: &mut Vec<WorldEvent>,
         callback: impl FnOnce(&mut R, &mut EventContext<'_>) -> Result<T, RulesError>,
     ) -> Result<Vec<NeighborTask>, SimulationError> {
-        let block_entities_before = self
-            .world
-            .block_entities()
-            .map(|(pos, data)| (*pos, data.clone()))
-            .collect();
+        let trace = self.config.trace.then_some(&mut self.trace);
         let mut ctx = EventContext::new(
             &mut self.world,
             self.config.mode,
@@ -560,15 +569,17 @@ impl<R: BlockRules> Simulation<R> {
             &mut self.scheduled_keys,
             &mut self.block_events,
             &mut self.block_event_keys,
-            &mut self.trace,
+            trace,
             changes,
         );
         callback(&mut self.rules, &mut ctx)?;
-        ctx.record_untracked_block_entity_changes(&block_entities_before);
         Ok(ctx.take_neighbor_tasks())
     }
 
     fn push_trace(&mut self, phase: SimulationPhase, kind: TraceKind) {
+        if !self.config.trace {
+            return;
+        }
         self.micro_step.0 += 1;
         self.trace.push(TraceEvent {
             tick: self.tick,

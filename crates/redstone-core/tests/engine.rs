@@ -123,18 +123,20 @@ impl BlockRules for MockRules {
         pos: BlockPos,
     ) -> Result<(), RulesError> {
         self.block_entity_order.push(("tick", pos));
-        let directly_mutated = ctx
+        if ctx
             .world
             .block_entity(pos)
-            .is_some_and(|data| data.kind == "test:mutable");
-        if directly_mutated && let Some(data) = ctx.world.block_entity_mut(pos) {
-            let counter = data
-                .fields
-                .get("counter")
-                .and_then(serde_json::Value::as_i64)
-                .unwrap_or(0);
-            data.fields
-                .insert("counter".to_owned(), serde_json::Value::from(counter + 1));
+            .is_some_and(|data| data.kind == "test:mutable")
+        {
+            ctx.update_block_entity(pos, |data| {
+                let counter = data
+                    .fields
+                    .get("counter")
+                    .and_then(serde_json::Value::as_i64)
+                    .unwrap_or(0);
+                data.fields
+                    .insert("counter".to_owned(), serde_json::Value::from(counter + 1));
+            });
         }
         ctx.neighbor_changed(NeighborUpdate {
             pos: pos.relative(redstone_core::Direction::Up),
@@ -175,8 +177,8 @@ impl BlockRules for MockRules {
     }
 }
 
-#[tokio::test]
-async fn successful_block_event_precedes_its_world_changes() {
+#[test]
+fn successful_block_event_precedes_its_world_changes() {
     let mut world = SparseWorld::new(AIR);
     world.set_block(BlockPos::ZERO, BLOCK).unwrap();
     let mut simulation = Simulation::load(
@@ -187,7 +189,6 @@ async fn successful_block_event_precedes_its_world_changes() {
         world,
         SimulationConfig::default(),
     )
-    .await
     .unwrap();
 
     let delta = simulation
@@ -197,7 +198,6 @@ async fn successful_block_event_precedes_its_world_changes() {
             location: [0.5, 0.5, 0.5],
             arrow: false,
         }])
-        .await
         .unwrap();
 
     assert_eq!(
@@ -223,8 +223,8 @@ async fn successful_block_event_precedes_its_world_changes() {
     );
 }
 
-#[tokio::test]
-async fn block_entity_creation_follows_its_block_update() {
+#[test]
+fn block_entity_creation_follows_its_block_update() {
     let data = BlockEntityData {
         kind: "test:block_entity".to_owned(),
         fields: BTreeMap::new(),
@@ -234,7 +234,6 @@ async fn block_entity_creation_follows_its_block_update() {
         SparseWorld::new(AIR),
         SimulationConfig::default(),
     )
-    .await
     .unwrap();
 
     let delta = simulation
@@ -242,7 +241,6 @@ async fn block_entity_creation_follows_its_block_update() {
             pos: BlockPos::ZERO,
             data: data.clone(),
         }])
-        .await
         .unwrap();
 
     assert_eq!(
@@ -265,8 +263,8 @@ async fn block_entity_creation_follows_its_block_update() {
     );
 }
 
-#[tokio::test]
-async fn direct_block_entity_mutation_is_recorded_as_an_update() {
+#[test]
+fn block_entity_update_is_recorded_as_an_update() {
     let mut world = SparseWorld::new(AIR);
     world.set_block(BlockPos::ZERO, BLOCK).unwrap();
     world.set_block_entity(
@@ -277,10 +275,9 @@ async fn direct_block_entity_mutation_is_recorded_as_an_update() {
         },
     );
     let mut simulation = Simulation::load(MockRules::default(), world, SimulationConfig::default())
-        .await
         .unwrap();
 
-    let delta = simulation.step().await.unwrap();
+    let delta = simulation.step().unwrap();
     let [
         WorldEvent::BlockEntity {
             change: BlockEntityChange::Update {
@@ -295,8 +292,8 @@ async fn direct_block_entity_mutation_is_recorded_as_an_update() {
     assert_eq!(new_data.fields["counter"], 1);
 }
 
-#[tokio::test]
-async fn scheduled_ticks_added_during_execution_wait_for_next_game_tick() {
+#[test]
+fn scheduled_ticks_added_during_execution_wait_for_next_game_tick() {
     let mut world = SparseWorld::new(AIR);
     world.set_block(BlockPos::ZERO, BLOCK).unwrap();
     let mut simulation = Simulation::load(
@@ -304,22 +301,21 @@ async fn scheduled_ticks_added_during_execution_wait_for_next_game_tick() {
         world,
         SimulationConfig {
             mode: RedstoneMode::Default,
+            trace: true,
             ..SimulationConfig::default()
         },
     )
-    .await
     .unwrap();
 
     simulation
         .step_with_actions(&[Action::UseBlock {
             pos: BlockPos::ZERO,
         }])
-        .await
         .unwrap();
     assert_eq!(simulation.rules().scheduled_executions, 1);
     assert_eq!(simulation.pending_scheduled_ticks(), 1);
 
-    simulation.step().await.unwrap();
+    simulation.step().unwrap();
     assert_eq!(simulation.rules().scheduled_executions, 2);
     let executed_ticks = simulation
         .trace()
@@ -332,19 +328,17 @@ async fn scheduled_ticks_added_during_execution_wait_for_next_game_tick() {
     assert_eq!(executed_ticks, vec![1, 2]);
 }
 
-#[tokio::test]
-async fn nested_neighbor_update_preempts_multi_update_continuation() {
+#[test]
+fn nested_neighbor_update_preempts_multi_update_continuation() {
     let mut world = SparseWorld::new(AIR);
     world.set_block(BlockPos::ZERO, BLOCK).unwrap();
     let mut simulation = Simulation::load(MockRules::default(), world, SimulationConfig::default())
-        .await
         .unwrap();
 
     simulation
         .step_with_actions(&[Action::PullLever {
             pos: BlockPos::ZERO,
         }])
-        .await
         .unwrap();
 
     assert_eq!(
@@ -357,8 +351,8 @@ async fn nested_neighbor_update_preempts_multi_update_continuation() {
     );
 }
 
-#[tokio::test]
-async fn block_entity_neighbor_updates_finish_before_the_next_registered_entity_ticks() {
+#[test]
+fn block_entity_neighbor_updates_finish_before_the_next_registered_entity_ticks() {
     let first = BlockPos::ZERO;
     let second = BlockPos::new(1, 0, 0);
     let mut world = SparseWorld::new(AIR);
@@ -373,10 +367,9 @@ async fn block_entity_neighbor_updates_finish_before_the_next_registered_entity_
         );
     }
     let mut simulation = Simulation::load(MockRules::default(), world, SimulationConfig::default())
-        .await
         .unwrap();
 
-    simulation.step().await.unwrap();
+    simulation.step().unwrap();
 
     assert_eq!(
         simulation.rules().block_entity_order,
@@ -389,19 +382,24 @@ async fn block_entity_neighbor_updates_finish_before_the_next_registered_entity_
     );
 }
 
-#[tokio::test]
-async fn deferred_scheduled_tick_is_queued_after_synchronous_neighbor_updates() {
+#[test]
+fn deferred_scheduled_tick_is_queued_after_synchronous_neighbor_updates() {
     let mut world = SparseWorld::new(AIR);
     world.set_block(BlockPos::ZERO, BLOCK).unwrap();
-    let mut simulation = Simulation::load(MockRules::default(), world, SimulationConfig::default())
-        .await
-        .unwrap();
+    let mut simulation = Simulation::load(
+        MockRules::default(),
+        world,
+        SimulationConfig {
+            trace: true,
+            ..SimulationConfig::default()
+        },
+    )
+    .unwrap();
 
     simulation
         .step_with_actions(&[Action::PressButton {
             pos: BlockPos::ZERO,
         }])
-        .await
         .unwrap();
 
     let ordered = simulation
@@ -417,8 +415,8 @@ async fn deferred_scheduled_tick_is_queued_after_synchronous_neighbor_updates() 
     assert_eq!(ordered, ["neighbor", "scheduled"]);
 }
 
-#[tokio::test]
-async fn deferred_block_changes_are_applied_after_synchronous_neighbor_updates() {
+#[test]
+fn deferred_block_changes_are_applied_after_synchronous_neighbor_updates() {
     let mut world = SparseWorld::new(AIR);
     world.set_block(BlockPos::ZERO, BLOCK).unwrap();
     let block_entity = BlockEntityData {
@@ -426,15 +424,20 @@ async fn deferred_block_changes_are_applied_after_synchronous_neighbor_updates()
         fields: BTreeMap::new(),
     };
     world.set_block_entity(BlockPos::ZERO, block_entity.clone());
-    let mut simulation = Simulation::load(MockRules::default(), world, SimulationConfig::default())
-        .await
-        .unwrap();
+    let mut simulation = Simulation::load(
+        MockRules::default(),
+        world,
+        SimulationConfig {
+            trace: true,
+            ..SimulationConfig::default()
+        },
+    )
+    .unwrap();
 
     let delta = simulation
         .step_with_actions(&[Action::BreakBlock {
             pos: BlockPos::ZERO,
         }])
-        .await
         .unwrap();
 
     let ordered = simulation
@@ -449,7 +452,7 @@ async fn deferred_block_changes_are_applied_after_synchronous_neighbor_updates()
         .collect::<Vec<_>>();
     assert_eq!(ordered, ["neighbor", "changed"]);
     assert_eq!(
-        simulation.snapshot().await.world.get_block(BlockPos::ZERO),
+        simulation.snapshot().world.get_block(BlockPos::ZERO),
         AIR
     );
     assert_eq!(
@@ -472,9 +475,9 @@ async fn deferred_block_changes_are_applied_after_synchronous_neighbor_updates()
     );
 }
 
-#[tokio::test]
-async fn identical_runs_produce_byte_identical_jsonl_and_vcd() {
-    async fn run() -> (Vec<u8>, Vec<u8>) {
+#[test]
+fn identical_runs_produce_byte_identical_jsonl_and_vcd() {
+    fn run() -> (Vec<u8>, Vec<u8>) {
         let mut world = SparseWorld::new(AIR);
         world.set_block(BlockPos::ZERO, BLOCK).unwrap();
         let mut simulation = Simulation::load(
@@ -482,10 +485,10 @@ async fn identical_runs_produce_byte_identical_jsonl_and_vcd() {
             world,
             SimulationConfig {
                 seed: 42,
+                trace: true,
                 ..SimulationConfig::default()
             },
         )
-        .await
         .unwrap();
         simulation.add_probe(
             "counter",
@@ -497,9 +500,8 @@ async fn identical_runs_produce_byte_identical_jsonl_and_vcd() {
             .step_with_actions(&[Action::UseBlock {
                 pos: BlockPos::ZERO,
             }])
-            .await
             .unwrap();
-        simulation.step().await.unwrap();
+        simulation.step().unwrap();
         let trace = simulation.trace();
         let mut jsonl = Vec::new();
         let mut vcd = Vec::new();
@@ -508,7 +510,7 @@ async fn identical_runs_produce_byte_identical_jsonl_and_vcd() {
         (jsonl, vcd)
     }
 
-    let first = run().await;
-    let second = run().await;
+    let first = run();
+    let second = run();
     assert_eq!(first, second);
 }

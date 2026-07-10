@@ -202,7 +202,7 @@ impl Java26Rules {
             let head_pos = movement.piston_pos.relative(movement.piston_facing);
             if self
                 .state(ctx.world.get_block(head_pos))
-                .is_ok_and(|state| state.name == "minecraft:piston_head")
+                .is_ok_and(|state| state.name.as_ref() == "minecraft:piston_head")
             {
                 self.set_piston_state(
                     ctx,
@@ -377,7 +377,7 @@ impl Java26Rules {
         let head_pos = pos.relative(facing);
         let head_propagates = self
             .state(ctx.world.get_block(head_pos))
-            .is_ok_and(|head| head.name == "minecraft:piston_head");
+            .is_ok_and(|head| head.name.as_ref() == "minecraft:piston_head");
         let retracted = self.changed_state(state_id, "extended", "false")?;
         let moving_base = self
             .registry
@@ -541,7 +541,6 @@ impl Java26Rules {
         ctx.remove_block_entity(pos);
         let old = ctx.set_block(pos, final_state, "piston_movement_settle")?;
         let final_state = self.apply_observer_lifecycle(ctx, pos, old, final_state, true, true)?;
-        self.sync_entity_sensor(pos, old, final_state);
         ctx.update_neighbors(pos, self.state(old)?.kind, None, None);
         self.queue_neighbor_shape_updates(ctx, pos);
         let push_direction = if extending {
@@ -578,8 +577,7 @@ impl Java26Rules {
         if old == state {
             return Ok(false);
         }
-        let state = self.apply_observer_lifecycle(ctx, pos, old, state, moved_by_piston, true)?;
-        self.sync_entity_sensor(pos, old, state);
+        self.apply_observer_lifecycle(ctx, pos, old, state, moved_by_piston, true)?;
         if update_shapes {
             self.update_neighbor_shapes(ctx, pos)?;
         }
@@ -866,11 +864,11 @@ fn moving_block_entity(
         ),
         (
             "moved_state_name".to_owned(),
-            serde_json::Value::String(moved_state.name.clone()),
+            serde_json::Value::String(moved_state.name.to_string()),
         ),
         (
             "moved_state_properties".to_owned(),
-            serde_json::to_value(&moved_state.properties).unwrap_or_default(),
+            serde_json::to_value(moved_state.properties.as_ref()).unwrap_or_default(),
         ),
         (
             "direction".to_owned(),

@@ -163,17 +163,14 @@ async fn main() -> Result<()> {
             trace,
             vcd,
             allow_static_fallback,
-        } => {
-            run(
+        } => run(
                 &scenario,
                 replay.as_deref(),
                 replay_anim,
                 trace.as_deref(),
                 vcd.as_deref(),
                 allow_static_fallback,
-            )
-            .await
-        }
+            ),
         Command::Test {
             path,
             replay,
@@ -194,16 +191,16 @@ async fn main() -> Result<()> {
             scenario,
             output,
             vcd,
-        } => run(&scenario, None, false, Some(&output), vcd.as_deref(), false).await,
+        } => run(&scenario, None, false, Some(&output), vcd.as_deref(), false),
         Command::Bench {
             blocks,
             active,
             ticks,
-        } => bench(blocks, active, ticks).await,
+        } => bench(blocks, active, ticks),
     }
 }
 
-async fn bench(blocks: usize, active: usize, ticks: usize) -> Result<()> {
+fn bench(blocks: usize, active: usize, ticks: usize) -> Result<()> {
     if blocks == 0 || ticks == 0 {
         bail!("blocks 和 ticks 必须大于 0");
     }
@@ -245,12 +242,12 @@ async fn bench(blocks: usize, active: usize, ticks: usize) -> Result<()> {
     let build_elapsed = started.elapsed();
     let sections = world.section_count();
     let rules = Java26Rules::new(registry);
-    let mut simulation = Simulation::load(rules, world, SimulationConfig::default()).await?;
+    let mut simulation = Simulation::load(rules, world, SimulationConfig::default())?;
     let mut samples = Vec::with_capacity(ticks);
     info!(blocks, active, sections, ?build_elapsed, "完成基准世界构建");
     for _ in 0..ticks {
         let started = Instant::now();
-        simulation.step().await?;
+        simulation.step()?;
         samples.push(started.elapsed());
     }
     samples.sort_unstable();
@@ -259,15 +256,15 @@ async fn bench(blocks: usize, active: usize, ticks: usize) -> Result<()> {
     println!("sections: {sections}");
     println!("build_ms: {:.3}", build_elapsed.as_secs_f64() * 1_000.0);
     println!(
-        "tick_p50_ms: {:.3}",
+        "tick_p50_ms: {:.6}",
         percentile(&samples, 50).as_secs_f64() * 1_000.0
     );
     println!(
-        "tick_p95_ms: {:.3}",
+        "tick_p95_ms: {:.6}",
         percentile(&samples, 95).as_secs_f64() * 1_000.0
     );
     println!(
-        "tick_p99_ms: {:.3}",
+        "tick_p99_ms: {:.6}",
         percentile(&samples, 99).as_secs_f64() * 1_000.0
     );
     if let Some(rss) = resident_memory_bytes() {
@@ -352,7 +349,7 @@ fn oracle_progress_style() -> Result<ProgressStyle> {
     )?)
 }
 
-async fn run(
+fn run(
     scenario_path: &Path,
     replay_path: Option<&Path>,
     replay_anim: bool,
@@ -367,8 +364,7 @@ async fn run(
         trace_path,
         vcd_path,
         allow_static_fallback,
-    )
-    .await?;
+    )?;
     println!("ticks: {}", summary.ticks);
     println!("blocks: {}", summary.blocks);
     println!("trace_events: {}", summary.trace_events);
@@ -376,7 +372,7 @@ async fn run(
     Ok(())
 }
 
-async fn execute_scenario(
+fn execute_scenario(
     scenario_path: &Path,
     replay_path: Option<&Path>,
     replay_anim: bool,
@@ -416,15 +412,15 @@ async fn execute_scenario(
             mode: scenario.mode,
             seed: scenario.seed,
             strict: scenario.strict && !allow_static_fallback,
+            trace: trace_path.is_some() || vcd_path.is_some(),
             ..SimulationConfig::default()
         },
-    )
-    .await?;
+    )?;
     for probe in &scenario.probes {
         simulation.add_probe(&probe.name, probe.probe.clone());
     }
     if scenario.source.initialization == InitializationMode::Notify {
-        simulation.initialize().await?;
+        simulation.initialize()?;
     }
 
     let mut replay = if let Some(path) = replay_path {
@@ -473,7 +469,7 @@ async fn execute_scenario(
             current_actions.push(actions[action_index].1.clone());
             action_index += 1;
         }
-        let delta = simulation.step_with_actions(&current_actions).await?;
+        let delta = simulation.step_with_actions(&current_actions)?;
         let completed_tick = delta.tick.0;
         if let Some(replay) = replay.as_mut() {
             replay.record_delta(&delta).with_context(|| {
@@ -651,8 +647,7 @@ async fn execute_test_scenario(
         trace_path.as_deref(),
         None,
         allow_static_fallback,
-    )
-    .await;
+    );
     let comparison = if let (Ok(_), Some(trace_path)) = (&result, trace_path.as_deref()) {
         compare_with_oracle(scenario, trace_path).await
     } else {

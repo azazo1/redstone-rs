@@ -20,7 +20,6 @@ impl Java26Rules {
         let air = self.registry.air_state();
         ctx.set_block(pos, air, cause)?;
         let state = self.apply_observer_lifecycle(ctx, pos, old_state_id, air, true, true)?;
-        self.sync_entity_sensor(pos, old_state_id, state);
         self.affect_neighbors_after_removal(ctx, pos, &old_state, false)?;
         self.update_indirect_neighbor_shapes(ctx, pos, &old_state)?;
         ctx.update_neighbors(pos, old_state.kind, None, None);

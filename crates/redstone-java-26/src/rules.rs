@@ -27,7 +27,6 @@ pub struct Java26Rules {
     comparator_outputs: BTreeMap<BlockPos, u8>,
     torch_toggles: VecDeque<(u64, BlockPos)>,
     event_counts: BTreeMap<String, i64>,
-    entity_sensors: BTreeSet<BlockPos>,
 }
 
 impl Java26Rules {
@@ -37,7 +36,6 @@ impl Java26Rules {
             comparator_outputs: BTreeMap::new(),
             torch_toggles: VecDeque::new(),
             event_counts: BTreeMap::new(),
-            entity_sensors: BTreeSet::new(),
         }
     }
 
@@ -76,7 +74,6 @@ impl Java26Rules {
             return Ok(false);
         }
         let state = self.apply_observer_lifecycle(ctx, pos, old, requested_state, true, true)?;
-        self.sync_entity_sensor(pos, old, state);
         if state != requested_state {
             return Ok(true);
         }
@@ -205,7 +202,6 @@ impl Java26Rules {
             return Ok(false);
         }
         let state = self.apply_observer_lifecycle(ctx, pos, old, state, false, true)?;
-        self.sync_entity_sensor(pos, old, state);
         let definition = self.state(state)?.clone();
         self.update_neighbor_shapes(ctx, pos)?;
         self.update_diode_output_neighbors(ctx, pos, &definition);
@@ -223,32 +219,9 @@ impl Java26Rules {
         if old == state {
             return Ok(false);
         }
-        let state = self.apply_observer_lifecycle(ctx, pos, old, state, false, true)?;
-        self.sync_entity_sensor(pos, old, state);
+        self.apply_observer_lifecycle(ctx, pos, old, state, false, true)?;
         self.update_neighbor_shapes(ctx, pos)?;
         Ok(true)
-    }
-
-    fn sync_entity_sensor(
-        &mut self,
-        pos: BlockPos,
-        old_state: BlockStateId,
-        new_state: BlockStateId,
-    ) {
-        if self
-            .registry
-            .state(old_state)
-            .is_some_and(|state| tracks_entity_collisions(&state.behavior))
-        {
-            self.entity_sensors.remove(&pos);
-        }
-        if self
-            .registry
-            .state(new_state)
-            .is_some_and(|state| tracks_entity_collisions(&state.behavior))
-        {
-            self.entity_sensors.insert(pos);
-        }
     }
 
     fn is_powered(&self, world: &SparseWorld, pos: BlockPos) -> bool {
@@ -509,8 +482,7 @@ impl Java26Rules {
                     return Ok(());
                 }
                 let new_state = self.changed_state(state_id, "power", new_power.to_string())?;
-                let old_state = ctx.set_block(initial_pos, new_state, "default_wire")?;
-                self.sync_entity_sensor(initial_pos, old_state, new_state);
+                ctx.set_block(initial_pos, new_state, "default_wire")?;
                 self.update_neighbor_shapes(ctx, initial_pos)?;
                 for candidate in default_wire_update_positions(initial_pos) {
                     ctx.update_neighbors(candidate, state.kind, None, None);
@@ -926,7 +898,7 @@ impl BlockRules for Java26Rules {
     fn block_name(&self, state: BlockStateId) -> &str {
         self.registry
             .state(state)
-            .map_or("minecraft:unknown", |state| state.name.as_str())
+            .map_or("minecraft:unknown", |state| state.name.as_ref())
     }
 
     fn is_supported(&self, state: BlockStateId) -> bool {
@@ -936,14 +908,7 @@ impl BlockRules for Java26Rules {
     }
 
     fn load_world(&mut self, world: &SparseWorld) -> Result<(), RulesError> {
-        self.entity_sensors.clear();
-        self.entity_sensors
-            .extend(world.iter_blocks().filter_map(|(pos, state)| {
-                self.registry
-                    .state(state)
-                    .is_some_and(|state| tracks_entity_collisions(&state.behavior))
-                    .then_some(pos)
-            }));
+        let _ = world;
         Ok(())
     }
 
@@ -958,7 +923,6 @@ impl BlockRules for Java26Rules {
         for pos in positions {
             let state_id = ctx.world.get_block(*pos);
             let state = self.state(state_id)?.clone();
-            self.sync_entity_sensor(*pos, self.registry.air_state(), state_id);
             match state.behavior {
                 BlockBehavior::Wire => self.update_wire(ctx, *pos, None)?,
                 BlockBehavior::Torch { .. } => self.refresh_torch(ctx, *pos, state_id)?,
@@ -1080,7 +1044,7 @@ impl BlockRules for Java26Rules {
             self.repair_shape_after_neighbor_changed(ctx, update.pos, direction)?
         };
         let state = self.state(state_id)?.clone();
-        if state.name == "minecraft:piston_head" {
+        if state.name.as_ref() == "minecraft:piston_head" {
             self.refresh_piston_head(ctx, update.pos, &state, update)?;
         }
         match state.behavior {
@@ -1289,13 +1253,17 @@ impl BlockRules for Java26Rules {
 
     fn tick_entities(&mut self, ctx: &mut EventContext<'_>) -> Result<(), RulesError> {
         self.tick_minimal_entities(ctx)?;
-        let sensors = self.entity_sensors.iter().copied().collect::<Vec<_>>();
-        for pos in sensors {
+        let mut occupied_positions = ctx
+            .world
+            .entities()
+            .map(|(_, entity)| entity_block_pos(entity.position))
+            .collect::<Vec<_>>();
+        occupied_positions.sort_unstable();
+        occupied_positions.dedup();
+        for pos in occupied_positions {
             let state = self.state(ctx.world.get_block(pos))?.clone();
             if tracks_entity_collisions(&state.behavior) {
                 self.refresh_entity_sensor(ctx, pos, &state, false)?;
-            } else {
-                self.entity_sensors.remove(&pos);
             }
         }
         Ok(())

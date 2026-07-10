@@ -43,7 +43,7 @@ fn supports_face(
     face: Direction,
     support_type: SupportType,
 ) -> bool {
-    let moving_source_face = (state.name == "minecraft:moving_piston")
+    let moving_source_face = (state.name.as_ref() == "minecraft:moving_piston")
         .then(|| world.block_entity(pos))
         .flatten()
         .filter(|data| data.fields.get("source").and_then(|value| value.as_bool()) == Some(true))

@@ -74,17 +74,17 @@ impl StructureStateResolver for RegistryResolver {
     }
 }
 
-#[tokio::test]
-async fn default_wire_mode_displays_each_decimal_input_with_seven_segments() {
-    assert_all_digits(RedstoneMode::Default).await;
+#[test]
+fn default_wire_mode_displays_each_decimal_input_with_seven_segments() {
+    assert_all_digits(RedstoneMode::Default);
 }
 
-#[tokio::test]
-async fn experimental_wire_mode_displays_each_decimal_input_with_seven_segments() {
-    assert_all_digits(RedstoneMode::Experimental).await;
+#[test]
+fn experimental_wire_mode_displays_each_decimal_input_with_seven_segments() {
+    assert_all_digits(RedstoneMode::Experimental);
 }
 
-async fn assert_all_digits(mode: RedstoneMode) {
+fn assert_all_digits(mode: RedstoneMode) {
     let schematic =
         PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../assets/schematics/seg7.litematic");
     let mut resolver = RegistryResolver(Java26Registry::new());
@@ -97,7 +97,7 @@ async fn assert_all_digits(mode: RedstoneMode) {
             resolver
                 .0
                 .state(state_id)
-                .is_some_and(|state| state.name == "minecraft:lever")
+                .is_some_and(|state| state.name.as_ref() == "minecraft:lever")
                 .then_some(pos)
         })
         .collect::<Vec<_>>();
@@ -111,7 +111,7 @@ async fn assert_all_digits(mode: RedstoneMode) {
             resolver
                 .0
                 .state(*state_id)
-                .is_some_and(|state| state.name == "minecraft:redstone_lamp")
+                .is_some_and(|state| state.name.as_ref() == "minecraft:redstone_lamp")
         })
         .count();
     assert_eq!(lamp_count, 21);
@@ -121,9 +121,9 @@ async fn assert_all_digits(mode: RedstoneMode) {
         mode,
         ..SimulationConfig::default()
     };
-    let mut simulation = Simulation::load(rules, loaded.world, config).await.unwrap();
-    simulation.initialize().await.unwrap();
-    simulation.run_until(GameTick(20)).await.unwrap();
+    let mut simulation = Simulation::load(rules, loaded.world, config).unwrap();
+    simulation.initialize().unwrap();
+    simulation.run_until(GameTick(20)).unwrap();
 
     assert_digit(&simulation, 9, mode);
     for digit in (0..9).rev() {
@@ -131,16 +131,14 @@ async fn assert_all_digits(mode: RedstoneMode) {
         let selected = levers[9 - digit];
         simulation
             .step_with_actions(&[Action::PullLever { pos: previous }])
-            .await
             .unwrap();
         let settled_tick = GameTick(simulation.current_tick().0 + 20);
-        simulation.run_until(settled_tick).await.unwrap();
+        simulation.run_until(settled_tick).unwrap();
         simulation
             .step_with_actions(&[Action::PullLever { pos: selected }])
-            .await
             .unwrap();
         let settled_tick = GameTick(simulation.current_tick().0 + 20);
-        simulation.run_until(settled_tick).await.unwrap();
+        simulation.run_until(settled_tick).unwrap();
         assert_digit(&simulation, digit, mode);
     }
 }

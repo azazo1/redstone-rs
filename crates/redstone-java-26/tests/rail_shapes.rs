@@ -45,8 +45,8 @@ fn shape(simulation: &Simulation<Java26Rules>, pos: BlockPos) -> &str {
         .unwrap()
 }
 
-#[tokio::test]
-async fn rail_pair_repairs_to_an_east_west_line() {
+#[test]
+fn rail_pair_repairs_to_an_east_west_line() {
     let mut registry = Java26Registry::new();
     let rail = rail(&mut registry);
     let mut world = SparseWorld::new(registry.air_state());
@@ -54,17 +54,16 @@ async fn rail_pair_repairs_to_an_east_west_line() {
     world.set_block(BlockPos::new(1, 0, 0), rail).unwrap();
     let rules = Java26Rules::new(registry);
     let mut simulation = Simulation::load(rules, world, SimulationConfig::default())
-        .await
         .unwrap();
 
-    simulation.initialize().await.unwrap();
+    simulation.initialize().unwrap();
 
     assert_eq!(shape(&simulation, BlockPos::ZERO), "east_west");
     assert_eq!(shape(&simulation, BlockPos::new(1, 0, 0)), "east_west");
 }
 
-#[tokio::test]
-async fn ordinary_rail_forms_a_south_east_corner() {
+#[test]
+fn ordinary_rail_forms_a_south_east_corner() {
     let mut registry = Java26Registry::new();
     let rail = rail(&mut registry);
     let mut world = SparseWorld::new(registry.air_state());
@@ -77,16 +76,15 @@ async fn ordinary_rail_forms_a_south_east_corner() {
     }
     let rules = Java26Rules::new(registry);
     let mut simulation = Simulation::load(rules, world, SimulationConfig::default())
-        .await
         .unwrap();
 
-    simulation.initialize().await.unwrap();
+    simulation.initialize().unwrap();
 
     assert_eq!(shape(&simulation, BlockPos::ZERO), "south_east");
 }
 
-#[tokio::test]
-async fn lower_rail_ascends_toward_an_upper_neighbor() {
+#[test]
+fn lower_rail_ascends_toward_an_upper_neighbor() {
     let mut registry = Java26Registry::new();
     let rail = rail(&mut registry);
     let mut world = SparseWorld::new(registry.air_state());
@@ -94,17 +92,16 @@ async fn lower_rail_ascends_toward_an_upper_neighbor() {
     world.set_block(BlockPos::new(1, 1, 0), rail).unwrap();
     let rules = Java26Rules::new(registry);
     let mut simulation = Simulation::load(rules, world, SimulationConfig::default())
-        .await
         .unwrap();
 
-    simulation.initialize().await.unwrap();
+    simulation.initialize().unwrap();
 
     assert_eq!(shape(&simulation, BlockPos::ZERO), "ascending_east");
     assert_eq!(shape(&simulation, BlockPos::new(1, 1, 0)), "east_west");
 }
 
-#[tokio::test]
-async fn straight_rail_types_never_form_a_corner() {
+#[test]
+fn straight_rail_types_never_form_a_corner() {
     let mut registry = Java26Registry::new();
     let rail = powered_rail(&mut registry);
     let mut world = SparseWorld::new(registry.air_state());
@@ -117,10 +114,9 @@ async fn straight_rail_types_never_form_a_corner() {
     }
     let rules = Java26Rules::new(registry);
     let mut simulation = Simulation::load(rules, world, SimulationConfig::default())
-        .await
         .unwrap();
 
-    simulation.initialize().await.unwrap();
+    simulation.initialize().unwrap();
 
     assert!(matches!(
         shape(&simulation, BlockPos::ZERO),
@@ -128,8 +124,8 @@ async fn straight_rail_types_never_form_a_corner() {
     ));
 }
 
-#[tokio::test]
-async fn powered_three_way_rail_uses_the_vanilla_corner_priority() {
+#[test]
+fn powered_three_way_rail_uses_the_vanilla_corner_priority() {
     for (powered, expected) in [(false, "south_east"), (true, "north_east")] {
         let mut registry = Java26Registry::new();
         let rail = rail(&mut registry);
@@ -148,10 +144,9 @@ async fn powered_three_way_rail_uses_the_vanilla_corner_priority() {
         }
         let rules = Java26Rules::new(registry);
         let mut simulation = Simulation::load(rules, world, SimulationConfig::default())
-            .await
             .unwrap();
 
-        simulation.initialize().await.unwrap();
+        simulation.initialize().unwrap();
 
         assert_eq!(shape(&simulation, BlockPos::ZERO), expected);
     }

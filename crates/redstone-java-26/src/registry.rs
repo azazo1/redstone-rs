@@ -21,7 +21,7 @@ pub enum PushReaction {
     PushOnly,
 }
 
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub enum BlockBehavior {
     Air,
     Static,
@@ -66,12 +66,12 @@ pub enum BlockBehavior {
     UnsupportedActive,
 }
 
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct StateDefinition {
     pub id: BlockStateId,
     pub kind: BlockKindId,
-    pub name: String,
-    pub properties: BTreeMap<String, String>,
+    pub name: Arc<str>,
+    pub properties: Arc<BTreeMap<String, String>>,
     pub behavior: BlockBehavior,
     pub redstone_conductor: bool,
     pub sturdy_faces: [bool; 6],
@@ -172,9 +172,9 @@ impl Java26Registry {
             .state(state)
             .cloned()
             .ok_or(StateResolveError::UnknownState(state))?;
-        let mut properties = definition.properties;
+        let mut properties = definition.properties.as_ref().clone();
         properties.insert(name.to_owned(), value.into());
-        self.resolve_state(&definition.name, &properties)
+        self.resolve_state(definition.name.as_ref(), &properties)
     }
 
     pub fn state_by_name(
@@ -226,8 +226,8 @@ impl StateResolver for Java26Registry {
         self.states[id.0 as usize] = Some(StateDefinition {
             id,
             kind,
-            name: name.to_owned(),
-            properties: properties.clone(),
+            name: Arc::from(name),
+            properties: Arc::new(properties.clone()),
             behavior: traits.behavior,
             redstone_conductor: traits.redstone_conductor,
             sturdy_faces: traits.sturdy_faces,
