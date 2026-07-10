@@ -3,9 +3,9 @@ use std::collections::{BTreeSet, VecDeque};
 use thiserror::Error;
 
 use crate::{
-    Action, BlockChange, BlockEvent, BlockKindId, BlockPos, BlockStateId, Direction, GameTick,
-    MicroStep, NeighborTask, NeighborUpdate, Probe, ProbeValue, RedstoneMode, ScheduledTick,
-    SimulationPhase, SparseWorld, TickPriority, TraceEvent, TraceKind, WorldError,
+    Action, BlockChange, BlockEvent, BlockKindId, BlockPos, BlockStateId, DeferredBlockChange,
+    Direction, GameTick, MicroStep, NeighborTask, NeighborUpdate, Probe, ProbeValue, RedstoneMode,
+    ScheduledTick, SimulationPhase, SparseWorld, TickPriority, TraceEvent, TraceKind, WorldError,
 };
 
 pub trait BlockRules: Send {
@@ -59,7 +59,11 @@ pub trait BlockRules: Send {
         Ok(())
     }
 
-    fn tick_block_entities(&mut self, _ctx: &mut EventContext<'_>) -> Result<(), RulesError> {
+    fn tick_block_entity(
+        &mut self,
+        _ctx: &mut EventContext<'_>,
+        _pos: BlockPos,
+    ) -> Result<(), RulesError> {
         Ok(())
     }
 
@@ -173,6 +177,47 @@ impl<'a> EventContext<'a> {
 
     pub fn has_scheduled_tick(&self, pos: BlockPos, block: BlockKindId) -> bool {
         self.scheduled_keys.contains(&(pos, block))
+    }
+
+    pub fn schedule_tick_after_neighbors(
+        &mut self,
+        pos: BlockPos,
+        block: BlockKindId,
+        delay: u64,
+        priority: TickPriority,
+    ) {
+        self.neighbor_tasks
+            .push(NeighborTask::ScheduleTickAfterNeighbors {
+                pos,
+                block,
+                delay,
+                priority,
+            });
+    }
+
+    pub fn set_block_and_update_neighbors_after_neighbors(
+        &mut self,
+        pos: BlockPos,
+        state: BlockStateId,
+        cause: impl Into<String>,
+        source_block: BlockKindId,
+    ) {
+        self.neighbor_tasks
+            .push(NeighborTask::SetBlockAndUpdateNeighborsAfterNeighbors {
+                pos,
+                state,
+                cause: cause.into(),
+                source_block,
+            });
+    }
+
+    pub fn apply_block_changes_after_neighbors(
+        &mut self,
+        changes: Vec<DeferredBlockChange>,
+        follow_up: Vec<NeighborTask>,
+    ) {
+        self.neighbor_tasks
+            .push(NeighborTask::ApplyBlockChangesAfterNeighbors { changes, follow_up });
     }
 
     pub fn queue_block_event(&mut self, event: BlockEvent) -> bool {

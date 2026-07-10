@@ -15,6 +15,7 @@ import net.minecraft.world.level.BlockEventData;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.Rotation;
+import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.redstone.Orientation;
 import net.minecraft.world.ticks.ScheduledTick;
 
@@ -28,6 +29,7 @@ final class OracleTraceRecorder implements AutoCloseable {
     private final long baseGameTime;
     private final long baseSubTickOrder;
     private final List<JsonObject> samples = new ArrayList<>();
+    private boolean blockChangesEnabled;
     private int tick;
 
     OracleTraceRecorder(Scenario scenario, FrameGeometry frame, GameTestHelper helper) {
@@ -49,6 +51,10 @@ final class OracleTraceRecorder implements AutoCloseable {
 
     void setTick(int tick) {
         this.tick = tick;
+    }
+
+    void enableBlockChanges() {
+        this.blockChangesEnabled = true;
     }
 
     void writePending(BufferedWriter writer) throws IOException {
@@ -115,6 +121,25 @@ final class OracleTraceRecorder implements AutoCloseable {
         }
         JsonObject root = sample("scheduled_tick_executed", pos);
         root.addProperty("block", blockName(block));
+        samples.add(root);
+    }
+
+    void recordBlockChange(
+        Level updatedLevel,
+        BlockPos absolutePos,
+        BlockState oldState,
+        BlockState newState
+    ) {
+        if (!blockChangesEnabled) {
+            return;
+        }
+        Scenario.Pos pos = normalize(updatedLevel, absolutePos);
+        if (pos == null) {
+            return;
+        }
+        JsonObject root = sample("block_changed", pos);
+        root.addProperty("old_state", Block.getId(oldState));
+        root.addProperty("new_state", Block.getId(newState));
         samples.add(root);
     }
 

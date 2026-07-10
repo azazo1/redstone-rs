@@ -521,13 +521,15 @@ struct OracleProbeSample {
     value: serde_json::Value,
 }
 
-#[derive(Debug, serde::Deserialize, Eq, PartialEq)]
+#[derive(Clone, Debug, serde::Deserialize, Eq, PartialEq)]
 struct OracleNeighborSample {
     tick: u64,
     pos: BlockPos,
+    moved_by_piston: bool,
+    orientation: Option<u8>,
 }
 
-#[derive(Debug, serde::Deserialize, Eq, PartialEq)]
+#[derive(Clone, Debug, serde::Deserialize, Eq, PartialEq)]
 struct OracleScheduledTickQueuedSample {
     tick: u64,
     pos: BlockPos,
@@ -536,18 +538,36 @@ struct OracleScheduledTickQueuedSample {
     sub_tick_order: i64,
 }
 
-#[derive(Debug, serde::Deserialize, Eq, PartialEq)]
+#[derive(Clone, Debug, serde::Deserialize, Eq, PartialEq)]
 struct OracleScheduledTickExecutedSample {
     tick: u64,
     pos: BlockPos,
 }
 
-#[derive(Debug, serde::Deserialize, Eq, PartialEq)]
+#[derive(Clone, Debug, serde::Deserialize, Eq, PartialEq)]
 struct OracleBlockEventSample {
     tick: u64,
     pos: BlockPos,
     param_a: i32,
     param_b: i32,
+}
+
+#[derive(Clone, Debug, serde::Deserialize, Eq, PartialEq)]
+struct OracleBlockChangeSample {
+    tick: u64,
+    pos: BlockPos,
+    old_state: u32,
+    new_state: u32,
+}
+
+#[derive(Debug, Eq, PartialEq)]
+enum OracleMicroSample {
+    Neighbor(OracleNeighborSample),
+    ScheduledTickQueued(OracleScheduledTickQueuedSample),
+    ScheduledTickExecuted(OracleScheduledTickExecutedSample),
+    BlockEventQueued(OracleBlockEventSample),
+    BlockEventExecuted(OracleBlockEventSample),
+    BlockChanged(OracleBlockChangeSample),
 }
 
 fn is_probe_sample_oracle(output: &[u8]) -> Result<bool> {
@@ -621,6 +641,77 @@ fn compare_oracle_samples_v2(rust_trace: &[u8], java_output: &[u8]) -> Result<()
         .filter(|line| !line.is_empty())
         .map(|line| serde_json::from_slice::<TraceEvent>(line).context("解析 Rust 轨迹失败"))
         .collect::<Result<Vec<_>>>()?;
+    let rust_micro = rust_events
+        .iter()
+        .filter_map(|event| match event.kind {
+            TraceKind::NeighborUpdate {
+                pos,
+                moved_by_piston,
+                orientation,
+                ..
+            } => Some(OracleMicroSample::Neighbor(OracleNeighborSample {
+                tick: event.tick.0,
+                pos,
+                moved_by_piston,
+                orientation,
+            })),
+            TraceKind::ScheduledTickQueued {
+                pos,
+                trigger_tick,
+                priority,
+                sub_tick_order,
+                ..
+            } => Some(OracleMicroSample::ScheduledTickQueued(
+                OracleScheduledTickQueuedSample {
+                    tick: event.tick.0,
+                    pos,
+                    trigger_tick: trigger_tick.0,
+                    priority,
+                    sub_tick_order,
+                },
+            )),
+            TraceKind::ScheduledTickExecuted { pos, .. } => Some(
+                OracleMicroSample::ScheduledTickExecuted(OracleScheduledTickExecutedSample {
+                    tick: event.tick.0,
+                    pos,
+                }),
+            ),
+            TraceKind::BlockEventQueued {
+                pos,
+                param_a,
+                param_b,
+                ..
+            } => Some(OracleMicroSample::BlockEventQueued(OracleBlockEventSample {
+                tick: event.tick.0,
+                pos,
+                param_a,
+                param_b,
+            })),
+            TraceKind::BlockEventExecuted {
+                pos,
+                param_a,
+                param_b,
+                ..
+            } => Some(OracleMicroSample::BlockEventExecuted(OracleBlockEventSample {
+                tick: event.tick.0,
+                pos,
+                param_a,
+                param_b,
+            })),
+            TraceKind::BlockChanged {
+                pos,
+                old_state,
+                new_state,
+                ..
+            } => Some(OracleMicroSample::BlockChanged(OracleBlockChangeSample {
+                tick: event.tick.0,
+                pos,
+                old_state: old_state.0,
+                new_state: new_state.0,
+            })),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
     let rust_probes = rust_events
         .iter()
         .filter_map(|event| match &event.kind {
@@ -635,9 +726,16 @@ fn compare_oracle_samples_v2(rust_trace: &[u8], java_output: &[u8]) -> Result<()
     let rust_neighbors = rust_events
         .iter()
         .filter_map(|event| match event.kind {
-            TraceKind::NeighborUpdate { pos, .. } => Some(OracleNeighborSample {
+            TraceKind::NeighborUpdate {
+                pos,
+                moved_by_piston,
+                orientation,
+                ..
+            } => Some(OracleNeighborSample {
                 tick: event.tick.0,
                 pos,
+                moved_by_piston,
+                orientation,
             }),
             _ => None,
         })
@@ -707,6 +805,23 @@ fn compare_oracle_samples_v2(rust_trace: &[u8], java_output: &[u8]) -> Result<()
             _ => None,
         })
         .collect::<Vec<_>>();
+    let rust_block_changes = rust_events
+        .iter()
+        .filter_map(|event| match event.kind {
+            TraceKind::BlockChanged {
+                pos,
+                old_state,
+                new_state,
+                ..
+            } => Some(OracleBlockChangeSample {
+                tick: event.tick.0,
+                pos,
+                old_state: old_state.0,
+                new_state: new_state.0,
+            }),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
 
     let mut java_probes = Vec::new();
     let mut java_neighbors = Vec::new();
@@ -714,6 +829,8 @@ fn compare_oracle_samples_v2(rust_trace: &[u8], java_output: &[u8]) -> Result<()
     let mut java_scheduled_executed = Vec::new();
     let mut java_block_events_queued = Vec::new();
     let mut java_block_events_executed = Vec::new();
+    let mut java_block_changes = Vec::new();
+    let mut java_micro = Vec::new();
     for line in java_output
         .split(|byte| *byte == b'\n')
         .skip(1)
@@ -726,30 +843,47 @@ fn compare_oracle_samples_v2(rust_trace: &[u8], java_output: &[u8]) -> Result<()
                 serde_json::from_value::<OracleProbeSample>(value)
                     .context("解析 Java oracle 探针样本失败")?,
             ),
-            Some("neighbor_update") => java_neighbors.push(
-                serde_json::from_value::<OracleNeighborSample>(value)
-                    .context("解析 Java oracle 邻居更新样本失败")?,
-            ),
-            Some("scheduled_tick_queued") => java_scheduled_queued.push(
-                serde_json::from_value::<OracleScheduledTickQueuedSample>(value)
-                    .context("解析 Java oracle 计划刻入队样本失败")?,
-            ),
-            Some("scheduled_tick_executed") => java_scheduled_executed.push(
-                serde_json::from_value::<OracleScheduledTickExecutedSample>(value)
-                    .context("解析 Java oracle 计划刻执行样本失败")?,
-            ),
-            Some("block_event_queued") => java_block_events_queued.push(
-                serde_json::from_value::<OracleBlockEventSample>(value)
-                    .context("解析 Java oracle 方块事件入队样本失败")?,
-            ),
-            Some("block_event_executed") => java_block_events_executed.push(
-                serde_json::from_value::<OracleBlockEventSample>(value)
-                    .context("解析 Java oracle 方块事件执行样本失败")?,
-            ),
+            Some("neighbor_update") => {
+                let sample = serde_json::from_value::<OracleNeighborSample>(value)
+                    .context("解析 Java oracle 邻居更新样本失败")?;
+                java_micro.push(OracleMicroSample::Neighbor(sample.clone()));
+                java_neighbors.push(sample);
+            }
+            Some("scheduled_tick_queued") => {
+                let sample = serde_json::from_value::<OracleScheduledTickQueuedSample>(value)
+                    .context("解析 Java oracle 计划刻入队样本失败")?;
+                java_micro.push(OracleMicroSample::ScheduledTickQueued(sample.clone()));
+                java_scheduled_queued.push(sample);
+            }
+            Some("scheduled_tick_executed") => {
+                let sample = serde_json::from_value::<OracleScheduledTickExecutedSample>(value)
+                    .context("解析 Java oracle 计划刻执行样本失败")?;
+                java_micro.push(OracleMicroSample::ScheduledTickExecuted(sample.clone()));
+                java_scheduled_executed.push(sample);
+            }
+            Some("block_event_queued") => {
+                let sample = serde_json::from_value::<OracleBlockEventSample>(value)
+                    .context("解析 Java oracle 方块事件入队样本失败")?;
+                java_micro.push(OracleMicroSample::BlockEventQueued(sample.clone()));
+                java_block_events_queued.push(sample);
+            }
+            Some("block_event_executed") => {
+                let sample = serde_json::from_value::<OracleBlockEventSample>(value)
+                    .context("解析 Java oracle 方块事件执行样本失败")?;
+                java_micro.push(OracleMicroSample::BlockEventExecuted(sample.clone()));
+                java_block_events_executed.push(sample);
+            }
+            Some("block_changed") => {
+                let sample = serde_json::from_value::<OracleBlockChangeSample>(value)
+                    .context("解析 Java oracle 方块状态写入样本失败")?;
+                java_micro.push(OracleMicroSample::BlockChanged(sample.clone()));
+                java_block_changes.push(sample);
+            }
             other => bail!("Java oracle 返回未知样本类型: {other:?}"),
         }
     }
     compare_sample_vectors("探针", &rust_probes, &java_probes)?;
+    compare_sample_vectors("全局微轨迹", &rust_micro, &java_micro)?;
     compare_sample_vectors("邻居更新", &rust_neighbors, &java_neighbors)?;
     compare_sample_vectors(
         "计划刻入队",
@@ -770,7 +904,8 @@ fn compare_oracle_samples_v2(rust_trace: &[u8], java_output: &[u8]) -> Result<()
         "方块事件执行",
         &rust_block_events_executed,
         &java_block_events_executed,
-    )
+    )?;
+    compare_sample_vectors("方块状态写入", &rust_block_changes, &java_block_changes)
 }
 
 fn compare_sample_vectors<T>(kind: &str, rust: &[T], java: &[T]) -> Result<()>
@@ -785,15 +920,17 @@ where
         .zip(java)
         .position(|(rust, java)| rust != java)
         .unwrap_or(rust.len().min(java.len()));
+    let rust_start = difference.saturating_sub(4);
+    let java_start = difference.saturating_sub(4);
     let rust_end = difference.saturating_add(8).min(rust.len());
     let java_end = difference.saturating_add(8).min(java.len());
     bail!(
-        "Rust 与 Java oracle {kind}不一致, 样本 {}, Rust={:?}, Java={:?}, Rust 后续={:?}, Java 后续={:?}",
+        "Rust 与 Java oracle {kind}不一致, 样本 {}, Rust={:?}, Java={:?}, Rust 上下文={:?}, Java 上下文={:?}",
         difference + 1,
         rust.get(difference),
         java.get(difference),
-        &rust[difference..rust_end],
-        &java[difference..java_end]
+        &rust[rust_start..rust_end],
+        &java[java_start..java_end]
     )
 }
 
@@ -940,16 +1077,18 @@ mod tests {
 {"tick":1,"micro_step":2,"phase":"pre_tick","event":"scheduled_tick_queued","pos":{"x":0,"y":0,"z":0},"block":1,"trigger_tick":9,"priority":0,"sub_tick_order":0}
 {"tick":1,"micro_step":3,"phase":"pre_tick","event":"block_event_queued","pos":{"x":1,"y":0,"z":0},"block":2,"param_a":0,"param_b":5}
 {"tick":1,"micro_step":4,"phase":"block_events","event":"block_event_executed","pos":{"x":1,"y":0,"z":0},"block":2,"param_a":0,"param_b":5}
+{"tick":1,"micro_step":5,"phase":"block_events","event":"block_changed","pos":{"x":1,"y":0,"z":0},"old_state":4,"new_state":5,"cause":"test"}
 {"tick":9,"micro_step":1,"phase":"scheduled_ticks","event":"scheduled_tick_executed","pos":{"x":0,"y":0,"z":0},"block":1}
 {"tick":9,"micro_step":2,"phase":"post_tick","event":"probe_sample","sample":{"name":"power","probe":{"type":"property","pos":{"x":0,"y":0,"z":0},"property":"power"},"value":"0"}}
 "#;
         let java = br#"{"format":"oracle_samples_v2"}
 {"tick":9,"probe":"power","value":"0","kind":"probe"}
-{"kind":"neighbor_update","tick":1,"pos":{"x":-1,"y":0,"z":0}}
+{"kind":"neighbor_update","tick":1,"pos":{"x":-1,"y":0,"z":0},"moved_by_piston":false,"orientation":null}
 {"kind":"scheduled_tick_queued","tick":1,"pos":{"x":0,"y":0,"z":0},"trigger_tick":9,"priority":0,"sub_tick_order":0}
-{"kind":"scheduled_tick_executed","tick":9,"pos":{"x":0,"y":0,"z":0}}
 {"kind":"block_event_queued","tick":1,"pos":{"x":1,"y":0,"z":0},"block":"minecraft:piston","param_a":0,"param_b":5}
 {"kind":"block_event_executed","tick":1,"pos":{"x":1,"y":0,"z":0},"block":"minecraft:piston","param_a":0,"param_b":5}
+{"kind":"block_changed","tick":1,"pos":{"x":1,"y":0,"z":0},"old_state":4,"new_state":5}
+{"kind":"scheduled_tick_executed","tick":9,"pos":{"x":0,"y":0,"z":0}}
 "#;
 
         assert!(is_oracle_samples_v2(java).unwrap());

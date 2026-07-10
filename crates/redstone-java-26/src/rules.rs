@@ -78,7 +78,13 @@ impl Java26Rules {
         if let Some(source_block) = source_block {
             if let Some(orientation) = orientation {
                 let orientation = Orientation::from_index(orientation);
+                let changed_state = self.state(state)?.clone();
                 for direction in orientation.directions() {
+                    if matches!(changed_state.behavior, BlockBehavior::Wire)
+                        && !wire_connects_for_update(&changed_state, direction)
+                    {
+                        continue;
+                    }
                     let neighbor_pos = pos.relative(direction);
                     let neighbor_orientation = orientation.with_front_preserve_up(direction);
                     ctx.neighbor_changed(NeighborUpdate {
@@ -111,7 +117,24 @@ impl Java26Rules {
                     }
                 }
             } else {
-                ctx.update_neighbors(pos, source_block, None, None);
+                match ctx.mode {
+                    RedstoneMode::Default => ctx.update_neighbors(pos, source_block, None, None),
+                    RedstoneMode::Experimental => {
+                        let orientation = Orientation::from_index(ctx.random_bounded(48) as u8)
+                            .with_side_bias(SideBias::Left);
+                        for direction in Direction::UPDATE_ORDER {
+                            ctx.neighbor_changed(NeighborUpdate {
+                                pos: pos.relative(direction),
+                                source_pos: pos,
+                                source_block,
+                                orientation: Some(
+                                    orientation.with_front(direction).index(),
+                                ),
+                                moved_by_piston: false,
+                            });
+                        }
+                    }
+                }
             }
         }
         Ok(true)
@@ -160,37 +183,6 @@ impl Java26Rules {
         self.sync_entity_sensor(pos, old, state);
         let definition = self.state(state)?.clone();
         self.update_diode_output_neighbors(ctx, pos, &definition);
-        Ok(true)
-    }
-
-    fn set_state_and_notify_piston(
-        &mut self,
-        ctx: &mut EventContext<'_>,
-        pos: BlockPos,
-        state: BlockStateId,
-        cause: &str,
-    ) -> Result<bool, RulesError> {
-        let old = ctx.set_block(pos, state, cause)?;
-        if old == state {
-            return Ok(false);
-        }
-        self.sync_entity_sensor(pos, old, state);
-        let source_block = self
-            .registry
-            .state(state)
-            .or_else(|| self.registry.state(old))
-            .map(|definition| definition.kind);
-        if let Some(source_block) = source_block {
-            for direction in Direction::UPDATE_ORDER {
-                ctx.neighbor_changed(NeighborUpdate {
-                    pos: pos.relative(direction),
-                    source_pos: pos,
-                    source_block,
-                    orientation: None,
-                    moved_by_piston: true,
-                });
-            }
-        }
         Ok(true)
     }
 
@@ -991,6 +983,9 @@ impl BlockRules for Java26Rules {
     ) -> Result<(), RulesError> {
         let state_id = self.repair_shape(ctx, update.pos, true)?;
         let state = self.state(state_id)?.clone();
+        if state.name == "minecraft:piston_head" {
+            self.refresh_piston_head(ctx, update.pos, &state, update)?;
+        }
         match state.behavior {
             BlockBehavior::Wire => self.update_wire(ctx, update.pos, update.orientation)?,
             BlockBehavior::Torch { .. } => self.refresh_torch(ctx, update.pos, state_id)?,
@@ -1149,7 +1144,7 @@ impl BlockRules for Java26Rules {
         let state = self.state(state_id)?.clone();
         if state.kind == event.block
             && matches!(state.behavior, BlockBehavior::Piston { .. })
-            && let Err(error) = self.move_piston(ctx, event.pos, state_id, event.param_a == 0)
+            && let Err(error) = self.move_piston(ctx, event.pos, state_id, event.param_a)
         {
             debug!(?error, pos = ?event.pos, "活塞事件未执行");
         }
@@ -1170,78 +1165,67 @@ impl BlockRules for Java26Rules {
         Ok(())
     }
 
-    fn tick_block_entities(&mut self, ctx: &mut EventContext<'_>) -> Result<(), RulesError> {
-        let positions = ctx
+    fn tick_block_entity(
+        &mut self,
+        ctx: &mut EventContext<'_>,
+        pos: BlockPos,
+    ) -> Result<(), RulesError> {
+        let state = self.state(ctx.world.get_block(pos))?.clone();
+        if let Some(data) = ctx
             .world
-            .block_entities()
-            .map(|(pos, _)| *pos)
-            .collect::<Vec<_>>();
-        for pos in positions {
-            let state = self.state(ctx.world.get_block(pos))?.clone();
-            if let Some(data) = ctx
-                .world
-                .block_entity(pos)
-                .filter(|data| data.kind == "minecraft:moving_piston")
-            {
-                let should_settle = data
-                    .fields
-                    .get("settle_tick")
-                    .and_then(serde_json::Value::as_u64)
-                    .is_some_and(|tick| tick <= ctx.tick.0);
-                let moved_block_entity = should_settle.then(|| {
-                    data.fields
-                        .get("moved_block_entity")
-                        .and_then(|value| serde_json::from_value(value.clone()).ok())
-                });
-                if let Some(moved_block_entity) = moved_block_entity {
-                    ctx.world.remove_block_entity(pos);
-                    if let Some(data) = moved_block_entity {
-                        ctx.world.set_block_entity(pos, data);
-                    }
-                }
-                continue;
+            .block_entity(pos)
+            .filter(|data| data.kind == "minecraft:moving_piston")
+        {
+            let should_settle = data
+                .fields
+                .get("settle_tick")
+                .and_then(serde_json::Value::as_u64)
+                .is_some_and(|tick| tick <= ctx.tick.0);
+            if should_settle {
+                self.settle_moving_piston(ctx, pos, false)?;
             }
-            match state.behavior {
-                BlockBehavior::Hopper => self.tick_container(ctx, pos, &state)?,
-                BlockBehavior::DaylightDetector => {
-                    let sky = block_entity_i64(ctx.world, pos, "sky_signal")
-                        .unwrap_or_else(|| state.int_property("power").unwrap_or(0).into())
-                        .clamp(0, 15);
-                    let power = if state.bool_property("inverted") { 15 - sky } else { sky };
-                    if state.int_property("power") != Some(power as i32) {
-                        let next = self.changed_state(state.id, "power", power.to_string())?;
-                        self.set_state_and_notify(ctx, pos, next, "daylight_detector", None)?;
-                    }
+            return Ok(());
+        }
+        match state.behavior {
+            BlockBehavior::Hopper => self.tick_container(ctx, pos, &state)?,
+            BlockBehavior::DaylightDetector => {
+                let sky = block_entity_i64(ctx.world, pos, "sky_signal")
+                    .unwrap_or_else(|| state.int_property("power").unwrap_or(0).into())
+                    .clamp(0, 15);
+                let power = if state.bool_property("inverted") { 15 - sky } else { sky };
+                if state.int_property("power") != Some(power as i32) {
+                    let next = self.changed_state(state.id, "power", power.to_string())?;
+                    self.set_state_and_notify(ctx, pos, next, "daylight_detector", None)?;
                 }
-                BlockBehavior::TrappedChest => {
-                    let open = block_entity_i64(ctx.world, pos, "open_count")
-                        .unwrap_or(0)
-                        .clamp(0, 15);
-                    let previous = block_entity_i64(ctx.world, pos, "last_open_count").unwrap_or(0);
-                    if open != previous {
-                        if let Some(data) = ctx.world.block_entity_mut(pos) {
-                            data.fields.insert(
-                                "last_open_count".to_owned(),
-                                serde_json::Value::from(open),
-                            );
-                        }
-                        ctx.update_neighbors(pos, state.kind, None, None);
-                    }
-                }
-                BlockBehavior::Dropper | BlockBehavior::Dispenser | BlockBehavior::Crafter => {
-                    let powered = self.is_powered(ctx.world, pos);
-                    let triggered = state.bool_property("triggered");
-                    if powered && !triggered {
-                        let next = self.changed_state(state.id, "triggered", "true")?;
-                        self.set_state_and_notify(ctx, pos, next, "container_trigger", None)?;
-                        ctx.schedule_tick(pos, state.kind, 4, TickPriority::Normal);
-                    } else if !powered && triggered {
-                        let next = self.changed_state(state.id, "triggered", "false")?;
-                        self.set_state_and_notify(ctx, pos, next, "container_untrigger", None)?;
-                    }
-                }
-                _ => {}
             }
+            BlockBehavior::TrappedChest => {
+                let open = block_entity_i64(ctx.world, pos, "open_count")
+                    .unwrap_or(0)
+                    .clamp(0, 15);
+                let previous = block_entity_i64(ctx.world, pos, "last_open_count").unwrap_or(0);
+                if open != previous {
+                    if let Some(data) = ctx.world.block_entity_mut(pos) {
+                        data.fields.insert(
+                            "last_open_count".to_owned(),
+                            serde_json::Value::from(open),
+                        );
+                    }
+                    ctx.update_neighbors(pos, state.kind, None, None);
+                }
+            }
+            BlockBehavior::Dropper | BlockBehavior::Dispenser | BlockBehavior::Crafter => {
+                let powered = self.is_powered(ctx.world, pos);
+                let triggered = state.bool_property("triggered");
+                if powered && !triggered {
+                    let next = self.changed_state(state.id, "triggered", "true")?;
+                    self.set_state_and_notify(ctx, pos, next, "container_trigger", None)?;
+                    ctx.schedule_tick(pos, state.kind, 4, TickPriority::Normal);
+                } else if !powered && triggered {
+                    let next = self.changed_state(state.id, "triggered", "false")?;
+                    self.set_state_and_notify(ctx, pos, next, "container_untrigger", None)?;
+                }
+            }
+            _ => {}
         }
         Ok(())
     }
@@ -1756,6 +1740,14 @@ fn torch_input_direction(state: &StateDefinition) -> Direction {
             .unwrap_or(Direction::North)
             .opposite(),
         _ => Direction::Down,
+    }
+}
+
+fn wire_connects_for_update(state: &StateDefinition, direction: Direction) -> bool {
+    match direction {
+        Direction::Down => true,
+        Direction::Up => false,
+        horizontal => state.property(direction_name(horizontal)) != Some("none"),
     }
 }
 

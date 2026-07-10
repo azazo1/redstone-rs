@@ -122,6 +122,7 @@ final class ScenarioTest {
         if (!template.placeInWorld(helper.getLevel(), origin, origin, settings, helper.getLevel().getRandom(), 818)) {
             throw new IllegalStateException("放置 redstone:scenario structure 失败");
         }
+        helper.getLevel().getRandom().setSeed(scenario.seed);
     }
 
     private void tick(GameTestHelper helper) {
@@ -133,6 +134,9 @@ final class ScenarioTest {
                     microTrace.setTick(0);
                 }
                 initialize(helper);
+                if (microTrace != null) {
+                    microTrace.enableBlockChanges();
+                }
             }
             if (tick > 0) {
                 for (Scenario.Probe probe : scenario.probes) {

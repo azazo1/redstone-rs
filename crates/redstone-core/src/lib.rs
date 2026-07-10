@@ -6,7 +6,8 @@ mod types;
 mod world;
 
 pub use event::{
-    BlockEvent, NeighborTask, NeighborUpdate, ScheduledTick, TickPriority,
+    BlockEvent, DeferredBlockChange, DeferredBlockEntityUpdate, NeighborTask, NeighborUpdate,
+    ScheduledTick, TickPriority,
 };
 pub use rules::{BlockRules, EventContext, RulesError};
 pub use simulation::{Simulation, SimulationConfig, SimulationError, Snapshot};

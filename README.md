@@ -19,7 +19,7 @@
 - Java 式嵌套邻居更新和固定方向顺序.
 - 默认及实验性红石线, 48 种 `Orientation` 和 Java 兼容随机源.
 - 火把, 中继器, 比较器, 观察者, BUD/QC 基础行为.
-- 活塞, 黏性活塞, 12 方块限制, 黏液/蜂蜜分支和移动占位.
+- 活塞, 黏性活塞, 12 方块限制, 黏液/蜂蜜分支, 取消, 零刻和移动方块实体.
 - 灯, 铜灯, 门, 动力铁轨, 音符盒, 钟, 目标方块和 TNT 触发轨迹.
 - 漏斗, 投掷器, 发射器投射物/矿车/TNT 显式行为和合成器最小模型.
 - 熔炉和酿造台侧面槽规则, 合成器禁用槽和潜影盒嵌套限制.
@@ -88,7 +88,7 @@ equals = 15
 
 `just oracle-build` 会下载测试专用 TOML 解析依赖并构建 Java `26.1.2` 探针 JAR. `just oracle-scenario-self-test` 会运行真实 structure, 动作和探针场景. `VANILLA_ORACLE_JAR` 可以覆盖默认 JAR. 发布的 Rust 库和 CLI 不需要 Java.
 
-当前 GameTest oracle 支持原版 structure NBT, `raw`/`notify` 初始化, 非零原点, 旋转/镜像, 任意场景 seed, 默认/实验性红石模式, 基础方块与实体动作, 方块与实体探针. 测试场景可启用 ASM 邻居更新及计划方块刻采样, CLI 会同时差分探针, 同步嵌套顺序, 计划刻优先级和 `sub_tick_order`. 方块事件, 状态写入和形状更新的完整 ASM 微轨迹仍待完成.
+当前 GameTest oracle 支持原版 structure NBT, `raw`/`notify` 初始化, 非零原点, 旋转/镜像, 任意场景 seed, 默认/实验性红石模式, 基础方块与实体动作, 方块与实体探针. 测试场景可启用 ASM 邻居更新, 计划方块刻及方块事件采样, CLI 会同时差分探针, 同步嵌套顺序, `Orientation`, `moved_by_piston`, 计划刻优先级, `sub_tick_order` 和方块事件参数. 状态写入和形状更新的完整 ASM 微轨迹仍待完成.
 
 `redstone bench` 默认构建 100 万已放置方块和 1 万活跃元件, 运行 100 个空闲刻并输出 P50/P95/P99 与可获取的常驻内存.
 

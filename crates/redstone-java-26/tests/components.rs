@@ -589,16 +589,36 @@ async fn piston_moves_slime_branches_without_sticking_to_honey() {
 
     simulation.step().await.unwrap();
 
+    let moving_slime = simulation
+        .world()
+        .block_entity(BlockPos::new(2, 0, 0))
+        .unwrap();
+    assert_eq!(moving_slime.kind, "minecraft:moving_piston");
+    assert_eq!(moving_slime.fields["moved_state"], slime.0);
+    let moving_stone = simulation
+        .world()
+        .block_entity(BlockPos::new(2, 1, 0))
+        .unwrap();
+    assert_eq!(moving_stone.fields["moved_state"], stone.0);
+    let moving_order = simulation
+        .world()
+        .block_entities()
+        .filter(|(_, data)| data.kind == "minecraft:moving_piston")
+        .map(|(pos, data)| (*pos, data.fields["source"].as_bool().unwrap()))
+        .collect::<Vec<_>>();
+    assert!(moving_order.last().is_some_and(|(_, source)| *source));
+    assert!(moving_order[..moving_order.len() - 1]
+        .iter()
+        .all(|(_, source)| !source));
+    simulation.run_until(redstone_core::GameTick(4)).await.unwrap();
+
     assert_eq!(simulation.world().get_block(BlockPos::new(2, 0, 0)), slime);
     assert_eq!(simulation.world().get_block(BlockPos::new(2, 1, 0)), stone);
     assert_eq!(simulation.world().get_block(BlockPos::new(1, -1, 0)), honey);
     assert!(simulation.trace().events().iter().any(|event| {
         matches!(
             event.kind,
-            TraceKind::NeighborUpdate {
-                moved_by_piston: true,
-                ..
-            }
+            TraceKind::BlockEventExecuted { param_a: 0, .. }
         )
     }));
 }

@@ -29,7 +29,7 @@ fn real_java_oracle_matches_notify_initialization() {
 fn real_java_oracle_matches_experimental_mode_and_seed() {
     assert_oracle_matches(
         "oracle-experimental",
-        powered_wire_structure(),
+        wire_chain_structure(),
         experimental_scenario(),
     );
 }
@@ -113,6 +113,56 @@ fn real_java_oracle_matches_piston_block_event_order() {
         "oracle-piston-event",
         piston_event_structure(),
         piston_event_scenario(),
+    );
+}
+
+#[test]
+#[ignore = "需要先执行 just oracle-build"]
+fn real_java_oracle_matches_cancelled_piston_extension() {
+    assert_oracle_matches(
+        "oracle-piston-cancel",
+        piston_event_structure(),
+        cancelled_piston_scenario(),
+    );
+}
+
+#[test]
+#[ignore = "需要先执行 just oracle-build"]
+fn real_java_oracle_matches_zero_tick_piston_retraction() {
+    assert_oracle_matches(
+        "oracle-piston-zero-tick",
+        piston_event_structure(),
+        zero_tick_piston_scenario(),
+    );
+}
+
+#[test]
+#[ignore = "需要先执行 just oracle-build"]
+fn real_java_oracle_matches_zero_tick_sticky_piston_drop() {
+    assert_oracle_matches(
+        "oracle-sticky-piston-zero-tick",
+        sticky_piston_event_structure(),
+        zero_tick_piston_scenario(),
+    );
+}
+
+#[test]
+#[ignore = "需要先执行 just oracle-build"]
+fn real_java_oracle_matches_sticky_piston_pull() {
+    assert_oracle_matches(
+        "oracle-sticky-piston-pull",
+        sticky_piston_event_structure(),
+        sticky_piston_pull_scenario(),
+    );
+}
+
+#[test]
+#[ignore = "需要先执行 just oracle-build"]
+fn real_java_oracle_matches_piston_quasi_connectivity_and_bud() {
+    assert_oracle_matches(
+        "oracle-piston-qc-bud",
+        piston_event_structure(),
+        piston_qc_bud_scenario(),
     );
 }
 
@@ -368,6 +418,14 @@ fn scheduler_structure() -> Vec<u8> {
 }
 
 fn piston_event_structure() -> Vec<u8> {
+    piston_event_structure_for("minecraft:piston")
+}
+
+fn sticky_piston_event_structure() -> Vec<u8> {
+    piston_event_structure_for("minecraft:sticky_piston")
+}
+
+fn piston_event_structure_for(piston_name: &str) -> Vec<u8> {
     let piston_properties = HashMap::from([
         ("extended".to_owned(), Value::String("false".to_owned())),
         ("facing".to_owned(), Value::String("east".to_owned())),
@@ -388,7 +446,7 @@ fn piston_event_structure() -> Vec<u8> {
                 Value::Compound(HashMap::from([
                     (
                         "Name".to_owned(),
-                        Value::String("minecraft:piston".to_owned()),
+                        Value::String(piston_name.to_owned()),
                     ),
                     (
                         "Properties".to_owned(),
@@ -495,17 +553,30 @@ fn experimental_scenario() -> &'static str {
     r#"version = "26.1.2"
 mode = "experimental"
 seed = 42
-max_ticks = 2
+max_ticks = 1
 strict = true
+oracle_micro_trace = true
 
 [source]
 path = "machine.nbt"
-initialization = "notify"
+initialization = "raw"
+
+[[actions]]
+tick = 1
+type = "set_block"
+pos = { x = 0, y = 1, z = 0 }
+name = "minecraft:redstone_block"
 
 [[probes]]
-name = "wire_power"
+name = "near_power"
 type = "property"
 pos = { x = 1, y = 1, z = 0 }
+property = "power"
+
+[[probes]]
+name = "far_power"
+type = "property"
+pos = { x = 2, y = 1, z = 0 }
 property = "power"
 "#
 }
@@ -836,6 +907,37 @@ fn piston_event_scenario() -> &'static str {
     r#"version = "26.1.2"
 mode = "default"
 seed = 0
+max_ticks = 4
+strict = true
+oracle_micro_trace = true
+
+[source]
+path = "machine.nbt"
+initialization = "raw"
+
+[[actions]]
+tick = 1
+type = "set_block"
+pos = { x = 0, y = 1, z = 0 }
+name = "minecraft:redstone_block"
+
+[[probes]]
+name = "piston_extended"
+type = "property"
+pos = { x = 1, y = 1, z = 0 }
+property = "extended"
+
+[[probes]]
+name = "moved_block"
+type = "block_state"
+pos = { x = 3, y = 1, z = 0 }
+"#
+}
+
+fn cancelled_piston_scenario() -> &'static str {
+    r#"version = "26.1.2"
+mode = "default"
+seed = 0
 max_ticks = 2
 strict = true
 oracle_micro_trace = true
@@ -849,6 +951,123 @@ tick = 1
 type = "set_block"
 pos = { x = 0, y = 1, z = 0 }
 name = "minecraft:redstone_block"
+
+[[actions]]
+tick = 1
+type = "break_block"
+pos = { x = 0, y = 1, z = 0 }
+
+[[probes]]
+name = "piston_extended"
+type = "property"
+pos = { x = 1, y = 1, z = 0 }
+property = "extended"
+
+[[probes]]
+name = "unmoved_block"
+type = "block_state"
+pos = { x = 2, y = 1, z = 0 }
+"#
+}
+
+fn zero_tick_piston_scenario() -> &'static str {
+    r#"version = "26.1.2"
+mode = "default"
+seed = 0
+max_ticks = 5
+strict = true
+oracle_micro_trace = true
+
+[source]
+path = "machine.nbt"
+initialization = "raw"
+
+[[actions]]
+tick = 1
+type = "set_block"
+pos = { x = 0, y = 1, z = 0 }
+name = "minecraft:redstone_block"
+
+[[actions]]
+tick = 2
+type = "break_block"
+pos = { x = 0, y = 1, z = 0 }
+
+[[probes]]
+name = "piston"
+type = "block_state"
+pos = { x = 1, y = 1, z = 0 }
+
+[[probes]]
+name = "moved_block"
+type = "block_state"
+pos = { x = 3, y = 1, z = 0 }
+"#
+}
+
+fn sticky_piston_pull_scenario() -> &'static str {
+    r#"version = "26.1.2"
+mode = "default"
+seed = 0
+max_ticks = 7
+strict = true
+oracle_micro_trace = true
+
+[source]
+path = "machine.nbt"
+initialization = "raw"
+
+[[actions]]
+tick = 1
+type = "set_block"
+pos = { x = 0, y = 1, z = 0 }
+name = "minecraft:redstone_block"
+
+[[actions]]
+tick = 4
+type = "break_block"
+pos = { x = 0, y = 1, z = 0 }
+
+[[probes]]
+name = "piston"
+type = "block_state"
+pos = { x = 1, y = 1, z = 0 }
+
+[[probes]]
+name = "pulled_block"
+type = "block_state"
+pos = { x = 2, y = 1, z = 0 }
+
+[[probes]]
+name = "source_cleared"
+type = "block_state"
+pos = { x = 3, y = 1, z = 0 }
+"#
+}
+
+fn piston_qc_bud_scenario() -> &'static str {
+    r#"version = "26.1.2"
+mode = "default"
+seed = 0
+max_ticks = 5
+strict = true
+oracle_micro_trace = true
+
+[source]
+path = "machine.nbt"
+initialization = "raw"
+
+[[actions]]
+tick = 1
+type = "set_block"
+pos = { x = 1, y = 3, z = 0 }
+name = "minecraft:redstone_block"
+
+[[actions]]
+tick = 2
+type = "set_block"
+pos = { x = 0, y = 1, z = 0 }
+name = "minecraft:stone"
 
 [[probes]]
 name = "piston_extended"

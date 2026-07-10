@@ -6,10 +6,10 @@ use tokio::sync::broadcast;
 use tracing::{debug, warn};
 
 use crate::{
-    Action, BlockChange, BlockEvent, BlockKindId, BlockPos, BlockRules, Direction, EventContext,
-    GameTick, MicroStep, NeighborTask, NeighborUpdate, Probe, ProbeSample, RedstoneMode,
-    RulesError, ScheduledTick, SimulationPhase, SparseWorld, TraceEvent, TraceKind, TraceLog,
-    WorldDelta,
+    Action, BlockChange, BlockEvent, BlockKindId, BlockPos, BlockRules, DeferredBlockEntityUpdate,
+    Direction, EventContext, GameTick, MicroStep, NeighborTask, NeighborUpdate, Probe, ProbeSample,
+    RedstoneMode, RulesError, ScheduledTick, SimulationPhase, SparseWorld, TraceEvent, TraceKind,
+    TraceLog, WorldDelta,
 };
 
 const DEFAULT_MAX_SCHEDULED_TICKS_PER_TICK: usize = 65_536;
@@ -188,16 +188,7 @@ impl<R: BlockRules> Simulation<R> {
         )?;
         self.process_neighbor_tasks_with_changes(tasks, SimulationPhase::Entities, &mut changes)?;
 
-        let tasks = self.with_context_and_changes(
-            SimulationPhase::BlockEntities,
-            &mut changes,
-            |rules, ctx| rules.tick_block_entities(ctx),
-        )?;
-        self.process_neighbor_tasks_with_changes(
-            tasks,
-            SimulationPhase::BlockEntities,
-            &mut changes,
-        )?;
+        self.run_block_entities(&mut changes)?;
 
         let probes = self.sample_probes();
         let delta = WorldDelta {
@@ -317,6 +308,33 @@ impl<R: BlockRules> Simulation<R> {
         Ok(())
     }
 
+    fn run_block_entities(
+        &mut self,
+        changes: &mut Vec<BlockChange>,
+    ) -> Result<(), SimulationError> {
+        let positions = self
+            .world
+            .block_entities()
+            .map(|(pos, _)| *pos)
+            .collect::<Vec<_>>();
+        for pos in positions {
+            if self.world.block_entity(pos).is_none() {
+                continue;
+            }
+            let tasks = self.with_context_and_changes(
+                SimulationPhase::BlockEntities,
+                changes,
+                |rules, ctx| rules.tick_block_entity(ctx, pos),
+            )?;
+            self.process_neighbor_tasks_with_changes(
+                tasks,
+                SimulationPhase::BlockEntities,
+                changes,
+            )?;
+        }
+        Ok(())
+    }
+
     fn process_neighbor_tasks(
         &mut self,
         tasks: Vec<NeighborTask>,
@@ -337,6 +355,81 @@ impl<R: BlockRules> Simulation<R> {
         }
         let mut count = 0usize;
         while let Some(task) = stack.pop() {
+            let task = match task {
+                NeighborTask::ScheduleTickAfterNeighbors {
+                    pos,
+                    block,
+                    delay,
+                    priority,
+                } => {
+                    let nested = self.with_context_and_changes(
+                        phase,
+                        changes,
+                        |_rules, ctx| {
+                            ctx.schedule_tick(pos, block, delay, priority);
+                            Ok(())
+                        },
+                    )?;
+                    for task in nested.into_iter().rev() {
+                        stack.push(task);
+                    }
+                    continue;
+                }
+                NeighborTask::SetBlockAndUpdateNeighborsAfterNeighbors {
+                    pos,
+                    state,
+                    cause,
+                    source_block,
+                } => {
+                    let nested = self.with_context_and_changes(
+                        phase,
+                        changes,
+                        |_rules, ctx| {
+                            let old = ctx.set_block(pos, state, cause)?;
+                            if old != state {
+                                ctx.update_neighbors(pos, source_block, None, None);
+                            }
+                            Ok(())
+                        },
+                    )?;
+                    for task in nested.into_iter().rev() {
+                        stack.push(task);
+                    }
+                    continue;
+                }
+                NeighborTask::ApplyBlockChangesAfterNeighbors {
+                    changes: deferred_changes,
+                    follow_up,
+                } => {
+                    let nested = self.with_context_and_changes(
+                        phase,
+                        changes,
+                        |_rules, ctx| {
+                            for change in deferred_changes {
+                                ctx.set_block(change.pos, change.state, change.cause)?;
+                                match change.block_entity {
+                                    DeferredBlockEntityUpdate::Keep => {}
+                                    DeferredBlockEntityUpdate::Remove => {
+                                        ctx.world.remove_block_entity(change.pos);
+                                    }
+                                    DeferredBlockEntityUpdate::Set(data) => {
+                                        ctx.world.set_block_entity(change.pos, data);
+                                    }
+                                }
+                            }
+                            Ok(())
+                        },
+                    )?;
+                    for task in follow_up.into_iter().rev() {
+                        stack.push(task);
+                    }
+                    for task in nested.into_iter().rev() {
+                        stack.push(task);
+                    }
+                    continue;
+                }
+                task => task,
+            };
             count += 1;
             if count > self.config.max_chained_neighbor_updates {
                 warn!(
@@ -384,6 +477,9 @@ impl<R: BlockRules> Simulation<R> {
                     );
                     (update, continuation)
                 }
+                NeighborTask::ScheduleTickAfterNeighbors { .. } => unreachable!(),
+                NeighborTask::SetBlockAndUpdateNeighborsAfterNeighbors { .. } => unreachable!(),
+                NeighborTask::ApplyBlockChangesAfterNeighbors { .. } => unreachable!(),
             };
 
             self.push_trace(

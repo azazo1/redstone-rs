@@ -165,8 +165,8 @@ const fn same_axis(left: Direction, right: Direction) -> bool {
 
 const fn axis_direction(direction: Direction) -> u8 {
     match direction {
-        Direction::Down | Direction::North | Direction::West => 0,
-        Direction::Up | Direction::South | Direction::East => 1,
+        Direction::Up | Direction::South | Direction::East => 0,
+        Direction::Down | Direction::North | Direction::West => 1,
     }
 }
 
@@ -222,5 +222,16 @@ mod tests {
         let orientation = Orientation::from_index(20).with_side_bias(SideBias::Left);
         assert_eq!(orientation.directions().len(), 6);
         assert_ne!(orientation.directions()[0], orientation.directions()[1]);
+    }
+
+    #[test]
+    fn positive_axis_direction_uses_java_ordinal_zero() {
+        let orientation = Orientation {
+            up: Direction::South,
+            front: Direction::East,
+            side_bias: SideBias::Left,
+        };
+
+        assert_eq!(orientation.index(), 24);
     }
 }

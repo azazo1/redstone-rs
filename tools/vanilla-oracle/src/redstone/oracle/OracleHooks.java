@@ -5,6 +5,7 @@ import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.level.BlockEventData;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.Block;
+import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.redstone.Orientation;
 
 public final class OracleHooks {
@@ -62,6 +63,20 @@ public final class OracleHooks {
         OracleTraceRecorder recorder = traceRecorder;
         if (recorder != null) {
             recorder.recordScheduledTickQueued(scheduled);
+        }
+    }
+
+    public static void onBlockStateChangeRequested(
+        Level level,
+        BlockPos pos,
+        BlockState newState
+    ) {
+        OracleTraceRecorder recorder = traceRecorder;
+        if (recorder != null) {
+            BlockState oldState = level.getBlockState(pos);
+            if (oldState != newState) {
+                recorder.recordBlockChange(level, pos, oldState, newState);
+            }
         }
     }
 

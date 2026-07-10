@@ -382,7 +382,11 @@ fn classify(name: &str, properties: &BTreeMap<String, String>) -> BlockTraits {
     let redstone_conductor = !non_solid
         && !matches!(
             path,
-            "slime_block" | "honey_block" | "moving_piston" | "piston_head"
+            "redstone_block"
+                | "slime_block"
+                | "honey_block"
+                | "moving_piston"
+                | "piston_head"
         );
     let sturdy = !non_solid || path == "hopper";
     let push_reaction = if matches!(

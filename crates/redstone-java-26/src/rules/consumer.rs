@@ -165,7 +165,7 @@ impl Java26Rules {
         let strength = strength.clamp(1, 15);
         let next = self.changed_state(state_id, "power", strength.to_string())?;
         self.set_state_and_notify(ctx, pos, next, "target_hit", None)?;
-        ctx.schedule_tick(
+        ctx.schedule_tick_after_neighbors(
             pos,
             state.kind,
             if arrow { 20 } else { 8 },

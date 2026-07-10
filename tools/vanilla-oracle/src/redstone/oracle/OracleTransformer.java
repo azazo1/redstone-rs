@@ -11,6 +11,7 @@ import org.objectweb.asm.Opcodes;
 final class OracleTransformer implements ClassFileTransformer {
     private static final String NEIGHBOR_TARGET = "net/minecraft/world/level/redstone/NeighborUpdater";
     private static final String GAME_TEST_SERVER_TARGET = "net/minecraft/gametest/framework/GameTestServer";
+    private static final String LEVEL_TARGET = "net/minecraft/world/level/Level";
     private static final String LEVEL_TICKS_TARGET = "net/minecraft/world/ticks/LevelTicks";
     private static final String SERVER_LEVEL_TARGET = "net/minecraft/server/level/ServerLevel";
     private static final String METHOD = "executeUpdate";
@@ -35,6 +36,7 @@ final class OracleTransformer implements ClassFileTransformer {
     ) {
         if (!NEIGHBOR_TARGET.equals(className)
             && !GAME_TEST_SERVER_TARGET.equals(className)
+            && !LEVEL_TARGET.equals(className)
             && !LEVEL_TICKS_TARGET.equals(className)
             && !SERVER_LEVEL_TARGET.equals(className)) {
             return null;
@@ -66,6 +68,14 @@ final class OracleTransformer implements ClassFileTransformer {
                     && name.equals("startTests")
                     && descriptor.equals("(Lnet/minecraft/server/level/ServerLevel;)V")) {
                     return gameTestStartVisitor(delegate);
+                }
+                if (LEVEL_TARGET.equals(className)
+                    && name.equals("setBlock")
+                    && descriptor.equals(
+                        "(Lnet/minecraft/core/BlockPos;"
+                            + "Lnet/minecraft/world/level/block/state/BlockState;II)Z"
+                    )) {
+                    return blockStateWriteVisitor(delegate);
                 }
                 if (LEVEL_TICKS_TARGET.equals(className)
                     && name.equals("schedule")
@@ -150,6 +160,27 @@ final class OracleTransformer implements ClassFileTransformer {
                             "redstone/oracle/OracleHooks",
                             "onScheduledTickQueued",
                             "(Lnet/minecraft/world/ticks/ScheduledTick;)V",
+                            false
+                        );
+                    }
+                };
+            }
+
+            private MethodVisitor blockStateWriteVisitor(MethodVisitor delegate) {
+                return new MethodVisitor(Opcodes.ASM9, delegate) {
+                    @Override
+                    public void visitCode() {
+                        super.visitCode();
+                        super.visitVarInsn(Opcodes.ALOAD, 0);
+                        super.visitVarInsn(Opcodes.ALOAD, 1);
+                        super.visitVarInsn(Opcodes.ALOAD, 2);
+                        super.visitMethodInsn(
+                            Opcodes.INVOKESTATIC,
+                            "redstone/oracle/OracleHooks",
+                            "onBlockStateChangeRequested",
+                            "(Lnet/minecraft/world/level/Level;"
+                                + "Lnet/minecraft/core/BlockPos;"
+                                + "Lnet/minecraft/world/level/block/state/BlockState;)V",
                             false
                         );
                     }

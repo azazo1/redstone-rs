@@ -2,7 +2,7 @@ use std::cmp::Ordering;
 
 use serde::{Deserialize, Serialize};
 
-use crate::{BlockKindId, BlockPos, Direction, GameTick};
+use crate::{BlockEntityData, BlockKindId, BlockPos, BlockStateId, Direction, GameTick};
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, Hash, PartialEq, Serialize)]
 #[repr(i8)]
@@ -78,6 +78,21 @@ pub struct NeighborUpdate {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
+pub enum DeferredBlockEntityUpdate {
+    Keep,
+    Remove,
+    Set(BlockEntityData),
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct DeferredBlockChange {
+    pub pos: BlockPos,
+    pub state: BlockStateId,
+    pub cause: String,
+    pub block_entity: DeferredBlockEntityUpdate,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub enum NeighborTask {
     Single(NeighborUpdate),
     Multi {
@@ -86,5 +101,21 @@ pub enum NeighborTask {
         skip_direction: Option<Direction>,
         orientation: Option<u8>,
         next_index: usize,
+    },
+    ScheduleTickAfterNeighbors {
+        pos: BlockPos,
+        block: BlockKindId,
+        delay: u64,
+        priority: TickPriority,
+    },
+    SetBlockAndUpdateNeighborsAfterNeighbors {
+        pos: BlockPos,
+        state: BlockStateId,
+        cause: String,
+        source_block: BlockKindId,
+    },
+    ApplyBlockChangesAfterNeighbors {
+        changes: Vec<DeferredBlockChange>,
+        follow_up: Vec<NeighborTask>,
     },
 }
