@@ -3,6 +3,7 @@ members = [
     "crates/redstone-core",
     "crates/redstone-java-26",
     "crates/redstone-io",
+    "crates/redstone-replay-26",
     "crates/redstone-cli",
 ]
 resolver = "3"
@@ -16,6 +17,7 @@ authors = ["azazo1"]
 [workspace.dependencies]
 anyhow = "1.0.98"
 clap = { version = "4.5.40", features = ["derive"] }
+crc32fast = "1.5.0"
 fastnbt = "2.6.0"
 flate2 = "1.1.2"
 indexmap = { version = "2.9.0", features = ["serde"] }
@@ -29,3 +31,4 @@ toml = "0.8.23"
 tracing = "0.1.41"
 tracing-indicatif = "0.3.14"
 tracing-subscriber = { version = "0.3.19", features = ["env-filter"] }
+zip = { version = "2.4.2", default-features = false, features = ["deflate"] }

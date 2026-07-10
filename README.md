@@ -9,6 +9,7 @@
 - `redstone-core`: 稀疏世界, 事件调度, 邻居更新, 探针, delta 和轨迹.
 - `redstone-java-26`: Java `26.1.2` 状态注册表和红石规则.
 - `redstone-io`: Litematic, 原版 structure NBT 和 TOML 场景.
+- `redstone-replay-26`: Replay Mod MCPR 容器和 Java `26.1.2` 网络协议编码.
 - `redstone-cli`: `inspect`, `run`, `test` 和 `trace` 命令.
 - `tools/vanilla-oracle`: 外部 Java 参考探针的调用协议.
 
@@ -28,6 +29,7 @@
 - 红石线, 铁轨, 绊线, 栅栏, 玻璃板, 栏杆和墙的结构形状修复.
 - gzip/非 gzip NBT, Litematic 多区域, 负尺寸区域, 旋转和镜像.
 - JSONL 微时序轨迹, VCD 波形和场景级并行测试.
+- Rust 仿真初始世界和逐 tick 方块变化的 Replay Mod `.mcpr` 导出.
 - TOML 实体生成, 移动, 删除, 字段修改和目标方块命中动作.
 
 ## 构建和测试
@@ -46,11 +48,15 @@ cargo run -p redstone-cli -- inspect machine.litematic --block 10,20,30
 cargo run -p redstone-cli -- inspect machine.litematic --type minecraft:hopper --format json
 cargo run -p redstone-cli -- inspect machine.litematic --all --json
 cargo run -p redstone-cli -- run scenario.toml --trace trace.jsonl --vcd signals.vcd
+cargo run -p redstone-cli -- run scenario.toml --replay scenario.mcpr
+cargo run -p redstone-cli -- test scenario.toml --replay scenario.mcpr
 cargo run -p redstone-cli -- test scenarios
 cargo run --release -p redstone-cli -- bench
 ```
 
 `inspect` 默认输出结构汇总. `--block X,Y,Z` 可重复查询指定坐标, `--type BLOCK_ID` 按方块类型筛选, `--all` 输出全部非空气方块. 明细包含状态 ID, properties, 支持状态和完整方块实体 NBT, 包括嵌套的 `components`. `--format json` 与 `--json` 均可输出 JSON.
+
+`run --replay` 和单场景 `test --replay` 会直接从 Rust 仿真生成 Replay Mod 格式 14 录像. 录像目标版本为 Minecraft `26.1.2`, 每个游戏 tick 对应 50 ms. 初始结构与相机之间的连续 chunk 区域会在同一批次加载, 外围保留渲染邻居, 后续新 chunk 会先扩展已加载区域再写入方块更新. 目录批量测试暂不支持共享录像输出路径. 断言失败时录像仍会完成并保留, 仿真或编码失败时不会替换目标文件.
 
 ## 场景格式
 

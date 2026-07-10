@@ -96,6 +96,8 @@ pub struct LoadedStructure {
     pub world: SparseWorld,
     pub min: BlockPos,
     pub max: BlockPos,
+    pub region_min: BlockPos,
+    pub region_max: BlockPos,
     pub format: String,
     pub data_version: Option<i32>,
     pub block_counts: BTreeMap<String, usize>,
@@ -175,6 +177,15 @@ fn load_vanilla<R: StructureStateResolver>(
     }
 
     let size = int_list(&root, "size")?;
+    let (region_min, region_max) = if size.iter().all(|dimension| *dimension > 0) {
+        transformed_bounds(
+            transform,
+            BlockPos::ZERO,
+            BlockPos::new(size[0] - 1, size[1] - 1, size[2] - 1),
+        )
+    } else {
+        (transform.origin, transform.origin)
+    };
     let mut world = SparseWorld::new(resolver.air_state());
     let mut counts = BTreeMap::new();
     let mut block_entity_nbt = BTreeMap::new();
@@ -207,11 +218,9 @@ fn load_vanilla<R: StructureStateResolver>(
     Ok(LoadedStructure {
         world,
         min: min.unwrap_or(transform.origin),
-        max: max.unwrap_or(transform.apply(BlockPos::new(
-            size[0] - 1,
-            size[1] - 1,
-            size[2] - 1,
-        ))),
+        max: max.unwrap_or(region_max),
+        region_min,
+        region_max,
         format: "vanilla_structure".to_owned(),
         data_version: root.get("DataVersion").and_then(value_i32),
         block_counts: counts,
@@ -230,6 +239,8 @@ fn load_litematic<R: StructureStateResolver>(
     let mut block_entity_nbt = BTreeMap::new();
     let mut min = None::<BlockPos>;
     let mut max = None::<BlockPos>;
+    let mut region_min = None::<BlockPos>;
+    let mut region_max = None::<BlockPos>;
 
     let mut region_entries = regions.iter().collect::<Vec<_>>();
     region_entries.sort_by(|(left_name, left), (right_name, right)| {
@@ -255,10 +266,18 @@ fn load_litematic<R: StructureStateResolver>(
             region_position.y.min(end.y),
             region_position.z.min(end.z),
         );
+        let finish = BlockPos::new(
+            region_position.x.max(end.x),
+            region_position.y.max(end.y),
+            region_position.z.max(end.z),
+        );
         let dimensions = [size.x.unsigned_abs(), size.y.unsigned_abs(), size.z.unsigned_abs()];
         if dimensions.contains(&0) {
             continue;
         }
+        let (transformed_min, transformed_max) = transformed_bounds(transform, start, finish);
+        update_bounds(&mut region_min, &mut region_max, transformed_min);
+        update_bounds(&mut region_min, &mut region_max, transformed_max);
         let palette = list(region, "BlockStatePalette")?;
         let mut states = Vec::new();
         let mut names = Vec::new();
@@ -319,6 +338,8 @@ fn load_litematic<R: StructureStateResolver>(
         world,
         min: min.unwrap_or(transform.origin),
         max: max.unwrap_or(transform.origin),
+        region_min: region_min.unwrap_or(transform.origin),
+        region_max: region_max.unwrap_or(transform.origin),
         format: "litematic".to_owned(),
         data_version: root.get("MinecraftDataVersion").and_then(value_i32),
         block_counts: counts,
@@ -351,6 +372,30 @@ fn update_bounds(min: &mut Option<BlockPos>, max: &mut Option<BlockPos>, pos: Bl
     *max = Some(max.map_or(pos, |old| {
         BlockPos::new(old.x.max(pos.x), old.y.max(pos.y), old.z.max(pos.z))
     }));
+}
+
+fn transformed_bounds(
+    transform: StructureTransform,
+    min: BlockPos,
+    max: BlockPos,
+) -> (BlockPos, BlockPos) {
+    let mut transformed_min = None;
+    let mut transformed_max = None;
+    for x in [min.x, max.x] {
+        for y in [min.y, max.y] {
+            for z in [min.z, max.z] {
+                update_bounds(
+                    &mut transformed_min,
+                    &mut transformed_max,
+                    transform.apply(BlockPos::new(x, y, z)),
+                );
+            }
+        }
+    }
+    (
+        transformed_min.unwrap_or(transform.origin),
+        transformed_max.unwrap_or(transform.origin),
+    )
 }
 
 fn unpack_palette_index(longs: &[i64], index: usize, bits: usize) -> usize {

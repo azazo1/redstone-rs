@@ -8,8 +8,8 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, Result, anyhow, bail};
 use clap::{Parser, Subcommand};
 use redstone_core::{
-    Action, BlockPos, BlockStateId, GameTick, ProbeValue, Simulation, SimulationConfig,
-    SparseWorld, TraceEvent, TraceKind,
+    Action, BlockPos, BlockStateId, GameTick, ProbeValue, RedstoneMode, Simulation,
+    SimulationConfig, SparseWorld, TraceEvent, TraceKind,
 };
 use redstone_io::{
     InitializationMode, Scenario, ScenarioActionKind, StructureLoader, StructureStateResolver,
@@ -17,6 +17,7 @@ use redstone_io::{
 use redstone_java_26::{
     JAVA_DATA_VERSION, JAVA_VERSION, Java26Registry, Java26Rules, StateResolveError, StateResolver,
 };
+use redstone_replay_26::{ReplayOptions, ReplayStats, ReplayWriter};
 use tokio::sync::Semaphore;
 use tracing::info;
 use tracing_indicatif::{IndicatifLayer, span_ext::IndicatifSpanExt, style::ProgressStyle};
@@ -73,6 +74,8 @@ enum Command {
     Run {
         scenario: PathBuf,
         #[arg(long)]
+        replay: Option<PathBuf>,
+        #[arg(long)]
         trace: Option<PathBuf>,
         #[arg(long)]
         vcd: Option<PathBuf>,
@@ -81,6 +84,8 @@ enum Command {
     },
     Test {
         path: PathBuf,
+        #[arg(long)]
+        replay: Option<PathBuf>,
         #[arg(long)]
         oracle: bool,
         #[arg(long)]
@@ -139,20 +144,31 @@ async fn main() -> Result<()> {
         ),
         Command::Run {
             scenario,
+            replay,
             trace,
             vcd,
             allow_static_fallback,
-        } => run(&scenario, trace.as_deref(), vcd.as_deref(), allow_static_fallback).await,
+        } => {
+            run(
+                &scenario,
+                replay.as_deref(),
+                trace.as_deref(),
+                vcd.as_deref(),
+                allow_static_fallback,
+            )
+            .await
+        }
         Command::Test {
             path,
+            replay,
             oracle,
             allow_static_fallback,
-        } => test_path(&path, oracle, allow_static_fallback).await,
+        } => test_path(&path, replay.as_deref(), oracle, allow_static_fallback).await,
         Command::Trace {
             scenario,
             output,
             vcd,
-        } => run(&scenario, Some(&output), vcd.as_deref(), false).await,
+        } => run(&scenario, None, Some(&output), vcd.as_deref(), false).await,
         Command::Bench {
             blocks,
             active,
@@ -281,12 +297,14 @@ struct RunSummary {
 
 async fn run(
     scenario_path: &Path,
+    replay_path: Option<&Path>,
     trace_path: Option<&Path>,
     vcd_path: Option<&Path>,
     allow_static_fallback: bool,
 ) -> Result<()> {
     let summary = execute_scenario(
         scenario_path,
+        replay_path,
         trace_path,
         vcd_path,
         allow_static_fallback,
@@ -301,6 +319,7 @@ async fn run(
 
 async fn execute_scenario(
     scenario_path: &Path,
+    replay_path: Option<&Path>,
     trace_path: Option<&Path>,
     vcd_path: Option<&Path>,
     allow_static_fallback: bool,
@@ -347,6 +366,26 @@ async fn execute_scenario(
         simulation.initialize().await?;
     }
 
+    let mut replay = if let Some(path) = replay_path {
+        let name = scenario_path
+            .file_name()
+            .map_or_else(|| scenario_path.display().to_string(), |name| name.to_string_lossy().into_owned());
+        Some(
+            ReplayWriter::new(
+                path,
+                ReplayOptions::new(
+                    name,
+                    scenario.seed,
+                    scenario.mode == RedstoneMode::Experimental,
+                ),
+                simulation.world(),
+            )
+            .with_context(|| format!("初始化 Replay Mod 录像失败: {}", path.display()))?,
+        )
+    } else {
+        None
+    };
+
     let mut action_index = 0;
     let mut samples = BTreeMap::<(GameTick, String), ProbeValue>::new();
     while simulation.current_tick().0 < scenario.max_ticks {
@@ -360,6 +399,15 @@ async fn execute_scenario(
             action_index += 1;
         }
         let delta = simulation.step_with_actions(&current_actions).await?;
+        if let Some(replay) = replay.as_mut() {
+            replay.record_delta(&delta).with_context(|| {
+                format!(
+                    "编码 Replay Mod tick {} 失败: {}",
+                    delta.tick.0,
+                    replay_path.expect("replay path must exist").display()
+                )
+            })?;
+        }
         for sample in delta.probes {
             samples.insert((delta.tick, sample.name), sample.value);
         }
@@ -374,6 +422,13 @@ async fn execute_scenario(
                 expectation.tick.0, expectation.probe, expectation.equals, actual
             ));
         }
+    }
+    if let Some(replay) = replay {
+        let path = replay_path.expect("replay path must exist");
+        let stats = replay
+            .finish()
+            .with_context(|| format!("完成 Replay Mod 录像失败: {}", path.display()))?;
+        log_replay_stats(path, &stats);
     }
     if let Some(path) = trace_path {
         let output = File::create(path).with_context(|| format!("创建轨迹文件失败: {}", path.display()))?;
@@ -398,7 +453,27 @@ async fn execute_scenario(
     })
 }
 
-async fn test_path(path: &Path, oracle: bool, allow_static_fallback: bool) -> Result<()> {
+fn log_replay_stats(path: &Path, stats: &ReplayStats) {
+    info!(
+        path = %path.display(),
+        ticks = stats.ticks,
+        packets = stats.packets,
+        block_updates = stats.block_updates,
+        file_size = stats.file_size,
+        elapsed_ms = stats.elapsed.as_secs_f64() * 1_000.0,
+        "导出 Replay Mod 录像"
+    );
+}
+
+async fn test_path(
+    path: &Path,
+    replay: Option<&Path>,
+    oracle: bool,
+    allow_static_fallback: bool,
+) -> Result<()> {
+    if path.is_dir() && replay.is_some() {
+        bail!("目录测试暂不支持 --replay, 请指定单个场景文件");
+    }
     let mut scenarios = if path.is_dir() {
         std::fs::read_dir(path)?
             .filter_map(Result::ok)
@@ -426,9 +501,16 @@ async fn test_path(path: &Path, oracle: bool, allow_static_fallback: bool) -> Re
     for (index, scenario) in scenarios.into_iter().enumerate() {
         let permit = semaphore.clone().acquire_owned().await?;
         let progress = progress.clone();
+        let replay = replay.map(Path::to_path_buf);
         tasks.push(tokio::spawn(async move {
             let _permit = permit;
-            let result = execute_test_scenario(&scenario, oracle, allow_static_fallback).await;
+            let result = execute_test_scenario(
+                &scenario,
+                replay.as_deref(),
+                oracle,
+                allow_static_fallback,
+            )
+            .await;
             progress.pb_inc(1);
             (index, scenario, result)
         }));
@@ -460,6 +542,7 @@ async fn test_path(path: &Path, oracle: bool, allow_static_fallback: bool) -> Re
 
 async fn execute_test_scenario(
     scenario: &Path,
+    replay: Option<&Path>,
     oracle: bool,
     allow_static_fallback: bool,
 ) -> Result<RunSummary> {
@@ -472,6 +555,7 @@ async fn execute_test_scenario(
     });
     let result = execute_scenario(
         scenario,
+        replay,
         trace_path.as_deref(),
         None,
         allow_static_fallback,
