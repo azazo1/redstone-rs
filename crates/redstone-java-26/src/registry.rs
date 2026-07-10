@@ -389,21 +389,28 @@ fn classify(name: &str, properties: &BTreeMap<String, String>) -> BlockTraits {
             "redstone_block"
                 | "slime_block"
                 | "honey_block"
+                | "piston"
+                | "sticky_piston"
                 | "moving_piston"
                 | "piston_head"
+                | "hopper"
         );
     let sturdy = !non_solid || path == "hopper";
-    let push_reaction = if matches!(
-        path,
-        "bedrock"
-            | "obsidian"
-            | "crying_obsidian"
-            | "respawn_anchor"
-            | "reinforced_deepslate"
-            | "end_portal_frame"
-            | "moving_piston"
-            | "piston_head"
-    ) {
+    let extended_piston = matches!(path, "piston" | "sticky_piston")
+        && properties.get("extended").is_some_and(|value| value == "true");
+    let push_reaction = if extended_piston
+        || matches!(
+            path,
+            "bedrock"
+                | "obsidian"
+                | "crying_obsidian"
+                | "respawn_anchor"
+                | "reinforced_deepslate"
+                | "end_portal_frame"
+                | "moving_piston"
+                | "piston_head"
+        )
+    {
         PushReaction::Block
     } else if path.ends_with("_torch")
         || path == "redstone_wire"

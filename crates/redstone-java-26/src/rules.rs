@@ -339,8 +339,6 @@ impl Java26Rules {
             BlockBehavior::TrappedChest => block_entity_i64(_world, pos, "open_count")
                 .unwrap_or(0)
                 .clamp(0, 15) as u8,
-            BlockBehavior::CopperBulb if state.bool_property("lit") => 15,
-            BlockBehavior::CopperBulb => 0,
             _ => 0,
         }
     }
@@ -365,12 +363,32 @@ impl Java26Rules {
                 }
             }
             BlockBehavior::PressurePlate { .. } => {
-                if direction == Direction::Down {
+                if direction == Direction::Up {
                     self.weak_signal(world, pos, state, direction)
                 } else {
                     0
                 }
             }
+            BlockBehavior::DetectorRail
+            | BlockBehavior::Lectern
+            | BlockBehavior::TrappedChest => {
+                if direction == Direction::Up {
+                    self.weak_signal(world, pos, state, direction)
+                } else {
+                    0
+                }
+            }
+            BlockBehavior::TripwireHook => {
+                if state.direction_property("facing") == Some(direction) {
+                    self.weak_signal(world, pos, state, direction)
+                } else {
+                    0
+                }
+            }
+            BlockBehavior::RedstoneBlock
+            | BlockBehavior::Target
+            | BlockBehavior::DaylightDetector
+            | BlockBehavior::CopperBulb => 0,
             _ => self.weak_signal(world, pos, state, direction),
         }
     }
@@ -802,16 +820,16 @@ impl Java26Rules {
                 let powered = !state.bool_property("powered");
                 let next = self.changed_state(state_id, "powered", powered.to_string())?;
                 if self.set_state_and_notify(ctx, pos, next, "lever_use", None)? {
-                    let attached = pos.relative(attached_direction(&state).opposite());
-                    ctx.update_neighbors(pos, state.kind, None, None);
-                    ctx.update_neighbors(attached, state.kind, None, None);
+                    update_attached_power_neighbors(ctx, pos, &state);
                 }
             }
             BlockBehavior::Button { wooden } if !force_lever => {
                 if !state.bool_property("powered") {
                     let next = self.changed_state(state_id, "powered", "true")?;
-                    self.set_state_and_notify(ctx, pos, next, "button_press", None)?;
-                    ctx.schedule_tick(
+                    if self.set_state_and_notify(ctx, pos, next, "button_press", None)? {
+                        update_attached_power_neighbors(ctx, pos, &state);
+                    }
+                    ctx.schedule_tick_after_neighbors(
                         pos,
                         state.kind,
                         if wooden { 30 } else { 20 },
@@ -832,8 +850,26 @@ impl Java26Rules {
             BlockBehavior::Lectern if !force_button && !force_lever => {
                 if !state.bool_property("powered") {
                     let next = self.changed_state(state_id, "powered", "true")?;
-                    self.set_state_and_notify(ctx, pos, next, "lectern_page_change", None)?;
-                    ctx.schedule_tick(pos, state.kind, 2, TickPriority::Normal);
+                    if self.set_state_and_notify(
+                        ctx,
+                        pos,
+                        next,
+                        "lectern_page_change",
+                        None,
+                    )? {
+                        ctx.update_neighbors(
+                            pos.relative(Direction::Down),
+                            state.kind,
+                            None,
+                            None,
+                        );
+                    }
+                    ctx.schedule_tick_after_neighbors(
+                        pos,
+                        state.kind,
+                        2,
+                        TickPriority::Normal,
+                    );
                 }
             }
             BlockBehavior::NoteBlock if !force_button && !force_lever => {
@@ -1068,7 +1104,9 @@ impl BlockRules for Java26Rules {
             BlockBehavior::Button { .. } => {
                 if state.bool_property("powered") {
                     let next = self.changed_state(state_id, "powered", "false")?;
-                    self.set_state_and_notify(ctx, tick.pos, next, "button_release", None)?;
+                    if self.set_state_and_notify(ctx, tick.pos, next, "button_release", None)? {
+                        update_attached_power_neighbors(ctx, tick.pos, &state);
+                    }
                 }
             }
             BlockBehavior::Torch { .. } => {
@@ -1158,7 +1196,20 @@ impl BlockRules for Java26Rules {
             BlockBehavior::Lectern => {
                 if state.bool_property("powered") {
                     let next = self.changed_state(state_id, "powered", "false")?;
-                    self.set_state_and_notify(ctx, tick.pos, next, "lectern_pulse_end", None)?;
+                    if self.set_state_and_notify(
+                        ctx,
+                        tick.pos,
+                        next,
+                        "lectern_pulse_end",
+                        None,
+                    )? {
+                        ctx.update_neighbors(
+                            tick.pos.relative(Direction::Down),
+                            state.kind,
+                            None,
+                            None,
+                        );
+                    }
                 }
             }
             BlockBehavior::Target => {
@@ -1493,13 +1544,25 @@ impl Java26Rules {
                 (power > 0).to_string()
             };
             let next = self.changed_state(state.id, property, value)?;
-            self.set_state_and_notify(ctx, pos, next, "entity_sensor", None)?;
+            if self.set_state_and_notify(ctx, pos, next, "entity_sensor", None)?
+                && matches!(
+                    state.behavior,
+                    BlockBehavior::PressurePlate { .. } | BlockBehavior::DetectorRail
+                )
+            {
+                ctx.update_neighbors(
+                    pos.relative(Direction::Down),
+                    state.kind,
+                    None,
+                    None,
+                );
+            }
             if matches!(state.behavior, BlockBehavior::Tripwire) {
                 self.refresh_tripwire_hooks(ctx, pos, power > 0)?;
             }
         }
         if power > 0 && !ctx.has_scheduled_tick(pos, state.kind) {
-            ctx.schedule_tick(pos, state.kind, delay, TickPriority::Normal);
+            ctx.schedule_tick_after_neighbors(pos, state.kind, delay, TickPriority::Normal);
         }
         Ok(())
     }
@@ -1527,7 +1590,15 @@ impl Java26Rules {
                         if state.bool_property("powered") != powered {
                             next = self.changed_state(next, "powered", powered.to_string())?;
                         }
-                        self.set_state_and_notify(ctx, cursor, next, "tripwire_hook", None)?;
+                        if self.set_state_and_notify(
+                            ctx,
+                            cursor,
+                            next,
+                            "tripwire_hook",
+                            None,
+                        )? {
+                            update_attached_power_neighbors(ctx, cursor, &state);
+                        }
                         break;
                     }
                     _ => break,
@@ -1802,6 +1873,16 @@ fn attached_direction(state: &StateDefinition) -> Direction {
         Some("floor") => Direction::Up,
         _ => state.direction_property("facing").unwrap_or(Direction::North),
     }
+}
+
+fn update_attached_power_neighbors(
+    ctx: &mut EventContext<'_>,
+    pos: BlockPos,
+    state: &StateDefinition,
+) {
+    let attached = pos.relative(attached_direction(state).opposite());
+    ctx.update_neighbors(pos, state.kind, None, None);
+    ctx.update_neighbors(attached, state.kind, None, None);
 }
 
 fn torch_input_direction(state: &StateDefinition) -> Direction {
