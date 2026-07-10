@@ -123,6 +123,7 @@ pub struct Java26Registry {
     catalog: Arc<OfficialStateCatalog>,
     kinds_by_name: HashMap<String, BlockKindId>,
     names_by_kind: Vec<String>,
+    property_transitions: HashMap<BlockStateId, HashMap<String, HashMap<String, BlockStateId>>>,
 }
 
 impl Default for Java26Registry {
@@ -139,6 +140,7 @@ impl Java26Registry {
             catalog,
             kinds_by_name: HashMap::new(),
             names_by_kind: Vec::new(),
+            property_transitions: HashMap::new(),
         };
         registry
             .resolve_state("minecraft:air", &BTreeMap::new())
@@ -166,15 +168,31 @@ impl Java26Registry {
         &mut self,
         state: BlockStateId,
         name: &str,
-        value: impl Into<String>,
+        value: impl AsRef<str>,
     ) -> Result<BlockStateId, StateResolveError> {
+        let value = value.as_ref();
+        if let Some(next) = self
+            .property_transitions
+            .get(&state)
+            .and_then(|properties| properties.get(name))
+            .and_then(|values| values.get(value))
+        {
+            return Ok(*next);
+        }
         let definition = self
             .state(state)
             .cloned()
             .ok_or(StateResolveError::UnknownState(state))?;
         let mut properties = definition.properties.as_ref().clone();
-        properties.insert(name.to_owned(), value.into());
-        self.resolve_state(definition.name.as_ref(), &properties)
+        properties.insert(name.to_owned(), value.to_owned());
+        let next = self.resolve_state(definition.name.as_ref(), &properties)?;
+        self.property_transitions
+            .entry(state)
+            .or_default()
+            .entry(name.to_owned())
+            .or_default()
+            .insert(value.to_owned(), next);
+        Ok(next)
     }
 
     pub fn state_by_name(

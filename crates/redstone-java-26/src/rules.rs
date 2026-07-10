@@ -53,7 +53,7 @@ impl Java26Rules {
         &mut self,
         state: BlockStateId,
         property: &str,
-        value: impl Into<String>,
+        value: impl AsRef<str>,
     ) -> Result<BlockStateId, RulesError> {
         self.registry
             .with_property(state, property, value)

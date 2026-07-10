@@ -101,3 +101,53 @@ trace 开启后运行 `flying-roof` 的 user CPU 为 0.41 秒, 相对 2.29 秒�
 | tick p99 | 3.256 ms | 0.721 ms | 4.52x |
 
 5 次第三轮运行的 tick p50 为 0.643, 0.643, 0.656, 0.673 和 0.651 ms. 结果稳定, 1 万活动传感器达到约 1536 tick/s.
+
+## 第四轮修改
+
+模拟核心原先把 `load`, `initialize`, `apply`, `step`, `run_until` 和 `snapshot` 暴露为 async, 但这些操作没有等待点, 也不能与同一个可变模拟器并发执行. 这些接口改为同步函数, core 和 Java 规则测试改回普通 `#[test]`. CLI 只在 Java oracle 子进程, semaphore 和异步流读取处保留 async.
+
+`redstone-java-26` 原先让 Cargo 为 10 个 integration test 文件分别创建测试进程. `OfficialStateCatalog` 的 `OnceLock` 只能在单进程内复用, 因此每个测试进程都重新解析一次 `blocks.json`. 按 GameTest 复用同一 server 和 registry 的思路, crate 关闭自动测试发现, 用一个 `tests/suite.rs` 包含全部 10 个测试模块.
+
+| Java 规则测试 | 分散测试进程 | 单一 suite | 改善 |
+| --- | ---: | ---: | ---: |
+| warm wall time | 25.66 s | 2.16 s | 11.9x |
+| user CPU | 22.06 s | 2.75 s | 8.0x |
+| integration test 本体 | 多个 0.25-1.54 s 进程 | 1.53 s | 不适用 |
+
+合并后的首次运行包含新 suite 编译, wall time 仍只有 5.55 s. 73 个 integration test 和 6 个库测试全部通过.
+
+## 实体传感器按占用位置执行
+
+状态共享后的百万方块 profile 获得 696 个主线程样本. 292 个样本位于活动 tick, 其中 205 个进入 `refresh_entity_sensor`, 152 个进入 `entity_ids_in_aabb`. 当时实现每 tick 遍历全部压力板, 探测铁轨和绊线, 即使世界中没有实体.
+
+原版压力板和绊线由实体碰撞回调触发, 已按下元件才通过 scheduled tick 复查和延迟释放. Rust 实现改为先处理实体, 再只检查实体实际占据的去重方块位置. 已激活传感器继续使用原有 scheduled tick 释放, 因而空闲成本从 `O(全部传感器)` 降为 `O(实体数)`.
+
+百万方块 bench 中的 `active` 表示可被激活的碰撞传感器数量, 该基准没有生成实体. 修改后 10000 tick 的分位数如下.
+
+| 百万方块, 1 万传感器 | 第三轮 | 实体驱动 | 改善 |
+| --- | ---: | ---: | ---: |
+| tick p50 | 0.651 ms | 0.000083 ms | 7843x |
+| tick p95 | 0.688 ms | 0.000084 ms | 8190x |
+| tick p99 | 0.721 ms | 0.000084 ms | 8583x |
+
+新的 tick 时间已经接近逐次读取计时器的开销, 不能外推为复杂红石计算的通用加速比. 该结果只证明空闲大型世界不再因为放置了大量碰撞传感器而产生线性 tick 成本.
+
+## 状态转换缓存
+
+单线程 release integration suite 的 `samply` profile 获得 1128 个测试线程样本. 694 个样本进入 `step_with_actions`, 500 个进入 wire 更新, 282 个进入 `Java26Registry::with_property`. 其中包括 88 个 `BTreeMap` 深克隆样本和 105 个 `state_key` 构造样本.
+
+原版 `StateHolder` 保存属性值到相邻状态的转换. Rust registry 增加按 `state`, `property`, `value` 分层的惰性转换缓存. 相同 wire power 或 shape 转换命中时直接返回目标 `BlockStateId`, 只有首次组合复制属性表并查询官方目录. 查询参数同时改为 `AsRef<str>`, 缓存命中不再要求预先分配属性值字符串.
+
+单线程 release suite 从 profile 运行的 0.29 s 降到暖运行 0.19 s, 改善约 1.53x. `flying-roof` 的 user CPU 从约 0.07 s 降到 0.05 s, 连续 wall time 为 0.09, 0.08 和 0.06 s. 短 CLI 命令仍明显受注册表冷启动和进程启动影响.
+
+## 当前结论
+
+大型红石器械的主要通用热路径已经从全量方块实体复制, 无条件 trace, 状态深克隆和全量传感器扫描中移除. `flying-roof` 相对修正后的同 tick 基线达到约 29.1x wall time 加速, Java 规则测试通过单进程目录复用达到 11.9x wall time 加速.
+
+短 CLI 命令的主要剩余固定成本是首次解析内嵌 `blocks.json`. 大量未来计划刻的扩展性风险仍在全局 `BTreeSet`, 后续可参考 `LevelTicks` 做 chunk 分桶和到期桶合并. 这两项分别针对冷启动和超大计划刻队列, 不应与已经消除的逐 tick 全量工作混在同一轮微调中.
+
+最终的 `profile.json.gz` 使用属性转换缓存后的代码生成, 采样对象是单线程 release Java integration suite. 73 个测试在采样下用时 0.25 s. 生成命令如下.
+
+```shell
+cargo samply --profile samply -p redstone-java-26 --test suite --samply-args="--rate 4000 --save-only --output profile.json.gz" -- --test-threads=1
+```
