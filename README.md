@@ -58,6 +58,8 @@ cargo run --release -p redstone-cli -- bench
 
 `run --replay` 和单场景 `test --replay` 会直接从 Rust 仿真生成 Replay Mod 格式 14 录像. 录像目标版本为 Minecraft `26.1.2`, 每个游戏 tick 对应 50 ms. 初始原理图声明区域覆盖的全部 chunk 会在同一批次加载, 外围保留一圈渲染邻居. 后续方块变化进入新 chunk 时只加载目标 chunk 的局部邻接圈, 可随飞行器移动持续扩展, 不会补齐与原理图之间的无关 chunk. 目录批量测试暂不支持共享录像输出路径. 断言失败时录像仍会完成并保留, 仿真或编码失败时不会替换目标文件.
 
+> 注: Replay Mod 版本: replaymod-26.1-2.6.26 fabric
+
 ## 场景格式
 
 场景固定指定版本, 红石模式, 随机种子, 结构来源, 初始化方式, 动作, 探针和断言. 动作在目标游戏刻的 `pre_tick` 阶段按声明顺序执行, 断言读取 `post_tick` 探针值.

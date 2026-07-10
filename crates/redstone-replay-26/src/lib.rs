@@ -5,24 +5,25 @@ use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use crc32fast::Hasher;
-use redstone_core::{BlockPos, SparseWorld, WorldDelta};
+use redstone_core::{BlockEntityChange, BlockPos, SparseWorld, WorldDelta, WorldEvent};
 use serde::Serialize;
 use thiserror::Error;
 use zip::ZipWriter;
 use zip::write::SimpleFileOptions;
 
 use crate::protocol::PacketState;
+use crate::protocol::block_entity::{BlockEntityEncodeError, block_entity_data};
 use crate::protocol::chunk::{
     ChunkSnapshot, MAX_BLOCK_STATE_ID, MAX_Y, MIN_Y, encode_chunk,
 };
 use crate::protocol::packets::{
     Camera, CONFIG_ENABLED_FEATURES, CONFIG_FINISH, CONFIG_REGISTRY_DATA,
-    CONFIG_SELECT_KNOWN_PACKS, CONFIG_UPDATE_TAGS, LOGIN_FINISHED, PLAY_BLOCK_UPDATE,
-    PLAY_CHUNK_BATCH_FINISHED, PLAY_CHUNK_BATCH_START, PLAY_LEVEL_CHUNK_WITH_LIGHT, PLAY_LOGIN,
-    PLAY_PLAYER_POSITION, PLAY_SET_CHUNK_CACHE_CENTER, PLAY_SET_CHUNK_CACHE_RADIUS,
-    PLAY_SET_DEFAULT_SPAWN, PLAY_SET_SIMULATION_DISTANCE, PLAY_SET_TIME, block_update,
-    chunk_cache_center, default_spawn, enabled_features, login_finished, play_login,
-    player_position, select_known_packs, set_time, single_var_int,
+    CONFIG_SELECT_KNOWN_PACKS, CONFIG_UPDATE_TAGS, LOGIN_FINISHED, PLAY_BLOCK_ENTITY_DATA,
+    PLAY_BLOCK_UPDATE, PLAY_CHUNK_BATCH_FINISHED, PLAY_CHUNK_BATCH_START,
+    PLAY_LEVEL_CHUNK_WITH_LIGHT, PLAY_LOGIN, PLAY_PLAYER_POSITION, PLAY_SET_CHUNK_CACHE_CENTER,
+    PLAY_SET_CHUNK_CACHE_RADIUS, PLAY_SET_DEFAULT_SPAWN, PLAY_SET_SIMULATION_DISTANCE,
+    PLAY_SET_TIME, block_update, chunk_cache_center, default_spawn, enabled_features,
+    login_finished, play_login, player_position, select_known_packs, set_time, single_var_int,
 };
 use crate::protocol::registry::{registry_packets, required_tags_packet};
 
@@ -177,17 +178,38 @@ impl ReplayWriter {
             });
         }
         let timestamp = timestamp_for_tick(delta.tick.0)?;
-        for change in &delta.changes {
-            validate_block(change.pos, change.new_state.0)?;
-            let chunk = chunk_pos(change.pos);
-            self.ensure_chunk_area(timestamp, chunk)?;
-            self.write_packet(
-                timestamp,
-                PacketState::Play,
-                PLAY_BLOCK_UPDATE,
-                &block_update(change.pos, change.new_state.0),
-            )?;
-            self.block_updates += 1;
+        for event in &delta.events {
+            match event {
+                WorldEvent::Block { change } => {
+                    validate_block(change.pos, change.new_state.0)?;
+                    self.ensure_chunk_area(timestamp, chunk_pos(change.pos))?;
+                    self.write_packet(
+                        timestamp,
+                        PacketState::Play,
+                        PLAY_BLOCK_UPDATE,
+                        &block_update(change.pos, change.new_state.0),
+                    )?;
+                    self.block_updates += 1;
+                }
+                WorldEvent::BlockEntity { change } => match change {
+                    BlockEntityChange::Create { pos, data }
+                    | BlockEntityChange::Update {
+                        pos,
+                        new_data: data,
+                        ..
+                    } => {
+                        validate_position(*pos)?;
+                        self.ensure_chunk_area(timestamp, chunk_pos(*pos))?;
+                        self.write_packet(
+                            timestamp,
+                            PacketState::Play,
+                            PLAY_BLOCK_ENTITY_DATA,
+                            &block_entity_data(*pos, data)?,
+                        )?;
+                    }
+                    BlockEntityChange::Remove { .. } => {}
+                },
+            }
         }
         self.last_tick = delta.tick.0;
         self.last_timestamp = timestamp;
@@ -235,6 +257,13 @@ impl ReplayWriter {
         for (pos, state) in world.iter_blocks() {
             validate_block(pos, state.0)?;
             chunks.entry(chunk_pos(pos)).or_default().set_block(pos, state);
+        }
+        for (pos, data) in world.block_entities() {
+            validate_position(*pos)?;
+            chunks
+                .entry(chunk_pos(*pos))
+                .or_default()
+                .set_block_entity(*pos, data.clone());
         }
         let region = ReplayRegion::new(self.options.region.min, self.options.region.max);
         validate_position(region.min)?;
@@ -336,7 +365,7 @@ impl ReplayWriter {
                 0,
                 PacketState::Play,
                 PLAY_LEVEL_CHUNK_WITH_LIGHT,
-                &encode_chunk(x, z, &chunk),
+                &encode_chunk(x, z, &chunk)?,
             )?;
             self.loaded_chunks.insert((x, z));
         }
@@ -390,7 +419,7 @@ impl ReplayWriter {
                 timestamp,
                 PacketState::Play,
                 PLAY_LEVEL_CHUNK_WITH_LIGHT,
-                &encode_chunk(chunk.0, chunk.1, &ChunkSnapshot::default()),
+                &encode_chunk(chunk.0, chunk.1, &ChunkSnapshot::default())?,
             )?;
             self.loaded_chunks.insert(*chunk);
         }
@@ -652,13 +681,25 @@ pub enum ReplayError {
     Json(#[from] serde_json::Error),
     #[error(transparent)]
     Zip(#[from] zip::result::ZipError),
+    #[error("方块实体编码失败: {message}")]
+    BlockEntity { message: String },
+}
+
+impl From<BlockEntityEncodeError> for ReplayError {
+    fn from(error: BlockEntityEncodeError) -> Self {
+        Self::BlockEntity {
+            message: error.to_string(),
+        }
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use std::io::Read;
 
-    use redstone_core::{BlockChange, BlockStateId, GameTick};
+    use redstone_core::{
+        BlockChange, BlockEntityChange, BlockEntityData, BlockStateId, GameTick, WorldEvent,
+    };
     use zip::ZipArchive;
 
     use super::*;
@@ -696,10 +737,12 @@ mod tests {
         writer
             .record_delta(&WorldDelta {
                 tick: GameTick(2),
-                changes: vec![BlockChange {
-                    pos: BlockPos::new(32, 0, -1),
-                    old_state: BlockStateId(0),
-                    new_state: BlockStateId(1),
+                events: vec![WorldEvent::Block {
+                    change: BlockChange {
+                        pos: BlockPos::new(32, 0, -1),
+                        old_state: BlockStateId(0),
+                        new_state: BlockStateId(1),
+                    },
                 }],
                 probes: Vec::new(),
             })
@@ -707,7 +750,7 @@ mod tests {
         writer
             .record_delta(&WorldDelta {
                 tick: GameTick(3),
-                changes: Vec::new(),
+                events: Vec::new(),
                 probes: Vec::new(),
             })
             .unwrap();
@@ -759,10 +802,12 @@ mod tests {
         .unwrap();
         let error = writer.record_delta(&WorldDelta {
             tick: GameTick(1),
-            changes: vec![BlockChange {
-                pos: BlockPos::new(0, MAX_Y + 1, 0),
-                old_state: BlockStateId(0),
-                new_state: BlockStateId(1),
+            events: vec![WorldEvent::Block {
+                change: BlockChange {
+                    pos: BlockPos::new(0, MAX_Y + 1, 0),
+                    old_state: BlockStateId(0),
+                    new_state: BlockStateId(1),
+                },
             }],
             probes: Vec::new(),
         });
@@ -772,6 +817,88 @@ mod tests {
         assert_eq!(std::fs::read_dir(&directory.path).unwrap().count(), 0);
     }
 
+    #[test]
+    fn moving_piston_data_immediately_follows_its_block_update() {
+        let directory = TestDirectory::new();
+        let output = directory.path.join("piston.mcpr");
+        let world = SparseWorld::new(BlockStateId(0));
+        let pos = BlockPos::new(1, 0, 1);
+        let moving_piston = BlockEntityData {
+            kind: "minecraft:moving_piston".to_owned(),
+            fields: BTreeMap::from([
+                ("direction".to_owned(), serde_json::Value::String("east".to_owned())),
+                ("extending".to_owned(), serde_json::Value::Bool(true)),
+                (
+                    "moved_state_name".to_owned(),
+                    serde_json::Value::String("minecraft:orange_wool".to_owned()),
+                ),
+                ("moved_state_properties".to_owned(), serde_json::json!({})),
+                ("progress".to_owned(), serde_json::Value::from(0.0)),
+                ("source".to_owned(), serde_json::Value::Bool(false)),
+            ]),
+        };
+        let mut writer = ReplayWriter::new(
+            &output,
+            ReplayOptions::new(
+                "piston.toml",
+                0,
+                false,
+                ReplayRegion::new(BlockPos::ZERO, BlockPos::new(2, 1, 2)),
+            ),
+            &world,
+        )
+        .unwrap();
+        writer
+            .record_delta(&WorldDelta {
+                tick: GameTick(1),
+                events: vec![
+                    WorldEvent::Block {
+                        change: BlockChange {
+                            pos,
+                            old_state: BlockStateId(0),
+                            new_state: BlockStateId(1),
+                        },
+                    },
+                    WorldEvent::BlockEntity {
+                        change: BlockEntityChange::Create {
+                            pos,
+                            data: moving_piston,
+                        },
+                    },
+                ],
+                probes: Vec::new(),
+            })
+            .unwrap();
+        writer.finish().unwrap();
+
+        let mut archive = ZipArchive::new(File::open(output).unwrap()).unwrap();
+        let recording = read_entry(&mut archive, "recording.tmcpr");
+        let packets = parse_packet_records(&recording);
+        let block_entity_index = packets
+            .iter()
+            .position(|packet| packet.id == PLAY_BLOCK_ENTITY_DATA)
+            .unwrap();
+        let block_update = &packets[block_entity_index - 1];
+        let block_entity = &packets[block_entity_index];
+        assert_eq!(block_update.id, PLAY_BLOCK_UPDATE);
+        assert_eq!(block_update.timestamp, block_entity.timestamp);
+        assert_eq!(&block_update.payload[..8], &block_entity.payload[..8]);
+        let (block_entity_type, type_length) = read_var_int(&block_entity.payload[8..]);
+        assert_eq!(block_entity_type, 11);
+        let nbt = &block_entity.payload[8 + type_length..];
+        assert_eq!(nbt[0], 10);
+        for field in [
+            b"blockState".as_slice(),
+            b"facing".as_slice(),
+            b"progress".as_slice(),
+            b"extending".as_slice(),
+            b"source".as_slice(),
+            b"minecraft:orange_wool".as_slice(),
+        ] {
+            assert!(nbt.windows(field.len()).any(|value| value == field));
+        }
+    }
+
     fn read_entry(archive: &mut ZipArchive<File>, name: &str) -> Vec<u8> {
         let mut entry = archive.by_name(name).unwrap();
         let mut bytes = Vec::new();
@@ -779,14 +906,31 @@ mod tests {
         bytes
     }
 
-    fn parse_packets(mut bytes: &[u8]) -> Vec<(i32, i32)> {
+    fn parse_packets(bytes: &[u8]) -> Vec<(i32, i32)> {
+        parse_packet_records(bytes)
+            .into_iter()
+            .map(|packet| (packet.timestamp, packet.id))
+            .collect()
+    }
+
+    struct PacketRecord<'a> {
+        timestamp: i32,
+        id: i32,
+        payload: &'a [u8],
+    }
+
+    fn parse_packet_records(mut bytes: &[u8]) -> Vec<PacketRecord<'_>> {
         let mut packets = Vec::new();
         while !bytes.is_empty() {
             let timestamp = i32::from_be_bytes(bytes[0..4].try_into().unwrap());
             let length = i32::from_be_bytes(bytes[4..8].try_into().unwrap()) as usize;
             let packet = &bytes[8..8 + length];
-            let (packet_id, _) = read_var_int(packet);
-            packets.push((timestamp, packet_id));
+            let (id, id_length) = read_var_int(packet);
+            packets.push(PacketRecord {
+                timestamp,
+                id,
+                payload: &packet[id_length..],
+            });
             bytes = &bytes[8 + length..];
         }
         packets

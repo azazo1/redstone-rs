@@ -1,3 +1,4 @@
+pub(crate) mod block_entity;
 pub(crate) mod buf;
 pub(crate) mod chunk;
 pub(crate) mod packets;

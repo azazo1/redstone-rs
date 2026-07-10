@@ -71,6 +71,13 @@ fn vanilla_structure_round_trip_loads_blocks_block_entities_and_entities() {
                             ("Slot".to_owned(), Value::Byte(2)),
                             ("id".to_owned(), Value::String("minecraft:redstone".to_owned())),
                             ("count".to_owned(), Value::Int(12)),
+                            (
+                                "components".to_owned(),
+                                Value::Compound(HashMap::from([(
+                                    "minecraft:custom_name".to_owned(),
+                                    Value::String("{\"text\":\"Signal\"}".to_owned()),
+                                )])),
+                            ),
                         ]))]),
                     ),
                 ])),
@@ -128,6 +135,10 @@ fn vanilla_structure_round_trip_loads_blocks_block_entities_and_entities() {
     assert_eq!(block_entity.fields["slot_count"], serde_json::Value::from(5));
     assert_eq!(block_entity.fields["capacity"], serde_json::Value::from(320));
     assert_eq!(block_entity.fields["cooldown"], serde_json::Value::from(6));
+    assert_eq!(
+        block_entity.fields["inventory"][0]["components"]["minecraft:custom_name"],
+        "{\"text\":\"Signal\"}"
+    );
     let entity = loaded.world.entities().next().unwrap().1;
     assert_eq!(entity.kind, "minecraft:item_frame");
     assert_eq!(entity.position, [9.5, 20.0, 30.5]);

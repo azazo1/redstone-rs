@@ -1,7 +1,8 @@
 use std::collections::{BTreeMap, HashMap};
 
-use redstone_core::{BlockPos, BlockStateId};
+use redstone_core::{BlockEntityData, BlockPos, BlockStateId};
 
+use super::block_entity::{BlockEntityEncodeError, write_chunk_block_entity};
 use super::buf::PacketBuf;
 
 pub(crate) const MIN_Y: i32 = -64;
@@ -18,6 +19,7 @@ const LIGHT_BYTES: usize = 2_048;
 #[derive(Clone, Debug, Default)]
 pub(crate) struct ChunkSnapshot {
     sections: BTreeMap<i32, Vec<BlockStateId>>,
+    block_entities: BTreeMap<BlockPos, BlockEntityData>,
 }
 
 impl ChunkSnapshot {
@@ -31,6 +33,10 @@ impl ChunkSnapshot {
         let y = pos.y.rem_euclid(16) as usize;
         let z = pos.z.rem_euclid(16) as usize;
         section[(y * 16 + z) * 16 + x] = state;
+    }
+
+    pub(crate) fn set_block_entity(&mut self, pos: BlockPos, data: BlockEntityData) {
+        self.block_entities.insert(pos, data);
     }
 
     fn section(&self, section_y: i32) -> Option<&[BlockStateId]> {
@@ -56,7 +62,11 @@ impl ChunkSnapshot {
     }
 }
 
-pub(crate) fn encode_chunk(x: i32, z: i32, chunk: &ChunkSnapshot) -> Vec<u8> {
+pub(crate) fn encode_chunk(
+    x: i32,
+    z: i32,
+    chunk: &ChunkSnapshot,
+) -> Result<Vec<u8>, BlockEntityEncodeError> {
     let mut output = PacketBuf::new();
     output.write_i32(x);
     output.write_i32(z);
@@ -69,9 +79,12 @@ pub(crate) fn encode_chunk(x: i32, z: i32, chunk: &ChunkSnapshot) -> Vec<u8> {
     }
     output.write_len(section_data.as_slice().len());
     output.write_bytes(section_data.as_slice());
-    output.write_var_i32(0);
+    output.write_len(chunk.block_entities.len());
+    for (pos, data) in &chunk.block_entities {
+        write_chunk_block_entity(&mut output, *pos, data)?;
+    }
     write_light_data(&mut output);
-    output.into_inner()
+    Ok(output.into_inner())
 }
 
 fn write_section(output: &mut PacketBuf, states: Option<&[BlockStateId]>) {
@@ -203,11 +216,51 @@ mod tests {
     fn chunk_uses_negative_chunk_coordinates_and_complete_light() {
         let mut chunk = ChunkSnapshot::default();
         chunk.set_block(BlockPos::new(-17, -64, -1), BlockStateId(1));
-        let encoded = encode_chunk(-2, -1, &chunk);
+        let encoded = encode_chunk(-2, -1, &chunk).unwrap();
         assert_eq!(&encoded[0..4], &(-2i32).to_be_bytes());
         assert_eq!(&encoded[4..8], &(-1i32).to_be_bytes());
         assert_eq!(encoded[8], 2);
         assert!(encoded.windows(LIGHT_BYTES).any(|window| window.iter().all(|byte| *byte == 0xff)));
+    }
+
+    #[test]
+    fn chunk_contains_network_block_entities() {
+        let mut chunk = ChunkSnapshot::default();
+        chunk.set_block_entity(
+            BlockPos::new(-17, 12, -1),
+            BlockEntityData {
+                kind: "minecraft:sign".to_owned(),
+                fields: BTreeMap::from([(
+                    "front_text".to_owned(),
+                    serde_json::json!({
+                        "messages": ["one", "two", "three", "four"],
+                        "filtered_messages": ["one", "two", "three", "four"],
+                        "color": "black",
+                        "has_glowing_text": false,
+                    }),
+                )]),
+            },
+        );
+        let encoded = encode_chunk(-2, -1, &chunk).unwrap();
+        let mut offset = 8;
+        let heightmap_count = read_var_int(&encoded, &mut offset);
+        for _ in 0..heightmap_count {
+            read_var_int(&encoded, &mut offset);
+            let storage_length = read_var_int(&encoded, &mut offset) as usize;
+            offset += storage_length * 8;
+        }
+        let section_length = read_var_int(&encoded, &mut offset) as usize;
+        offset += section_length;
+
+        assert_eq!(read_var_int(&encoded, &mut offset), 1);
+        assert_eq!(encoded[offset], 0xff);
+        offset += 1;
+        assert_eq!(i16::from_be_bytes(encoded[offset..offset + 2].try_into().unwrap()), 12);
+        offset += 2;
+        assert_eq!(read_var_int(&encoded, &mut offset), 7);
+        assert_eq!(encoded[offset], 10);
+        assert!(encoded[offset..].windows(10).any(|value| value == b"front_text"));
+        assert!(encoded[offset..].windows(9).any(|value| value == b"back_text"));
     }
 
     fn encoded_bits(distinct: usize) -> u8 {
@@ -217,5 +270,18 @@ mod tests {
         let mut output = PacketBuf::new();
         write_paletted_container(&mut output, &values, 4, 8, BLOCK_GLOBAL_BITS);
         output.as_slice()[0]
+    }
+
+    fn read_var_int(bytes: &[u8], offset: &mut usize) -> i32 {
+        let mut value = 0u32;
+        for index in 0..5 {
+            let byte = bytes[*offset];
+            *offset += 1;
+            value |= u32::from(byte & 0x7f) << (index * 7);
+            if byte & 0x80 == 0 {
+                return value as i32;
+            }
+        }
+        panic!("invalid var int")
     }
 }

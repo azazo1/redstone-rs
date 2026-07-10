@@ -244,9 +244,50 @@ pub struct BlockChange {
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum BlockEntityChange {
+    Create {
+        pos: BlockPos,
+        data: BlockEntityData,
+    },
+    Update {
+        pos: BlockPos,
+        old_data: BlockEntityData,
+        new_data: BlockEntityData,
+    },
+    Remove {
+        pos: BlockPos,
+        data: BlockEntityData,
+    },
+}
+
+impl BlockEntityChange {
+    pub fn pos(&self) -> BlockPos {
+        match self {
+            Self::Create { pos, .. } | Self::Update { pos, .. } | Self::Remove { pos, .. } => *pos,
+        }
+    }
+
+    pub fn current_data(&self) -> Option<&BlockEntityData> {
+        match self {
+            Self::Create { data, .. } => Some(data),
+            Self::Update { new_data, .. } => Some(new_data),
+            Self::Remove { .. } => None,
+        }
+    }
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum WorldEvent {
+    Block { change: BlockChange },
+    BlockEntity { change: BlockEntityChange },
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct WorldDelta {
     pub tick: GameTick,
-    pub changes: Vec<BlockChange>,
+    pub events: Vec<WorldEvent>,
     pub probes: Vec<ProbeSample>,
 }
 

@@ -1,0 +1,23 @@
+version = "26.1.2"
+mode = "default"
+seed = 0
+max_ticks = 1000
+
+[source]
+path = "../schematics/piston-gate-3x3.nbt"
+initialization = "notify"
+
+[[actions]]
+tick = 10
+type = "pull_lever"
+pos = { x = 3, y = 1, z = 0 }
+
+[[actions]]
+tick = 100
+type = "pull_lever"
+pos = { x = 3, y = 1, z = 0 }
+
+[[probes]]
+name = "quartz_rb"            # 右下角 (原点在更右下角)
+type = "block_state"
+pos = { x = 3, y = 5, z = 1 }

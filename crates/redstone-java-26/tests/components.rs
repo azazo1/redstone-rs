@@ -1,8 +1,9 @@
 use std::collections::BTreeMap;
 
 use redstone_core::{
-    Action, BlockEntityData, BlockPos, BlockStateId, Direction, EntityData, Probe, ProbeValue,
-    RedstoneMode, Simulation, SimulationConfig, SparseWorld, TraceKind,
+    Action, BlockEntityChange, BlockEntityData, BlockPos, BlockStateId, Direction, EntityData,
+    Probe, ProbeValue, RedstoneMode, Simulation, SimulationConfig, SparseWorld, TraceKind,
+    WorldEvent,
 };
 use redstone_java_26::{Java26Registry, Java26Rules, StateResolver};
 
@@ -327,12 +328,29 @@ async fn hopper_pulls_one_item_and_starts_an_eight_tick_cooldown() {
         .await
         .unwrap();
 
-    simulation.step().await.unwrap();
+    let delta = simulation.step().await.unwrap();
 
     assert_eq!(simulation.world().block_entity(hopper_pos).unwrap().fields["item_count"], 1);
     assert_eq!(simulation.world().block_entity(source_pos).unwrap().fields["item_count"], 1);
     assert_eq!(simulation.world().block_entity(target_pos).unwrap().fields["item_count"], 0);
     assert_eq!(simulation.world().block_entity(hopper_pos).unwrap().fields["cooldown"], 8);
+    let updates = delta
+        .events
+        .iter()
+        .filter_map(|event| match event {
+            WorldEvent::BlockEntity {
+                change: BlockEntityChange::Update { pos, new_data, .. },
+            } => Some((*pos, new_data)),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(
+        updates.iter().map(|(pos, _)| *pos).collect::<Vec<_>>(),
+        [hopper_pos, source_pos, hopper_pos]
+    );
+    assert_eq!(updates[0].1.fields["item_count"], 1);
+    assert_eq!(updates[1].1.fields["item_count"], 1);
+    assert_eq!(updates[2].1.fields["cooldown"], 8);
 }
 
 #[tokio::test]

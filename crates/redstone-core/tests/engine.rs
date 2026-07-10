@@ -1,10 +1,10 @@
 use std::collections::BTreeMap;
 
 use redstone_core::{
-    Action, BlockEntityData, BlockEvent, BlockKindId, BlockPos, BlockRules, BlockStateId,
-    DeferredBlockChange, DeferredBlockEntityUpdate, EventContext, NeighborUpdate, Probe,
-    ProbeValue, RedstoneMode, RulesError, ScheduledTick, Simulation, SimulationConfig, SparseWorld,
-    TickPriority, TraceKind,
+    Action, BlockEntityChange, BlockEntityData, BlockEvent, BlockKindId, BlockPos, BlockRules,
+    BlockStateId, DeferredBlockChange, DeferredBlockEntityUpdate, EventContext, NeighborUpdate,
+    Probe, ProbeValue, RedstoneMode, RulesError, ScheduledTick, Simulation, SimulationConfig,
+    SparseWorld, TickPriority, TraceKind, WorldEvent,
 };
 
 const AIR: BlockStateId = BlockStateId(0);
@@ -78,6 +78,10 @@ impl BlockRules for MockRules {
                 Vec::new(),
             );
         }
+        if let Action::SetBlockEntity { pos, data } = action {
+            ctx.set_block(*pos, BLOCK, "test_block_entity_state")?;
+            ctx.set_block_entity(*pos, data.clone());
+        }
         Ok(())
     }
 
@@ -106,6 +110,21 @@ impl BlockRules for MockRules {
         pos: BlockPos,
     ) -> Result<(), RulesError> {
         self.block_entity_order.push(("tick", pos));
+        let directly_mutated = ctx
+            .world
+            .block_entity(pos)
+            .is_some_and(|data| data.kind == "test:mutable");
+        if directly_mutated
+            && let Some(data) = ctx.world.block_entity_mut(pos)
+        {
+            let counter = data
+                .fields
+                .get("counter")
+                .and_then(serde_json::Value::as_i64)
+                .unwrap_or(0);
+            data.fields
+                .insert("counter".to_owned(), serde_json::Value::from(counter + 1));
+        }
         ctx.neighbor_changed(NeighborUpdate {
             pos: pos.relative(redstone_core::Direction::Up),
             source_pos: pos,
@@ -139,6 +158,83 @@ impl BlockRules for MockRules {
     fn read_probe(&self, _world: &SparseWorld, _probe: &Probe) -> ProbeValue {
         ProbeValue::Integer(self.scheduled_executions as i64)
     }
+}
+
+#[tokio::test]
+async fn block_entity_creation_follows_its_block_update() {
+    let data = BlockEntityData {
+        kind: "test:block_entity".to_owned(),
+        fields: BTreeMap::new(),
+    };
+    let mut simulation = Simulation::load(
+        MockRules::default(),
+        SparseWorld::new(AIR),
+        SimulationConfig::default(),
+    )
+    .await
+    .unwrap();
+
+    let delta = simulation
+        .step_with_actions(&[Action::SetBlockEntity {
+            pos: BlockPos::ZERO,
+            data: data.clone(),
+        }])
+        .await
+        .unwrap();
+
+    assert_eq!(
+        delta.events,
+        [
+            WorldEvent::Block {
+                change: redstone_core::BlockChange {
+                    pos: BlockPos::ZERO,
+                    old_state: AIR,
+                    new_state: BLOCK,
+                },
+            },
+            WorldEvent::BlockEntity {
+                change: BlockEntityChange::Create {
+                    pos: BlockPos::ZERO,
+                    data,
+                },
+            },
+        ]
+    );
+}
+
+#[tokio::test]
+async fn direct_block_entity_mutation_is_recorded_as_an_update() {
+    let mut world = SparseWorld::new(AIR);
+    world.set_block(BlockPos::ZERO, BLOCK).unwrap();
+    world.set_block_entity(
+        BlockPos::ZERO,
+        BlockEntityData {
+            kind: "test:mutable".to_owned(),
+            fields: BTreeMap::from([("counter".to_owned(), serde_json::Value::from(0))]),
+        },
+    );
+    let mut simulation = Simulation::load(
+        MockRules::default(),
+        world,
+        SimulationConfig::default(),
+    )
+    .await
+    .unwrap();
+
+    let delta = simulation.step().await.unwrap();
+    let [WorldEvent::BlockEntity {
+        change:
+            BlockEntityChange::Update {
+                old_data,
+                new_data,
+                ..
+            },
+    }] = delta.events.as_slice()
+    else {
+        panic!("expected one block entity update: {:?}", delta.events);
+    };
+    assert_eq!(old_data.fields["counter"], 0);
+    assert_eq!(new_data.fields["counter"], 1);
 }
 
 #[tokio::test]
@@ -274,6 +370,11 @@ async fn deferred_scheduled_tick_is_queued_after_synchronous_neighbor_updates() 
 async fn deferred_block_changes_are_applied_after_synchronous_neighbor_updates() {
     let mut world = SparseWorld::new(AIR);
     world.set_block(BlockPos::ZERO, BLOCK).unwrap();
+    let block_entity = BlockEntityData {
+        kind: "test:block_entity".to_owned(),
+        fields: BTreeMap::new(),
+    };
+    world.set_block_entity(BlockPos::ZERO, block_entity.clone());
     let mut simulation = Simulation::load(
         MockRules::default(),
         world,
@@ -282,7 +383,7 @@ async fn deferred_block_changes_are_applied_after_synchronous_neighbor_updates()
     .await
     .unwrap();
 
-    simulation
+    let delta = simulation
         .step_with_actions(&[Action::BreakBlock { pos: BlockPos::ZERO }])
         .await
         .unwrap();
@@ -301,6 +402,24 @@ async fn deferred_block_changes_are_applied_after_synchronous_neighbor_updates()
     assert_eq!(
         simulation.snapshot().await.world.get_block(BlockPos::ZERO),
         AIR
+    );
+    assert_eq!(
+        delta.events,
+        [
+            WorldEvent::Block {
+                change: redstone_core::BlockChange {
+                    pos: BlockPos::ZERO,
+                    old_state: BLOCK,
+                    new_state: AIR,
+                },
+            },
+            WorldEvent::BlockEntity {
+                change: BlockEntityChange::Remove {
+                    pos: BlockPos::ZERO,
+                    data: block_entity,
+                },
+            },
+        ]
     );
 }
 

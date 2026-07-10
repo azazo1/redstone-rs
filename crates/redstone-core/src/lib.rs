@@ -13,8 +13,8 @@ pub use rules::{BlockRules, EventContext, RulesError};
 pub use simulation::{Simulation, SimulationConfig, SimulationError, Snapshot};
 pub use trace::{TraceError, TraceLog};
 pub use types::{
-    Action, BlockChange, BlockEntityData, BlockKindId, BlockPos, BlockStateId, Direction,
-    EntityData, EntityId, Expectation, GameTick, MicroStep, Probe, ProbeSample, ProbeValue,
-    RedstoneMode, SimulationPhase, TraceEvent, TraceKind, WorldDelta,
+    Action, BlockChange, BlockEntityChange, BlockEntityData, BlockKindId, BlockPos, BlockStateId,
+    Direction, EntityData, EntityId, Expectation, GameTick, MicroStep, Probe, ProbeSample,
+    ProbeValue, RedstoneMode, SimulationPhase, TraceEvent, TraceKind, WorldDelta, WorldEvent,
 };
 pub use world::{PaletteSection, SectionPos, SparseWorld, WorldError, SECTION_EDGE};

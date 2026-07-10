@@ -1007,7 +1007,7 @@ impl BlockRules for Java26Rules {
             Action::PressButton { pos } => self.use_block(ctx, *pos, true, false)?,
             Action::PullLever { pos } => self.use_block(ctx, *pos, false, true)?,
             Action::SetBlockEntity { pos, data } => {
-                ctx.world.set_block_entity(*pos, data.clone());
+                ctx.set_block_entity(*pos, data.clone());
                 self.refresh_comparators_near(ctx, *pos)?;
             }
             Action::SpawnEntity { id, data } => {
@@ -1340,12 +1340,12 @@ impl BlockRules for Java26Rules {
                     .clamp(0, 15);
                 let previous = block_entity_i64(ctx.world, pos, "last_open_count").unwrap_or(0);
                 if open != previous {
-                    if let Some(data) = ctx.world.block_entity_mut(pos) {
+                    ctx.update_block_entity(pos, |data| {
                         data.fields.insert(
                             "last_open_count".to_owned(),
                             serde_json::Value::from(open),
                         );
-                    }
+                    });
                     ctx.update_neighbors(pos, state.kind, None, None);
                     ctx.update_neighbors(
                         pos.relative(Direction::Down),

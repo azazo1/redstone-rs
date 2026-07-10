@@ -130,7 +130,7 @@ impl Java26Rules {
                 .map(|(source, _, _, _)| *source)
                 .collect::<BTreeSet<_>>();
             for (source, reaction, _, _) in snapshots.iter().rev() {
-                ctx.world.remove_block_entity(*source);
+                ctx.remove_block_entity(*source);
                 if *reaction != PushReaction::Destroy {
                     continue;
                 }
@@ -159,10 +159,10 @@ impl Java26Rules {
                     moving,
                     "piston_moving_block",
                 )?;
-                ctx.world.set_block_entity(
+                ctx.set_block_entity(
                     destination,
                     moving_block_entity(
-                        *source_state,
+                        self.state(*source_state)?,
                         facing,
                         ctx.tick.0.saturating_add(2),
                         true,
@@ -200,10 +200,10 @@ impl Java26Rules {
                 moving_head,
                 "piston_moving_head",
             )?;
-            ctx.world.set_block_entity(
+            ctx.set_block_entity(
                 head_pos,
                 moving_block_entity(
-                    head,
+                    self.state(head)?,
                     facing,
                     ctx.tick.0.saturating_add(2),
                     true,
@@ -282,10 +282,10 @@ impl Java26Rules {
             )
             .map_err(|error| RulesError::Message(error.to_string()))?;
         self.set_piston_state_silent(ctx, pos, moving_base, "piston_retracting_base")?;
-        ctx.world.set_block_entity(
+        ctx.set_block_entity(
             pos,
             moving_block_entity(
-                retracted,
+                self.state(retracted)?,
                 facing,
                 ctx.tick.0.saturating_add(2),
                 false,
@@ -338,7 +338,7 @@ impl Java26Rules {
                     .map_err(|error| RulesError::Message(error.to_string()))?;
                 let orientation = piston_update_orientation(ctx, facing.opposite());
                 let moving_block_entity = moving_block_entity(
-                    source_state,
+                    &definition,
                     facing,
                     ctx.tick.0.saturating_add(2),
                     false,
@@ -431,7 +431,7 @@ impl Java26Rules {
             .fields
             .get("moved_block_entity")
             .and_then(|value| serde_json::from_value::<BlockEntityData>(value.clone()).ok());
-        ctx.world.remove_block_entity(pos);
+        ctx.remove_block_entity(pos);
         let old = ctx.set_block(pos, final_state, "piston_movement_settle")?;
         self.sync_entity_sensor(pos, old, final_state);
         ctx.update_neighbors(pos, self.state(old)?.kind, None, None);
@@ -451,7 +451,7 @@ impl Java26Rules {
         if final_state != self.registry.air_state()
             && let Some(data) = moved_block_entity
         {
-            ctx.world.set_block_entity(pos, data);
+            ctx.set_block_entity(pos, data);
         }
         Ok(true)
     }
@@ -563,7 +563,7 @@ fn projection(pos: BlockPos, direction: Direction) -> i64 {
 }
 
 fn moving_block_entity(
-    moved_state: BlockStateId,
+    moved_state: &StateDefinition,
     direction: Direction,
     settle_tick: u64,
     extending: bool,
@@ -571,12 +571,20 @@ fn moving_block_entity(
     moved_block_entity: Option<BlockEntityData>,
 ) -> BlockEntityData {
     let mut fields = BTreeMap::from([
-            ("moved_state".to_owned(), serde_json::Value::from(moved_state.0)),
-            ("direction".to_owned(), serde_json::Value::from(direction_name(direction))),
-            ("settle_tick".to_owned(), serde_json::Value::from(settle_tick)),
-            ("extending".to_owned(), serde_json::Value::Bool(extending)),
-            ("source".to_owned(), serde_json::Value::Bool(source)),
-        ]);
+        ("moved_state".to_owned(), serde_json::Value::from(moved_state.id.0)),
+        (
+            "moved_state_name".to_owned(),
+            serde_json::Value::String(moved_state.name.clone()),
+        ),
+        (
+            "moved_state_properties".to_owned(),
+            serde_json::to_value(&moved_state.properties).unwrap_or_default(),
+        ),
+        ("direction".to_owned(), serde_json::Value::from(direction_name(direction))),
+        ("settle_tick".to_owned(), serde_json::Value::from(settle_tick)),
+        ("extending".to_owned(), serde_json::Value::Bool(extending)),
+        ("source".to_owned(), serde_json::Value::Bool(source)),
+    ]);
     if let Some(data) = moved_block_entity
         && let Ok(value) = serde_json::to_value(data)
     {

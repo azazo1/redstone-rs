@@ -9,7 +9,9 @@ use fastnbt::Value;
 use zip::ZipArchive;
 
 const LEVEL_CHUNK_WITH_LIGHT: i32 = 45;
+const BLOCK_ENTITY_DATA: i32 = 6;
 const BLOCK_UPDATE: i32 = 8;
+const PISTON_BLOCK_ENTITY_TYPE: i32 = 11;
 
 #[test]
 fn run_exports_parseable_replay_and_atomically_replaces_target() {
@@ -99,6 +101,50 @@ fn directory_test_rejects_shared_replay_target() {
     let output = run_command("test", directory.path(), &replay);
     assert!(!output.status.success());
     assert!(!replay.exists());
+}
+
+#[test]
+fn piston_scenario_exports_vanilla_moving_piston_packets() {
+    let directory = TestDirectory::new("replay-piston");
+    let scenario = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../assets/scenarios/tripple-piston-extender.toml");
+    let replay = directory.path().join("piston.mcpr");
+
+    let output = run_command("run", &scenario, &replay);
+    assert_success(&output);
+    let recording = read_recording(&replay);
+    let packets = parse_packets(&recording);
+    let mut moving_pistons = 0;
+    let mut moved_wool = false;
+    for (index, packet) in packets.iter().enumerate() {
+        if packet.id != BLOCK_ENTITY_DATA {
+            continue;
+        }
+        let (pos, kind, nbt) = decode_block_entity_data(packet.payload);
+        if kind != PISTON_BLOCK_ENTITY_TYPE {
+            continue;
+        }
+        moving_pistons += 1;
+        let previous = &packets[index - 1];
+        assert_eq!(previous.id, BLOCK_UPDATE);
+        assert_eq!(previous.timestamp, packet.timestamp);
+        assert_eq!(decode_block_update(previous.timestamp, previous.payload).1, pos);
+        assert_eq!(nbt[0], 10);
+        for field in [
+            b"blockState".as_slice(),
+            b"facing".as_slice(),
+            b"progress".as_slice(),
+            b"extending".as_slice(),
+            b"source".as_slice(),
+        ] {
+            assert!(nbt.windows(field.len()).any(|value| value == field));
+        }
+        moved_wool |= nbt
+            .windows(b"minecraft:orange_wool".len())
+            .any(|value| value == b"minecraft:orange_wool");
+    }
+    assert!(moving_pistons > 0);
+    assert!(moved_wool);
 }
 
 fn run_command(command: &str, scenario: &Path, replay: &Path) -> Output {
@@ -322,11 +368,22 @@ fn section_index(x: usize, y: i32, z: usize) -> usize {
 
 fn decode_block_update(timestamp: i32, payload: &[u8]) -> (i32, (i32, i32, i32), u32) {
     let mut cursor = Cursor::new(payload);
-    let packed = cursor.u64();
+    let pos = unpack_block_pos(cursor.u64());
+    (timestamp, pos, cursor.var_int() as u32)
+}
+
+fn decode_block_entity_data(payload: &[u8]) -> ((i32, i32, i32), i32, &[u8]) {
+    let mut cursor = Cursor::new(payload);
+    let pos = unpack_block_pos(cursor.u64());
+    let kind = cursor.var_int();
+    (pos, kind, &payload[cursor.offset..])
+}
+
+fn unpack_block_pos(packed: u64) -> (i32, i32, i32) {
     let x = sign_extend((packed >> 38) & 0x3ff_ffff, 26) as i32;
     let y = sign_extend(packed & 0xfff, 12) as i32;
     let z = sign_extend((packed >> 12) & 0x3ff_ffff, 26) as i32;
-    (timestamp, (x, y, z), cursor.var_int() as u32)
+    (x, y, z)
 }
 
 fn sign_extend(value: u64, bits: u32) -> i64 {

@@ -6,10 +6,10 @@ use tokio::sync::broadcast;
 use tracing::{debug, warn};
 
 use crate::{
-    Action, BlockChange, BlockEvent, BlockKindId, BlockPos, BlockRules, DeferredBlockEntityUpdate,
-    Direction, EventContext, GameTick, MicroStep, NeighborTask, NeighborUpdate, Probe, ProbeSample,
+    Action, BlockEvent, BlockKindId, BlockPos, BlockRules, DeferredBlockEntityUpdate, Direction,
+    EventContext, GameTick, MicroStep, NeighborTask, NeighborUpdate, Probe, ProbeSample,
     RedstoneMode, RulesError, ScheduledTick, SimulationPhase, SparseWorld, TraceEvent, TraceKind,
-    TraceLog, WorldDelta,
+    TraceLog, WorldDelta, WorldEvent,
 };
 
 const DEFAULT_MAX_SCHEDULED_TICKS_PER_TICK: usize = 65_536;
@@ -140,7 +140,7 @@ impl<R: BlockRules> Simulation<R> {
         self.process_neighbor_tasks_with_changes(tasks, SimulationPhase::PreTick, &mut changes)?;
         let delta = WorldDelta {
             tick: self.tick,
-            changes,
+            events: changes,
             probes: Vec::new(),
         };
         let _ = self.delta_tx.send(delta.clone());
@@ -193,7 +193,7 @@ impl<R: BlockRules> Simulation<R> {
         let probes = self.sample_probes();
         let delta = WorldDelta {
             tick: self.tick,
-            changes,
+            events: changes,
             probes,
         };
         let _ = self.delta_tx.send(delta.clone());
@@ -233,7 +233,7 @@ impl<R: BlockRules> Simulation<R> {
 
     fn run_scheduled_ticks(
         &mut self,
-        changes: &mut Vec<BlockChange>,
+        changes: &mut Vec<WorldEvent>,
     ) -> Result<(), SimulationError> {
         let due = self
             .scheduled_ticks
@@ -281,7 +281,7 @@ impl<R: BlockRules> Simulation<R> {
 
     fn run_block_events(
         &mut self,
-        changes: &mut Vec<BlockChange>,
+        changes: &mut Vec<WorldEvent>,
     ) -> Result<(), SimulationError> {
         while let Some(event) = self.block_events.pop_front() {
             self.block_event_keys.remove(&event);
@@ -310,7 +310,7 @@ impl<R: BlockRules> Simulation<R> {
 
     fn run_block_entities(
         &mut self,
-        changes: &mut Vec<BlockChange>,
+        changes: &mut Vec<WorldEvent>,
     ) -> Result<(), SimulationError> {
         let positions = self
             .world
@@ -347,7 +347,7 @@ impl<R: BlockRules> Simulation<R> {
         &mut self,
         tasks: Vec<NeighborTask>,
         phase: SimulationPhase,
-        changes: &mut Vec<BlockChange>,
+        changes: &mut Vec<WorldEvent>,
     ) -> Result<(), SimulationError> {
         let mut stack = Vec::new();
         for task in tasks.into_iter().rev() {
@@ -410,10 +410,10 @@ impl<R: BlockRules> Simulation<R> {
                                 match change.block_entity {
                                     DeferredBlockEntityUpdate::Keep => {}
                                     DeferredBlockEntityUpdate::Remove => {
-                                        ctx.world.remove_block_entity(change.pos);
+                                        ctx.remove_block_entity(change.pos);
                                     }
                                     DeferredBlockEntityUpdate::Set(data) => {
-                                        ctx.world.set_block_entity(change.pos, data);
+                                        ctx.set_block_entity(change.pos, data);
                                     }
                                 }
                             }
@@ -550,9 +550,14 @@ impl<R: BlockRules> Simulation<R> {
     fn with_context_and_changes<T>(
         &mut self,
         phase: SimulationPhase,
-        changes: &mut Vec<BlockChange>,
+        changes: &mut Vec<WorldEvent>,
         callback: impl FnOnce(&mut R, &mut EventContext<'_>) -> Result<T, RulesError>,
     ) -> Result<Vec<NeighborTask>, SimulationError> {
+        let block_entities_before = self
+            .world
+            .block_entities()
+            .map(|(pos, data)| (*pos, data.clone()))
+            .collect();
         let mut ctx = EventContext::new(
             &mut self.world,
             self.config.mode,
@@ -569,6 +574,7 @@ impl<R: BlockRules> Simulation<R> {
             changes,
         );
         callback(&mut self.rules, &mut ctx)?;
+        ctx.record_untracked_block_entity_changes(&block_entities_before);
         Ok(ctx.take_neighbor_tasks())
     }
 

@@ -14,6 +14,7 @@ struct ItemStack {
     slot: u32,
     item_id: String,
     count: i64,
+    components: Option<Value>,
 }
 
 impl Java26Rules {
@@ -35,22 +36,22 @@ impl Java26Rules {
             }
             let cooldown = block_entity_i64(ctx.world, pos, "cooldown").unwrap_or(0);
             if cooldown > 0 {
-                set_block_entity_i64(ctx.world, pos, "cooldown", cooldown - 1);
+                set_block_entity_i64(ctx, pos, "cooldown", cooldown - 1);
                 return Ok(());
             }
             let facing = state.direction_property("facing").unwrap_or(Direction::Down);
             let target = pos.relative(facing);
-            let moved = transfer_one_item(ctx.world, pos, target, None, Some(facing.opposite()))
+            let moved = transfer_one_item(ctx, pos, target, None, Some(facing.opposite()))
                 || transfer_one_item(
-                    ctx.world,
+                    ctx,
                     pos.relative(Direction::Up),
                     pos,
                     Some(Direction::Down),
                     None,
                 )
-                || absorb_item_entity(ctx.world, pos);
+                || absorb_item_entity(ctx, pos);
             if moved {
-                set_block_entity_i64(ctx.world, pos, "cooldown", 8);
+                set_block_entity_i64(ctx, pos, "cooldown", 8);
                 *self.event_counts.entry("hopper_transfer".to_owned()).or_default() += 1;
             }
         }
@@ -84,13 +85,13 @@ impl Java26Rules {
         let facing = state.direction_property("facing").unwrap_or(Direction::North);
         let target = pos.relative(facing);
         let item = inventory(ctx.world, pos)[index].item_id.clone();
-        if insert_item(ctx.world, target, &item, 1, Some(facing.opposite())) == 1 {
-            take_item_at(ctx.world, pos, index, 1);
+        if insert_item(ctx, target, &item, 1, Some(facing.opposite())) == 1 {
+            take_item_at(ctx, pos, index, 1);
             *self.event_counts.entry("dropper_transfer".to_owned()).or_default() += 1;
             self.refresh_comparators_near(ctx, target)?;
             self.refresh_comparators_near(ctx, pos)?;
         } else if !is_container(ctx.world, target)
-            && take_item_at(ctx.world, pos, index, 1).is_some()
+            && take_item_at(ctx, pos, index, 1).is_some()
         {
             spawn_item(ctx.world, target, item, 1);
             *self.event_counts.entry("dropper_eject".to_owned()).or_default() += 1;
@@ -113,7 +114,7 @@ impl Java26Rules {
         let target = pos.relative(facing);
         match dispenser_behavior(&item) {
             Some(DispenserBehavior::Projectile) => {
-                if take_item_at(ctx.world, pos, index, 1).is_some() {
+                if take_item_at(ctx, pos, index, 1).is_some() {
                     let velocity = facing.step();
                     ctx.world.spawn_entity(EntityData {
                         kind: projectile_entity_kind(&item).to_owned(),
@@ -134,7 +135,7 @@ impl Java26Rules {
                 }
             }
             Some(DispenserBehavior::PrimeTnt) => {
-                if take_item_at(ctx.world, pos, index, 1).is_some() {
+                if take_item_at(ctx, pos, index, 1).is_some() {
                     ctx.world.spawn_entity(EntityData {
                         kind: "minecraft:tnt".to_owned(),
                         position: [target.x as f64 + 0.5, target.y as f64, target.z as f64 + 0.5],
@@ -149,7 +150,7 @@ impl Java26Rules {
             }
             Some(DispenserBehavior::Minecart) => {
                 if let Some(position) = minecart_spawn_position(self, ctx.world, pos, facing) {
-                    if take_item_at(ctx.world, pos, index, 1).is_some() {
+                    if take_item_at(ctx, pos, index, 1).is_some() {
                     ctx.world.spawn_entity(EntityData {
                             kind: item.clone(),
                         position,
@@ -160,13 +161,13 @@ impl Java26Rules {
                             .entry("dispenser_minecart".to_owned())
                             .or_default() += 1;
                     }
-                } else if take_item_at(ctx.world, pos, index, 1).is_some() {
+                } else if take_item_at(ctx, pos, index, 1).is_some() {
                     spawn_item(ctx.world, target, item, 1);
                     *self.event_counts.entry("dispenser_eject".to_owned()).or_default() += 1;
                 }
             }
             Some(DispenserBehavior::DefaultEject) => {
-                if take_item_at(ctx.world, pos, index, 1).is_some() {
+                if take_item_at(ctx, pos, index, 1).is_some() {
                     spawn_item(ctx.world, target, item, 1);
                     *self.event_counts.entry("dispenser_eject".to_owned()).or_default() += 1;
                 }
@@ -186,7 +187,7 @@ impl Java26Rules {
             self.set_state_and_notify(ctx, pos, idle, "crafter_idle", None)?;
             return Ok(());
         }
-        let Some(item) = take_first_enabled_item(ctx.world, pos, 1) else {
+        let Some(item) = take_first_enabled_item(ctx, pos, 1) else {
             return Ok(());
         };
         let output_item = block_entity_string(ctx.world, pos, "output_item_id")
@@ -195,7 +196,7 @@ impl Java26Rules {
         let front = crafter_front(state);
         let target = pos.relative(front);
         let inserted = insert_item(
-            ctx.world,
+            ctx,
             target,
             &output_item,
             output_count,
@@ -225,10 +226,10 @@ fn block_entity_string(world: &SparseWorld, pos: BlockPos, key: &str) -> Option<
         .map(ToOwned::to_owned)
 }
 
-fn set_block_entity_i64(world: &mut SparseWorld, pos: BlockPos, key: &str, value: i64) {
-    if let Some(data) = world.block_entity_mut(pos) {
+fn set_block_entity_i64(ctx: &mut EventContext<'_>, pos: BlockPos, key: &str, value: i64) {
+    ctx.update_block_entity(pos, |data| {
         data.fields.insert(key.to_owned(), Value::from(value));
-    }
+    });
 }
 
 pub(super) fn container_signal(world: &SparseWorld, pos: BlockPos) -> Option<u8> {
@@ -252,41 +253,60 @@ pub(super) fn container_signal(world: &SparseWorld, pos: BlockPos) -> Option<u8>
 }
 
 fn transfer_one_item(
-    world: &mut SparseWorld,
+    ctx: &mut EventContext<'_>,
     source: BlockPos,
     target: BlockPos,
     source_face: Option<Direction>,
     target_face: Option<Direction>,
 ) -> bool {
-    let stacks = inventory(world, source);
-    for slot in slots_for_face(world, source, source_face) {
+    let stacks = inventory(ctx.world, source);
+    for slot in slots_for_face(ctx.world, source, source_face) {
         let Some(stack) = stacks.iter().find(|stack| stack.slot == slot) else {
             continue;
         };
-        if !can_take_from_slot(world, source, stack, source_face) {
+        if !can_take_from_slot(ctx.world, source, stack, source_face) {
             continue;
         }
-        if insert_item(world, target, &stack.item_id, 1, target_face) != 1 {
+        if insert_item_with_components(
+            ctx,
+            target,
+            &stack.item_id,
+            1,
+            target_face,
+            stack.components.as_ref(),
+        ) != 1
+        {
             continue;
         }
-        return take_item_from_slot(world, source, stack.slot, 1).is_some();
+        return take_item_from_slot(ctx, source, stack.slot, 1).is_some();
     }
     false
 }
 
 fn insert_item(
-    world: &mut SparseWorld,
+    ctx: &mut EventContext<'_>,
     target: BlockPos,
     item_id: &str,
     count: i64,
     face: Option<Direction>,
 ) -> i64 {
-    if count <= 0 || !is_container(world, target) {
+    insert_item_with_components(ctx, target, item_id, count, face, None)
+}
+
+fn insert_item_with_components(
+    ctx: &mut EventContext<'_>,
+    target: BlockPos,
+    item_id: &str,
+    count: i64,
+    face: Option<Direction>,
+    components: Option<&Value>,
+) -> i64 {
+    if count <= 0 || !is_container(ctx.world, target) {
         return 0;
     }
-    let mut stacks = inventory(world, target);
-    let slots = slots_for_face(world, target, face);
-    let capacity = block_entity_i64(world, target, "capacity")
+    let mut stacks = inventory(ctx.world, target);
+    let slots = slots_for_face(ctx.world, target, face);
+    let capacity = block_entity_i64(ctx.world, target, "capacity")
         .unwrap_or(DEFAULT_STACK_SIZE)
         .max(1);
     let current = stacks.iter().map(|stack| stack.count).sum::<i64>();
@@ -294,10 +314,11 @@ fn insert_item(
     let inserted = remaining;
     for stack in stacks.iter_mut().filter(|stack| {
         stack.item_id == item_id
+            && stack.components.as_ref() == components
             && slots.contains(&stack.slot)
-            && can_place_in_slot(world, target, stack.slot, item_id)
+            && can_place_in_slot(ctx.world, target, stack.slot, item_id)
     }) {
-        let available = slot_stack_limit(world, target, stack.slot, item_id)
+        let available = slot_stack_limit(ctx.world, target, stack.slot, item_id)
             .saturating_sub(stack.count)
             .max(0);
         let moved = remaining.min(available);
@@ -312,20 +333,23 @@ fn insert_item(
         let Some(slot) = slots
             .iter()
             .copied()
-            .find(|slot| !used.contains(slot) && can_place_in_slot(world, target, *slot, item_id))
+            .find(|slot| {
+                !used.contains(slot) && can_place_in_slot(ctx.world, target, *slot, item_id)
+            })
         else {
             break;
         };
-        let moved = remaining.min(slot_stack_limit(world, target, slot, item_id));
+        let moved = remaining.min(slot_stack_limit(ctx.world, target, slot, item_id));
         stacks.push(ItemStack {
             slot,
             item_id: item_id.to_owned(),
             count: moved,
+            components: components.cloned(),
         });
         used.insert(slot);
         remaining -= moved;
     }
-    write_inventory(world, target, stacks);
+    write_inventory(ctx, target, stacks);
     inserted - remaining
 }
 
@@ -335,34 +359,34 @@ fn random_stack_index(ctx: &mut EventContext<'_>, pos: BlockPos) -> Option<usize
 }
 
 fn take_first_enabled_item(
-    world: &mut SparseWorld,
+    ctx: &mut EventContext<'_>,
     pos: BlockPos,
     count: i64,
 ) -> Option<ItemStack> {
-    let disabled = disabled_slots(world, pos);
-    let stack = inventory(world, pos)
+    let disabled = disabled_slots(ctx.world, pos);
+    let stack = inventory(ctx.world, pos)
         .into_iter()
         .find(|stack| !disabled.contains(&stack.slot))?;
-    take_item_from_slot(world, pos, stack.slot, count)
+    take_item_from_slot(ctx, pos, stack.slot, count)
 }
 
 fn take_item_at(
-    world: &mut SparseWorld,
+    ctx: &mut EventContext<'_>,
     pos: BlockPos,
     index: usize,
     count: i64,
 ) -> Option<ItemStack> {
-    let stack = inventory(world, pos).get(index).cloned()?;
-    take_item_from_slot(world, pos, stack.slot, count)
+    let stack = inventory(ctx.world, pos).get(index).cloned()?;
+    take_item_from_slot(ctx, pos, stack.slot, count)
 }
 
 fn take_item_from_slot(
-    world: &mut SparseWorld,
+    ctx: &mut EventContext<'_>,
     pos: BlockPos,
     slot: u32,
     count: i64,
 ) -> Option<ItemStack> {
-    let mut stacks = inventory(world, pos);
+    let mut stacks = inventory(ctx.world, pos);
     let index = stacks.iter().position(|stack| stack.slot == slot)?;
     let taken = count.max(0).min(stacks[index].count);
     if taken == 0 {
@@ -372,9 +396,10 @@ fn take_item_from_slot(
         slot,
         item_id: stacks[index].item_id.clone(),
         count: taken,
+        components: stacks[index].components.clone(),
     };
     stacks[index].count -= taken;
-    write_inventory(world, pos, stacks);
+    write_inventory(ctx, pos, stacks);
     Some(result)
 }
 
@@ -393,10 +418,12 @@ fn inventory(world: &SparseWorld, pos: BlockPos) -> Vec<ItemStack> {
             let slot = entry.get("slot")?.as_u64()?.try_into().ok()?;
             let item_id = entry.get("item_id")?.as_str()?.to_owned();
             let count = entry.get("count")?.as_i64()?;
+            let components = entry.get("components").cloned();
             (count > 0).then_some(ItemStack {
                 slot,
                 item_id,
                 count,
+                components,
             })
         })
         .collect::<Vec<_>>();
@@ -411,27 +438,32 @@ fn inventory(world: &SparseWorld, pos: BlockPos) -> Vec<ItemStack> {
             slot: 0,
             item_id: item_id.to_owned(),
             count,
+            components: None,
         });
     }
     stacks.sort_by_key(|stack| stack.slot);
     stacks
 }
 
-fn write_inventory(world: &mut SparseWorld, pos: BlockPos, mut stacks: Vec<ItemStack>) {
+fn write_inventory(ctx: &mut EventContext<'_>, pos: BlockPos, mut stacks: Vec<ItemStack>) {
     stacks.retain(|stack| stack.count > 0);
     stacks.sort_by_key(|stack| stack.slot);
     let count = stacks.iter().map(|stack| stack.count).sum::<i64>();
     let inventory = stacks
         .iter()
         .map(|stack| {
-            Value::Object(Map::from_iter([
+            let mut item = Map::from_iter([
                 ("slot".to_owned(), Value::from(stack.slot)),
                 ("item_id".to_owned(), Value::String(stack.item_id.clone())),
                 ("count".to_owned(), Value::from(stack.count)),
-            ]))
+            ]);
+            if let Some(components) = &stack.components {
+                item.insert("components".to_owned(), components.clone());
+            }
+            Value::Object(item)
         })
         .collect::<Vec<_>>();
-    if let Some(data) = world.block_entity_mut(pos) {
+    ctx.update_block_entity(pos, |data| {
         data.fields
             .insert("inventory".to_owned(), Value::Array(inventory));
         data.fields.insert("item_count".to_owned(), Value::from(count));
@@ -441,7 +473,7 @@ fn write_inventory(world: &mut SparseWorld, pos: BlockPos, mut stacks: Vec<ItemS
         } else {
             data.fields.remove("item_id");
         }
-    }
+    });
 }
 
 fn container_slot_count(world: &SparseWorld, pos: BlockPos, capacity: i64) -> u32 {
@@ -793,8 +825,9 @@ fn spawn_item(world: &mut SparseWorld, pos: BlockPos, item_id: String, count: i6
     });
 }
 
-fn absorb_item_entity(world: &mut SparseWorld, hopper: BlockPos) -> bool {
-    let candidate = world
+fn absorb_item_entity(ctx: &mut EventContext<'_>, hopper: BlockPos) -> bool {
+    let candidate = ctx
+        .world
         .entity_ids_in_aabb(
             [hopper.x as f64 - 0.25, hopper.y as f64, hopper.z as f64 - 0.25],
             [
@@ -805,7 +838,7 @@ fn absorb_item_entity(world: &mut SparseWorld, hopper: BlockPos) -> bool {
         )
         .into_iter()
         .find_map(|id| {
-            let entity = world.entity(id)?;
+            let entity = ctx.world.entity(id)?;
             (entity.kind == "minecraft:item").then(|| {
             (
                 id,
@@ -817,12 +850,12 @@ fn absorb_item_entity(world: &mut SparseWorld, hopper: BlockPos) -> bool {
     let Some((entity_id, Some(item_id), entity_count)) = candidate else {
         return false;
     };
-    if insert_item(world, hopper, &item_id, 1, None) != 1 {
+    if insert_item(ctx, hopper, &item_id, 1, None) != 1 {
         return false;
     }
     if entity_count <= 1 {
-        world.remove_entity(entity_id);
-    } else if let Some(fields) = world.entity_fields_mut(entity_id) {
+        ctx.world.remove_entity(entity_id);
+    } else if let Some(fields) = ctx.world.entity_fields_mut(entity_id) {
         fields.insert("item_count".to_owned(), Value::from(entity_count - 1));
     }
     true

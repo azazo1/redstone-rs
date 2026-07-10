@@ -497,20 +497,30 @@ fn normalize_inventory_fields(
                 .get("count")
                 .or_else(|| item.get("Count"))
                 .and_then(value_i32)?;
-            (count > 0).then_some((slot, item_id, count))
+            let components = item.get("components").map(nbt_value_to_json);
+            (count > 0).then_some((slot, item_id, count, components))
         })
         .collect::<Vec<_>>();
-    inventory.sort_by_key(|(slot, _, _)| *slot);
-    let item_count = inventory.iter().map(|(_, _, count)| i64::from(*count)).sum::<i64>();
-    let first_item = inventory.first().map(|(_, item_id, _)| item_id.clone());
+    inventory.sort_by_key(|(slot, _, _, _)| *slot);
+    let item_count = inventory
+        .iter()
+        .map(|(_, _, count, _)| i64::from(*count))
+        .sum::<i64>();
+    let first_item = inventory
+        .first()
+        .map(|(_, item_id, _, _)| item_id.clone());
     let inventory = inventory
         .into_iter()
-        .map(|(slot, item_id, count)| {
-            serde_json::json!({
-                "slot": slot,
-                "item_id": item_id,
-                "count": count,
-            })
+        .map(|(slot, item_id, count, components)| {
+            let mut item = serde_json::Map::from_iter([
+                ("slot".to_owned(), serde_json::Value::from(slot)),
+                ("item_id".to_owned(), serde_json::Value::String(item_id)),
+                ("count".to_owned(), serde_json::Value::from(count)),
+            ]);
+            if let Some(components) = components {
+                item.insert("components".to_owned(), components);
+            }
+            serde_json::Value::Object(item)
         })
         .collect::<Vec<_>>();
     let slot_count = container_slot_count(kind, fields, &inventory);
