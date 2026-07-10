@@ -41,8 +41,8 @@
 - [x] 增加 100 万方块和 1 万活跃元件性能基准.
 - [ ] 达到支持范围内零状态差异和零事件顺序差异.
 - [x] 红石 BUD/QC 触发与等待邻居更新测试.
-- [ ] 模拟过程能使用 Replay mod 格式兼容的录制导出.
-- [ ] 为 Replay Mod 录像导出告示牌等方块实体, 包含 block entity type, `front_text`/`back_text` NBT 和运行中的方块实体更新包. 并且支持容器方块内容导出等信息.
+- [x] 模拟过程能使用 Replay mod 格式兼容的录制导出.
+- [x] 为 Replay Mod 录像导出告示牌等方块实体, 包含 block entity type, `front_text`/`back_text` NBT 和运行中的方块实体更新包. 并且支持容器方块内容导出等信息.
 - [x] 编写 litematica, nbt 等文件的更详细的方块信息 inspect, 而不只是汇总信息, 要能查询包括方块自身 nbt / components 等标签的详细信息.
 
 ## 真实游戏探针
