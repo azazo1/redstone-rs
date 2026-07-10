@@ -64,7 +64,7 @@ impl Java26Rules {
         state: &StateDefinition,
     ) -> Result<(), RulesError> {
         match state.behavior {
-            BlockBehavior::Dropper => self.execute_dropper(ctx, pos, state),
+            BlockBehavior::Dropper => self.execute_dropper(ctx, pos, state)?,
             BlockBehavior::Dispenser => self.execute_dispenser(ctx, pos, state),
             BlockBehavior::Crafter => self.execute_crafter(ctx, pos, state)?,
             _ => {}
@@ -77,9 +77,9 @@ impl Java26Rules {
         ctx: &mut EventContext<'_>,
         pos: BlockPos,
         state: &StateDefinition,
-    ) {
+    ) -> Result<(), RulesError> {
         let Some(index) = random_stack_index(ctx, pos) else {
-            return;
+            return Ok(());
         };
         let facing = state.direction_property("facing").unwrap_or(Direction::North);
         let target = pos.relative(facing);
@@ -87,12 +87,16 @@ impl Java26Rules {
         if insert_item(ctx.world, target, &item, 1, Some(facing.opposite())) == 1 {
             take_item_at(ctx.world, pos, index, 1);
             *self.event_counts.entry("dropper_transfer".to_owned()).or_default() += 1;
+            self.refresh_comparators_near(ctx, target)?;
+            self.refresh_comparators_near(ctx, pos)?;
         } else if !is_container(ctx.world, target)
             && take_item_at(ctx.world, pos, index, 1).is_some()
         {
             spawn_item(ctx.world, target, item, 1);
             *self.event_counts.entry("dropper_eject".to_owned()).or_default() += 1;
+            self.refresh_comparators_near(ctx, pos)?;
         }
+        Ok(())
     }
 
     fn execute_dispenser(

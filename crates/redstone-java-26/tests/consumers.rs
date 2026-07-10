@@ -191,6 +191,41 @@ async fn note_block_and_bell_emit_events_only_on_rising_edges() {
 }
 
 #[tokio::test]
+async fn using_a_note_block_cycles_its_note_and_plays_once() {
+    let mut registry = Java26Registry::new();
+    let note = state(
+        &mut registry,
+        "minecraft:note_block",
+        &[("instrument", "harp"), ("note", "24"), ("powered", "false")],
+    );
+    let mut world = SparseWorld::new(registry.air_state());
+    world.set_block(BlockPos::ZERO, note).unwrap();
+    let rules = Java26Rules::new(registry);
+    let mut simulation = Simulation::load(rules, world, SimulationConfig::default())
+        .await
+        .unwrap();
+    simulation.add_probe(
+        "notes",
+        Probe::EventCount {
+            kind: "note_block_play".to_owned(),
+        },
+    );
+
+    let delta = simulation
+        .step_with_actions(&[Action::UseBlock { pos: BlockPos::ZERO }])
+        .await
+        .unwrap();
+
+    let state = simulation
+        .rules()
+        .registry()
+        .state(simulation.world().get_block(BlockPos::ZERO))
+        .unwrap();
+    assert_eq!(state.property("note"), Some("0"));
+    assert_eq!(delta.probes[0].value, ProbeValue::Integer(1));
+}
+
+#[tokio::test]
 async fn target_strength_uses_hit_location_and_releases_after_eight_ticks() {
     let mut registry = Java26Registry::new();
     let target = state(&mut registry, "minecraft:target", &[("power", "0")]);

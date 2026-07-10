@@ -713,6 +713,28 @@ impl Java26Rules {
         Ok(())
     }
 
+    fn refresh_triggered_container(
+        &mut self,
+        ctx: &mut EventContext<'_>,
+        pos: BlockPos,
+        state_id: BlockStateId,
+    ) -> Result<(), RulesError> {
+        let state = self.state(state_id)?.clone();
+        let powered = self.is_powered(ctx.world, pos)
+            || matches!(state.behavior, BlockBehavior::Dropper | BlockBehavior::Dispenser)
+                && self.is_powered(ctx.world, pos.relative(Direction::Up));
+        let triggered = state.bool_property("triggered");
+        if powered && !triggered {
+            let next = self.changed_state(state.id, "triggered", "true")?;
+            ctx.set_block(pos, next, "container_trigger")?;
+            ctx.schedule_tick(pos, state.kind, 4, TickPriority::Normal);
+        } else if !powered && triggered {
+            let next = self.changed_state(state.id, "triggered", "false")?;
+            ctx.set_block(pos, next, "container_untrigger")?;
+        }
+        Ok(())
+    }
+
     fn refresh_powered_consumer(
         &mut self,
         ctx: &mut EventContext<'_>,
@@ -823,6 +845,15 @@ impl Java26Rules {
                     ctx.schedule_tick(pos, state.kind, 2, TickPriority::Normal);
                 }
             }
+            BlockBehavior::NoteBlock if !force_button && !force_lever => {
+                let note = (state.int_property("note").unwrap_or(0) + 1).rem_euclid(25);
+                let next = self.changed_state(state_id, "note", note.to_string())?;
+                self.set_state_and_notify(ctx, pos, next, "note_block_use", None)?;
+                *self
+                    .event_counts
+                    .entry("note_block_play".to_owned())
+                    .or_default() += 1;
+            }
             _ if force_button || force_lever => {
                 return Err(RulesError::Message(format!(
                     "指定动作与方块不匹配: {} at {pos:?}",
@@ -887,6 +918,9 @@ impl BlockRules for Java26Rules {
                 BlockBehavior::Repeater => self.refresh_repeater(ctx, *pos, state_id)?,
                 BlockBehavior::Comparator => self.refresh_comparator(ctx, *pos, state_id)?,
                 BlockBehavior::Piston { .. } => self.refresh_piston(ctx, *pos, state_id)?,
+                BlockBehavior::Dropper | BlockBehavior::Dispenser | BlockBehavior::Crafter => {
+                    self.refresh_triggered_container(ctx, *pos, state_id)?
+                }
                 BlockBehavior::Lamp
                 | BlockBehavior::CopperBulb
                 | BlockBehavior::PoweredConsumer
@@ -1012,6 +1046,9 @@ impl BlockRules for Java26Rules {
             BlockBehavior::Observer => {
                 self.refresh_observer(ctx, update.pos, state_id, update.source_pos)?
             }
+            BlockBehavior::Dropper | BlockBehavior::Dispenser | BlockBehavior::Crafter => {
+                self.refresh_triggered_container(ctx, update.pos, state_id)?
+            }
             BlockBehavior::Piston { .. } => self.refresh_piston(ctx, update.pos, state_id)?,
             BlockBehavior::Lamp
             | BlockBehavior::CopperBulb
@@ -1117,7 +1154,7 @@ impl BlockRules for Java26Rules {
             BlockBehavior::Observer => {
                 let powered = !state.bool_property("powered");
                 let next = self.changed_state(state_id, "powered", powered.to_string())?;
-                self.set_state_and_notify(ctx, tick.pos, next, "observer_pulse", None)?;
+                self.set_diode_state(ctx, tick.pos, next, "observer_pulse")?;
                 if powered {
                     ctx.schedule_tick(tick.pos, state.kind, 2, TickPriority::Normal);
                 }
@@ -1258,18 +1295,6 @@ impl BlockRules for Java26Rules {
                         );
                     }
                     ctx.update_neighbors(pos, state.kind, None, None);
-                }
-            }
-            BlockBehavior::Dropper | BlockBehavior::Dispenser | BlockBehavior::Crafter => {
-                let powered = self.is_powered(ctx.world, pos);
-                let triggered = state.bool_property("triggered");
-                if powered && !triggered {
-                    let next = self.changed_state(state.id, "triggered", "true")?;
-                    self.set_state_and_notify(ctx, pos, next, "container_trigger", None)?;
-                    ctx.schedule_tick(pos, state.kind, 4, TickPriority::Normal);
-                } else if !powered && triggered {
-                    let next = self.changed_state(state.id, "triggered", "false")?;
-                    self.set_state_and_notify(ctx, pos, next, "container_untrigger", None)?;
                 }
             }
             _ => {}

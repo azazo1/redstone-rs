@@ -325,6 +325,7 @@ async fn powered_dropper_transfers_into_the_facing_container_after_four_ticks() 
     let mut simulation = Simulation::load(rules, world, SimulationConfig::default())
         .await
         .unwrap();
+    simulation.initialize().await.unwrap();
 
     simulation.run_until(redstone_core::GameTick(5)).await.unwrap();
 
@@ -353,6 +354,7 @@ async fn dispenser_consumes_registered_items_but_preserves_unknown_items() {
         let mut simulation = Simulation::load(rules, world, SimulationConfig::default())
             .await
             .unwrap();
+        simulation.initialize().await.unwrap();
 
         simulation.run_until(redstone_core::GameTick(5)).await.unwrap();
 
@@ -406,6 +408,7 @@ async fn crafter_emits_output_and_clears_its_crafting_pulse() {
     let mut simulation = Simulation::load(rules, world, SimulationConfig::default())
         .await
         .unwrap();
+    simulation.initialize().await.unwrap();
 
     simulation.run_until(redstone_core::GameTick(6)).await.unwrap();
 

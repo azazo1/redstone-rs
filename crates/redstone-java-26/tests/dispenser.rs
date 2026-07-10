@@ -64,9 +64,11 @@ async fn dispenser_world(item: &str, rail_in_front: bool) -> Simulation<Java26Ru
     }
     world.set_block_entity(BlockPos::ZERO, dispenser_inventory(item));
     let rules = Java26Rules::new(registry);
-    Simulation::load(rules, world, SimulationConfig::default())
+    let mut simulation = Simulation::load(rules, world, SimulationConfig::default())
         .await
-        .unwrap()
+        .unwrap();
+    simulation.initialize().await.unwrap();
+    simulation
 }
 
 #[tokio::test]
@@ -107,7 +109,7 @@ async fn dispensed_tnt_counts_down_and_records_an_unsupported_explosion() {
 
     let tnt = simulation.world().entities().next().unwrap().1;
     assert_eq!(tnt.kind, "minecraft:tnt");
-    assert_eq!(tnt.fields["fuse"], 79);
+    assert_eq!(tnt.fields["fuse"], 78);
     assert_eq!(tnt.fields["ignited_by"], "dispenser");
 
     simulation.run_until(GameTick(84)).await.unwrap();
