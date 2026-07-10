@@ -1,0 +1,567 @@
+version = "26.1.2"
+mode = "default"
+seed = 0
+max_ticks = 400
+
+[source]
+path = "../schematics/seg7.nbt"
+initialization = "notify"
+
+[[actions]]
+tick = 21
+type = "pull_lever"
+pos = { x = 0, y = 2, z = 0 }
+
+[[actions]]
+tick = 41
+type = "pull_lever"
+pos = { x = 0, y = 2, z = 2 }
+
+[[actions]]
+tick = 61
+type = "pull_lever"
+pos = { x = 0, y = 2, z = 2 }
+
+[[actions]]
+tick = 81
+type = "pull_lever"
+pos = { x = 0, y = 2, z = 4 }
+
+[[actions]]
+tick = 101
+type = "pull_lever"
+pos = { x = 0, y = 2, z = 4 }
+
+[[actions]]
+tick = 121
+type = "pull_lever"
+pos = { x = 0, y = 2, z = 6 }
+
+[[actions]]
+tick = 141
+type = "pull_lever"
+pos = { x = 0, y = 2, z = 6 }
+
+[[actions]]
+tick = 161
+type = "pull_lever"
+pos = { x = 0, y = 2, z = 8 }
+
+[[actions]]
+tick = 181
+type = "pull_lever"
+pos = { x = 0, y = 2, z = 8 }
+
+[[actions]]
+tick = 201
+type = "pull_lever"
+pos = { x = 0, y = 2, z = 10 }
+
+[[actions]]
+tick = 221
+type = "pull_lever"
+pos = { x = 0, y = 2, z = 10 }
+
+[[actions]]
+tick = 241
+type = "pull_lever"
+pos = { x = 0, y = 2, z = 12 }
+
+[[actions]]
+tick = 261
+type = "pull_lever"
+pos = { x = 0, y = 2, z = 12 }
+
+[[actions]]
+tick = 281
+type = "pull_lever"
+pos = { x = 0, y = 2, z = 14 }
+
+[[actions]]
+tick = 301
+type = "pull_lever"
+pos = { x = 0, y = 2, z = 14 }
+
+[[actions]]
+tick = 321
+type = "pull_lever"
+pos = { x = 0, y = 2, z = 16 }
+
+[[actions]]
+tick = 341
+type = "pull_lever"
+pos = { x = 0, y = 2, z = 16 }
+
+[[actions]]
+tick = 361
+type = "pull_lever"
+pos = { x = 0, y = 2, z = 18 }
+
+[[probes]]
+name = "segment_a"
+type = "property"
+pos = { x = 5, y = 11, z = 23 }
+property = "lit"
+
+[[probes]]
+name = "segment_b"
+type = "property"
+pos = { x = 7, y = 9, z = 23 }
+property = "lit"
+
+[[probes]]
+name = "segment_c"
+type = "property"
+pos = { x = 7, y = 5, z = 23 }
+property = "lit"
+
+[[probes]]
+name = "segment_d"
+type = "property"
+pos = { x = 5, y = 3, z = 23 }
+property = "lit"
+
+[[probes]]
+name = "segment_e"
+type = "property"
+pos = { x = 3, y = 5, z = 23 }
+property = "lit"
+
+[[probes]]
+name = "segment_f"
+type = "property"
+pos = { x = 3, y = 9, z = 23 }
+property = "lit"
+
+[[probes]]
+name = "segment_g"
+type = "property"
+pos = { x = 5, y = 7, z = 23 }
+property = "lit"
+
+[[probes]]
+name = "lever_9"
+type = "property"
+pos = { x = 0, y = 2, z = 0 }
+property = "powered"
+
+[[probes]]
+name = "lever_8"
+type = "property"
+pos = { x = 0, y = 2, z = 2 }
+property = "powered"
+
+[[probes]]
+name = "lever_7"
+type = "property"
+pos = { x = 0, y = 2, z = 4 }
+property = "powered"
+
+[[probes]]
+name = "lever_6"
+type = "property"
+pos = { x = 0, y = 2, z = 6 }
+property = "powered"
+
+[[probes]]
+name = "input_6_lower"
+type = "property"
+pos = { x = 1, y = 3, z = 6 }
+property = "power"
+
+[[probes]]
+name = "input_6_middle"
+type = "property"
+pos = { x = 1, y = 7, z = 6 }
+property = "power"
+
+[[probes]]
+name = "input_6_upper"
+type = "property"
+pos = { x = 2, y = 10, z = 6 }
+property = "power"
+
+[[expectations]]
+tick = 20
+probe = "segment_a"
+equals = "true"
+
+[[expectations]]
+tick = 20
+probe = "segment_b"
+equals = "true"
+
+[[expectations]]
+tick = 20
+probe = "segment_c"
+equals = "true"
+
+[[expectations]]
+tick = 20
+probe = "segment_d"
+equals = "true"
+
+[[expectations]]
+tick = 20
+probe = "segment_e"
+equals = "false"
+
+[[expectations]]
+tick = 20
+probe = "segment_f"
+equals = "true"
+
+[[expectations]]
+tick = 20
+probe = "segment_g"
+equals = "true"
+
+[[expectations]]
+tick = 20
+probe = "lever_9"
+equals = "false"
+
+[[expectations]]
+tick = 60
+probe = "segment_a"
+equals = "true"
+
+[[expectations]]
+tick = 60
+probe = "segment_b"
+equals = "true"
+
+[[expectations]]
+tick = 60
+probe = "segment_c"
+equals = "true"
+
+[[expectations]]
+tick = 60
+probe = "segment_d"
+equals = "true"
+
+[[expectations]]
+tick = 60
+probe = "segment_e"
+equals = "true"
+
+[[expectations]]
+tick = 60
+probe = "segment_f"
+equals = "true"
+
+[[expectations]]
+tick = 60
+probe = "segment_g"
+equals = "true"
+
+[[expectations]]
+tick = 60
+probe = "lever_8"
+equals = "false"
+
+[[expectations]]
+tick = 100
+probe = "segment_a"
+equals = "true"
+
+[[expectations]]
+tick = 100
+probe = "segment_b"
+equals = "true"
+
+[[expectations]]
+tick = 100
+probe = "segment_c"
+equals = "true"
+
+[[expectations]]
+tick = 100
+probe = "segment_d"
+equals = "false"
+
+[[expectations]]
+tick = 100
+probe = "segment_e"
+equals = "false"
+
+[[expectations]]
+tick = 100
+probe = "segment_f"
+equals = "false"
+
+[[expectations]]
+tick = 100
+probe = "segment_g"
+equals = "false"
+
+[[expectations]]
+tick = 100
+probe = "lever_7"
+equals = "false"
+
+[[expectations]]
+tick = 140
+probe = "segment_a"
+equals = "true"
+
+[[expectations]]
+tick = 140
+probe = "segment_b"
+equals = "false"
+
+[[expectations]]
+tick = 140
+probe = "segment_c"
+equals = "true"
+
+[[expectations]]
+tick = 140
+probe = "segment_d"
+equals = "true"
+
+[[expectations]]
+tick = 140
+probe = "segment_e"
+equals = "true"
+
+[[expectations]]
+tick = 140
+probe = "segment_f"
+equals = "true"
+
+[[expectations]]
+tick = 140
+probe = "segment_g"
+equals = "true"
+
+[[expectations]]
+tick = 140
+probe = "lever_6"
+equals = "false"
+
+[[expectations]]
+tick = 140
+probe = "input_6_lower"
+equals = "0"
+
+[[expectations]]
+tick = 140
+probe = "input_6_middle"
+equals = "0"
+
+[[expectations]]
+tick = 140
+probe = "input_6_upper"
+equals = "0"
+
+[[expectations]]
+tick = 180
+probe = "segment_a"
+equals = "true"
+
+[[expectations]]
+tick = 180
+probe = "segment_b"
+equals = "false"
+
+[[expectations]]
+tick = 180
+probe = "segment_c"
+equals = "true"
+
+[[expectations]]
+tick = 180
+probe = "segment_d"
+equals = "true"
+
+[[expectations]]
+tick = 180
+probe = "segment_e"
+equals = "false"
+
+[[expectations]]
+tick = 180
+probe = "segment_f"
+equals = "true"
+
+[[expectations]]
+tick = 180
+probe = "segment_g"
+equals = "true"
+
+[[expectations]]
+tick = 220
+probe = "segment_a"
+equals = "false"
+
+[[expectations]]
+tick = 220
+probe = "segment_b"
+equals = "true"
+
+[[expectations]]
+tick = 220
+probe = "segment_c"
+equals = "true"
+
+[[expectations]]
+tick = 220
+probe = "segment_d"
+equals = "false"
+
+[[expectations]]
+tick = 220
+probe = "segment_e"
+equals = "false"
+
+[[expectations]]
+tick = 220
+probe = "segment_f"
+equals = "true"
+
+[[expectations]]
+tick = 220
+probe = "segment_g"
+equals = "true"
+
+[[expectations]]
+tick = 260
+probe = "segment_a"
+equals = "true"
+
+[[expectations]]
+tick = 260
+probe = "segment_b"
+equals = "true"
+
+[[expectations]]
+tick = 260
+probe = "segment_c"
+equals = "true"
+
+[[expectations]]
+tick = 260
+probe = "segment_d"
+equals = "true"
+
+[[expectations]]
+tick = 260
+probe = "segment_e"
+equals = "false"
+
+[[expectations]]
+tick = 260
+probe = "segment_f"
+equals = "false"
+
+[[expectations]]
+tick = 260
+probe = "segment_g"
+equals = "true"
+
+[[expectations]]
+tick = 300
+probe = "segment_a"
+equals = "true"
+
+[[expectations]]
+tick = 300
+probe = "segment_b"
+equals = "true"
+
+[[expectations]]
+tick = 300
+probe = "segment_c"
+equals = "false"
+
+[[expectations]]
+tick = 300
+probe = "segment_d"
+equals = "true"
+
+[[expectations]]
+tick = 300
+probe = "segment_e"
+equals = "true"
+
+[[expectations]]
+tick = 300
+probe = "segment_f"
+equals = "false"
+
+[[expectations]]
+tick = 300
+probe = "segment_g"
+equals = "true"
+
+[[expectations]]
+tick = 340
+probe = "segment_a"
+equals = "false"
+
+[[expectations]]
+tick = 340
+probe = "segment_b"
+equals = "true"
+
+[[expectations]]
+tick = 340
+probe = "segment_c"
+equals = "true"
+
+[[expectations]]
+tick = 340
+probe = "segment_d"
+equals = "false"
+
+[[expectations]]
+tick = 340
+probe = "segment_e"
+equals = "false"
+
+[[expectations]]
+tick = 340
+probe = "segment_f"
+equals = "false"
+
+[[expectations]]
+tick = 340
+probe = "segment_g"
+equals = "false"
+
+[[expectations]]
+tick = 380
+probe = "segment_a"
+equals = "true"
+
+[[expectations]]
+tick = 380
+probe = "segment_b"
+equals = "true"
+
+[[expectations]]
+tick = 380
+probe = "segment_c"
+equals = "true"
+
+[[expectations]]
+tick = 380
+probe = "segment_d"
+equals = "true"
+
+[[expectations]]
+tick = 380
+probe = "segment_e"
+equals = "true"
+
+[[expectations]]
+tick = 380
+probe = "segment_f"
+equals = "true"
+
+[[expectations]]
+tick = 380
+probe = "segment_g"
+equals = "false"

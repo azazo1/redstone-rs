@@ -168,3 +168,8 @@ oracle-scenario-self-test: oracle-build
     set -eu
     classpath="{{ ORACLE_DIR }}/build/vanilla-oracle.jar:{{ CLIENT_JAR }}:$(find "{{ RUNTIME_DIR }}" "{{ ORACLE_LIB_DIR }}" -name '*.jar' -type f | sort | paste -sd ':' -)"
     java -Xmx4g -cp "$classpath" redstone.oracle.Main --scenario-self-test
+
+# just oracle assets/scenarios/seg7.toml /tmp/seg7-oracle.jsonl
+# 使用 Java GameTest oracle 运行场景并输出 JSONL.
+oracle scenario output="/tmp/redstone-oracle.jsonl": oracle-build
+    sh {{ ORACLE_DIR }}/run.sh "{{ scenario }}" "{{ output }}"

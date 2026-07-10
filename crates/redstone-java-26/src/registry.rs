@@ -347,6 +347,10 @@ fn classify(name: &str, properties: &BTreeMap<String, String>) -> BlockTraits {
         _ => BlockBehavior::Static,
     };
 
+    let full_slab = path.ends_with("_slab")
+        && properties
+            .get("type")
+            .is_some_and(|slab_type| slab_type == "double");
     let non_solid = matches!(
         behavior,
         BlockBehavior::Air
@@ -371,7 +375,7 @@ fn classify(name: &str, properties: &BTreeMap<String, String>) -> BlockTraits {
             | BlockBehavior::TrappedChest
             | BlockBehavior::UnsupportedActive
     ) || path.contains("glass")
-        || path.ends_with("_slab")
+        || (path.ends_with("_slab") && !full_slab)
         || path.ends_with("_stairs")
         || path.ends_with("_fence")
         || path.ends_with("_wall")
@@ -413,7 +417,6 @@ fn classify(name: &str, properties: &BTreeMap<String, String>) -> BlockTraits {
     };
     let supported = !matches!(behavior, BlockBehavior::UnsupportedActive);
 
-    let _ = properties;
     BlockTraits {
         behavior,
         redstone_conductor,

@@ -356,7 +356,7 @@ impl Java26Rules {
             return 0;
         };
         match state.behavior {
-            BlockBehavior::Torch { wall: false } if direction != Direction::Down => 0,
+            BlockBehavior::Torch { .. } if direction != Direction::Down => 0,
             BlockBehavior::Lever | BlockBehavior::Button { .. } => {
                 if state.bool_property("powered") && attached_direction(state) == direction {
                     15
@@ -413,47 +413,34 @@ impl Java26Rules {
 
     fn wire_target_power(&self, world: &SparseWorld, pos: BlockPos) -> u8 {
         let mut block_power = 0u8;
-        let mut wire_power = 0u8;
         for direction in Direction::UPDATE_ORDER {
             let neighbor = pos.relative(direction);
-            let neighbor_state = world.get_block(neighbor);
-            let Ok(definition) = self.state(neighbor_state) else {
-                continue;
-            };
-            if matches!(definition.behavior, BlockBehavior::Wire) {
-                wire_power = wire_power.max(
-                    definition
-                        .int_property("power")
-                        .unwrap_or(0)
-                        .clamp(0, 15) as u8,
-                );
-            } else {
-                block_power = block_power.max(self.signal_without_wire_feedback(
-                    world,
-                    neighbor,
-                    direction,
-                ));
-            }
+            block_power = block_power.max(self.signal_without_wire_feedback(
+                world,
+                neighbor,
+                direction,
+            ));
         }
 
+        let above_open = self
+            .state(world.get_block(pos.relative(Direction::Up)))
+            .map_or(true, |state| !state.redstone_conductor);
+        let mut wire_power = 0u8;
         for horizontal in Direction::HORIZONTAL {
             let side = pos.relative(horizontal);
             let Ok(side_state) = self.state(world.get_block(side)) else {
                 continue;
             };
-            let candidate = if side_state.redstone_conductor {
-                side.relative(Direction::Up)
-            } else {
-                side.relative(Direction::Down)
-            };
-            if let Ok(candidate_state) = self.state(world.get_block(candidate))
-                && matches!(candidate_state.behavior, BlockBehavior::Wire)
-            {
+            wire_power = wire_power.max(wire_power_of(side_state));
+            if side_state.redstone_conductor && above_open {
                 wire_power = wire_power.max(
-                    candidate_state
-                        .int_property("power")
-                        .unwrap_or(0)
-                        .clamp(0, 15) as u8,
+                    self.state(world.get_block(side.relative(Direction::Up)))
+                        .map_or(0, wire_power_of),
+                );
+            } else if !side_state.redstone_conductor {
+                wire_power = wire_power.max(
+                    self.state(world.get_block(side.relative(Direction::Down)))
+                        .map_or(0, wire_power_of),
                 );
             }
         }
@@ -814,7 +801,11 @@ impl Java26Rules {
             BlockBehavior::Lever if !force_button => {
                 let powered = !state.bool_property("powered");
                 let next = self.changed_state(state_id, "powered", powered.to_string())?;
-                self.set_state_and_notify(ctx, pos, next, "lever_use", None)?;
+                if self.set_state_and_notify(ctx, pos, next, "lever_use", None)? {
+                    let attached = pos.relative(attached_direction(&state).opposite());
+                    ctx.update_neighbors(pos, state.kind, None, None);
+                    ctx.update_neighbors(attached, state.kind, None, None);
+                }
             }
             BlockBehavior::Button { wooden } if !force_lever => {
                 if !state.bool_property("powered") {
@@ -1794,6 +1785,14 @@ fn attached_block(pos: BlockPos, state: &StateDefinition) -> BlockPos {
                 .opposite(),
         ),
         _ => pos.relative(Direction::Down),
+    }
+}
+
+fn wire_power_of(state: &StateDefinition) -> u8 {
+    if matches!(state.behavior, BlockBehavior::Wire) {
+        state.int_property("power").unwrap_or(0).clamp(0, 15) as u8
+    } else {
+        0
     }
 }
 
