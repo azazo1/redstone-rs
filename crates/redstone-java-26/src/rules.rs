@@ -15,6 +15,7 @@ mod inventory;
 mod item;
 mod observer;
 mod piston;
+mod removal;
 mod shape;
 mod consumer;
 mod comparator;
@@ -1114,14 +1115,21 @@ impl BlockRules for Java26Rules {
         update: NeighborUpdate,
     ) -> Result<(), RulesError> {
         let current_state_id = ctx.world.get_block(update.pos);
-        let current_state = self.state(current_state_id)?;
+        let current_state = self.state(current_state_id)?.clone();
+        let loses_support = shape::is_rail_name(&current_state.name)
+            && self.rail_support_changed(update.pos, &current_state, update.source_pos)
+            && !self.rail_survives(ctx.world, update.pos, &current_state);
+        if loses_support {
+            self.remove_block_after_support_loss(ctx, update.pos, "neighbor_support_loss")?;
+            return Ok(());
+        }
         let state_id = if matches!(current_state.behavior, BlockBehavior::Wire) {
             current_state_id
         } else {
             let direction = Direction::UPDATE_ORDER
                 .into_iter()
                 .find(|direction| update.pos.relative(*direction) == update.source_pos);
-            self.repair_shape_from(ctx, update.pos, true, direction)?
+            self.repair_shape_after_neighbor_changed(ctx, update.pos, direction)?
         };
         let state = self.state(state_id)?.clone();
         if state.name == "minecraft:piston_head" {

@@ -1,0 +1,150 @@
+version = "26.1.2"
+mode = "default"
+seed = 0
+max_ticks = 40
+strict = true
+oracle_micro_trace = true
+
+[source]
+path = "../schematics/piston-push-destroy-tests-2.nbt"
+initialization = "raw"
+
+[[actions]]
+tick = 1
+type = "pull_lever"
+pos = { x = 3, y = 0, z = 0 }
+
+[[actions]]
+tick = 1
+type = "pull_lever"
+pos = { x = 3, y = 0, z = 1 }
+
+[[actions]]
+tick = 1
+type = "pull_lever"
+pos = { x = 3, y = 0, z = 2 }
+
+[[actions]]
+tick = 1
+type = "pull_lever"
+pos = { x = 3, y = 0, z = 3 }
+
+[[actions]]
+tick = 1
+type = "pull_lever"
+pos = { x = 3, y = 0, z = 4 }
+
+[[actions]]
+tick = 1
+type = "pull_lever"
+pos = { x = 3, y = 0, z = 5 }
+
+[[actions]]
+tick = 10
+type = "pull_lever"
+pos = { x = 3, y = 0, z = 0 }
+
+[[actions]]
+tick = 10
+type = "pull_lever"
+pos = { x = 3, y = 0, z = 1 }
+
+[[actions]]
+tick = 10
+type = "pull_lever"
+pos = { x = 3, y = 0, z = 2 }
+
+[[actions]]
+tick = 10
+type = "pull_lever"
+pos = { x = 3, y = 0, z = 3 }
+
+[[actions]]
+tick = 10
+type = "pull_lever"
+pos = { x = 3, y = 0, z = 4 }
+
+[[actions]]
+tick = 10
+type = "pull_lever"
+pos = { x = 3, y = 0, z = 5 }
+
+[[probes]]
+name = "wall_torch_replaced_by_wool"
+type = "block_state"
+pos = { x = 0, y = 0, z = 0 }
+
+[[probes]]
+name = "unsupported_wire"
+type = "block_state"
+pos = { x = 1, y = 1, z = 0 }
+
+[[probes]]
+name = "button_on_extended_piston"
+type = "block_state"
+pos = { x = 2, y = 1, z = 0 }
+
+[[probes]]
+name = "unsupported_repeater"
+type = "block_state"
+pos = { x = 1, y = 1, z = 1 }
+
+[[probes]]
+name = "unsupported_button"
+type = "block_state"
+pos = { x = 1, y = 1, z = 2 }
+
+[[probes]]
+name = "unsupported_pressure_plate"
+type = "block_state"
+pos = { x = 1, y = 1, z = 3 }
+
+[[probes]]
+name = "unsupported_lever"
+type = "block_state"
+pos = { x = 1, y = 1, z = 4 }
+
+[[probes]]
+name = "unsupported_comparator"
+type = "block_state"
+pos = { x = 1, y = 1, z = 5 }
+
+[[expectations]]
+tick = 4
+probe = "wall_torch_replaced_by_wool"
+equals = { state = 2297 }
+
+[[expectations]]
+tick = 4
+probe = "unsupported_wire"
+equals = { state = 0 }
+
+[[expectations]]
+tick = 4
+probe = "button_on_extended_piston"
+equals = { state = 0 }
+
+[[expectations]]
+tick = 4
+probe = "unsupported_repeater"
+equals = { state = 0 }
+
+[[expectations]]
+tick = 4
+probe = "unsupported_button"
+equals = { state = 0 }
+
+[[expectations]]
+tick = 4
+probe = "unsupported_pressure_plate"
+equals = { state = 0 }
+
+[[expectations]]
+tick = 4
+probe = "unsupported_lever"
+equals = { state = 0 }
+
+[[expectations]]
+tick = 4
+probe = "unsupported_comparator"
+equals = { state = 0 }

@@ -2,7 +2,7 @@ use redstone_core::{
     BlockPos, BlockStateId, DeferredRuleTask, Direction, EventContext, RulesError, SparseWorld,
 };
 
-use super::{BlockBehavior, Java26Rules, StateDefinition};
+use super::{BlockBehavior, Java26Rules, StateDefinition, attached_direction};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum ShapeFamily {
@@ -13,6 +13,58 @@ enum ShapeFamily {
     Wall,
     Rail { straight: bool },
     Door,
+}
+
+#[derive(Clone, Copy)]
+enum SupportType {
+    Full,
+    Center,
+    Rigid,
+    PressurePlate,
+    Wire,
+}
+
+fn parse_direction(value: &str) -> Option<Direction> {
+    match value {
+        "west" => Some(Direction::West),
+        "east" => Some(Direction::East),
+        "down" => Some(Direction::Down),
+        "up" => Some(Direction::Up),
+        "north" => Some(Direction::North),
+        "south" => Some(Direction::South),
+        _ => None,
+    }
+}
+
+fn supports_face(
+    world: &SparseWorld,
+    pos: BlockPos,
+    state: &StateDefinition,
+    face: Direction,
+    support_type: SupportType,
+) -> bool {
+    let moving_source_face = (state.name == "minecraft:moving_piston")
+        .then(|| world.block_entity(pos))
+        .flatten()
+        .filter(|data| data.fields.get("source").and_then(|value| value.as_bool()) == Some(true))
+        .and_then(|data| data.fields.get("direction").and_then(|value| value.as_str()))
+        .and_then(parse_direction)
+        .is_some_and(|direction| face == direction.opposite());
+    let full = state.sturdy(face) || moving_source_face;
+    let path = state.name.strip_prefix("minecraft:").unwrap_or(&state.name);
+    let center = full
+        || face == Direction::Up
+            && (path.ends_with("_fence") || path.ends_with("_wall"))
+        || matches!(path, "piston" | "sticky_piston")
+            && state.bool_property("extended")
+            && state.direction_property("facing") != Some(face);
+    match support_type {
+        SupportType::Full => full,
+        SupportType::Center => center,
+        SupportType::Rigid => full,
+        SupportType::PressurePlate => full || center,
+        SupportType::Wire => full || path == "hopper",
+    }
 }
 
 pub(super) const UPDATE_NEIGHBOR_SHAPES: &str = "update_neighbor_shapes";
@@ -69,8 +121,38 @@ impl Java26Rules {
         notify: bool,
         direction_to_neighbor: Option<Direction>,
     ) -> Result<BlockStateId, RulesError> {
+        self.repair_shape_inner(ctx, pos, notify, direction_to_neighbor, true)
+    }
+
+    pub(super) fn repair_shape_after_neighbor_changed(
+        &mut self,
+        ctx: &mut EventContext<'_>,
+        pos: BlockPos,
+        direction_to_neighbor: Option<Direction>,
+    ) -> Result<BlockStateId, RulesError> {
+        self.repair_shape_inner(ctx, pos, true, direction_to_neighbor, false)
+    }
+
+    fn repair_shape_inner(
+        &mut self,
+        ctx: &mut EventContext<'_>,
+        pos: BlockPos,
+        notify: bool,
+        direction_to_neighbor: Option<Direction>,
+        check_support: bool,
+    ) -> Result<BlockStateId, RulesError> {
         let state_id = ctx.world.get_block(pos);
         let state = self.state(state_id)?.clone();
+        if check_support
+            && self.loses_support_from_shape(ctx.world, pos, &state, direction_to_neighbor)
+        {
+            if notify {
+                return self.remove_block_after_support_loss(ctx, pos, "shape_support_loss");
+            }
+            let air = self.registry.air_state();
+            ctx.set_block(pos, air, "shape_support_initialize")?;
+            return Ok(air);
+        }
         let Some(family) = shape_family(&state.name) else {
             return Ok(state_id);
         };
@@ -107,6 +189,106 @@ impl Java26Rules {
             }
         }
         Ok(repaired)
+    }
+
+    fn loses_support_from_shape(
+        &self,
+        world: &SparseWorld,
+        pos: BlockPos,
+        state: &StateDefinition,
+        direction_to_neighbor: Option<Direction>,
+    ) -> bool {
+        let Some(direction_to_neighbor) = direction_to_neighbor else {
+            return false;
+        };
+        let (support_direction, support_face, support_type) = match state.behavior {
+            BlockBehavior::Wire => (Direction::Down, Direction::Up, SupportType::Wire),
+            BlockBehavior::Torch { wall: false } => {
+                (Direction::Down, Direction::Up, SupportType::Center)
+            }
+            BlockBehavior::Torch { wall: true } => {
+                let facing = state
+                    .direction_property("facing")
+                    .unwrap_or(Direction::North);
+                (facing.opposite(), facing, SupportType::Center)
+            }
+            BlockBehavior::Lever | BlockBehavior::Button { .. } => {
+                let facing = attached_direction(state);
+                (facing.opposite(), facing, SupportType::Full)
+            }
+            BlockBehavior::PressurePlate { .. } => {
+                (Direction::Down, Direction::Up, SupportType::PressurePlate)
+            }
+            BlockBehavior::Repeater | BlockBehavior::Comparator => {
+                (Direction::Down, Direction::Up, SupportType::Rigid)
+            }
+            BlockBehavior::TripwireHook => {
+                let facing = state
+                    .direction_property("facing")
+                    .unwrap_or(Direction::North);
+                (facing.opposite(), facing, SupportType::Full)
+            }
+            _ => return false,
+        };
+        if direction_to_neighbor != support_direction {
+            return false;
+        }
+        let support = self.state_or_air(world, pos.relative(support_direction));
+        !supports_face(
+            world,
+            pos.relative(support_direction),
+            support,
+            support_face,
+            support_type,
+        )
+    }
+
+    pub(super) fn rail_survives(
+        &self,
+        world: &SparseWorld,
+        pos: BlockPos,
+        state: &StateDefinition,
+    ) -> bool {
+        if !self
+            .state_or_air(world, pos.relative(Direction::Down))
+            .sturdy(Direction::Up)
+        {
+            return false;
+        }
+        let support_direction = match RailShape::parse(
+            state.property("shape").unwrap_or("north_south"),
+        ) {
+            RailShape::AscendingEast => Some(Direction::East),
+            RailShape::AscendingWest => Some(Direction::West),
+            RailShape::AscendingNorth => Some(Direction::North),
+            RailShape::AscendingSouth => Some(Direction::South),
+            _ => None,
+        };
+        support_direction.is_none_or(|direction| {
+            self.state_or_air(world, pos.relative(direction))
+                .sturdy(Direction::Up)
+        })
+    }
+
+    pub(super) fn rail_support_changed(
+        &self,
+        pos: BlockPos,
+        state: &StateDefinition,
+        source_pos: BlockPos,
+    ) -> bool {
+        if source_pos == pos.relative(Direction::Down) {
+            return true;
+        }
+        let support_direction = match RailShape::parse(
+            state.property("shape").unwrap_or("north_south"),
+        ) {
+            RailShape::AscendingEast => Some(Direction::East),
+            RailShape::AscendingWest => Some(Direction::West),
+            RailShape::AscendingNorth => Some(Direction::North),
+            RailShape::AscendingSouth => Some(Direction::South),
+            _ => None,
+        };
+        support_direction.is_some_and(|direction| source_pos == pos.relative(direction))
     }
 
     fn repair_rail_shape(
@@ -728,7 +910,7 @@ impl RailShape {
     }
 }
 
-fn is_rail_name(name: &str) -> bool {
+pub(super) fn is_rail_name(name: &str) -> bool {
     let path = name.strip_prefix("minecraft:").unwrap_or(name);
     path == "rail" || path.ends_with("_rail")
 }

@@ -477,16 +477,35 @@ fn classify(name: &str, properties: &BTreeMap<String, String>) -> BlockTraits {
                 | "piston_head"
                 | "hopper"
         );
-    let sturdy = !non_solid || path == "hopper";
+    let sturdy = (!non_solid
+        || path == "hopper"
+        || matches!(behavior, BlockBehavior::Observer | BlockBehavior::NoteBlock))
+        && !matches!(path, "moving_piston" | "piston_head");
     let extended_piston = matches!(path, "piston" | "sticky_piston")
         && properties.get("extended").is_some_and(|value| value == "true");
+    let sturdy_faces = if extended_piston {
+        let mut faces = [false; 6];
+        let back_face = match properties.get("facing").map(String::as_str) {
+            Some("west") => 1,
+            Some("east") => 0,
+            Some("down") => 3,
+            Some("up") => 2,
+            Some("north") => 5,
+            Some("south") => 4,
+            _ => 1,
+        };
+        faces[back_face] = true;
+        faces
+    } else {
+        [sturdy; 6]
+    };
     let push_reaction = piston_push_reaction(path, extended_piston);
     let supported = !matches!(behavior, BlockBehavior::UnsupportedActive);
 
     BlockTraits {
         behavior,
         redstone_conductor,
-        sturdy_faces: [sturdy; 6],
+        sturdy_faces,
         push_reaction,
         supported,
     }
