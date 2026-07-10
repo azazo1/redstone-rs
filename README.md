@@ -42,10 +42,15 @@ just test
 
 ```shell
 cargo run -p redstone-cli -- inspect machine.litematic
+cargo run -p redstone-cli -- inspect machine.litematic --block 10,20,30
+cargo run -p redstone-cli -- inspect machine.litematic --type minecraft:hopper --format json
+cargo run -p redstone-cli -- inspect machine.litematic --all --json
 cargo run -p redstone-cli -- run scenario.toml --trace trace.jsonl --vcd signals.vcd
 cargo run -p redstone-cli -- test scenarios
 cargo run --release -p redstone-cli -- bench
 ```
+
+`inspect` 默认输出结构汇总. `--block X,Y,Z` 可重复查询指定坐标, `--type BLOCK_ID` 按方块类型筛选, `--all` 输出全部非空气方块. 明细包含状态 ID, properties, 支持状态和完整方块实体 NBT, 包括嵌套的 `components`. `--format json` 与 `--json` 均可输出 JSON.
 
 ## 场景格式
 

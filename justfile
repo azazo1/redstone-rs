@@ -27,10 +27,10 @@ test:
 run scenario *args:
     cargo run -p redstone-cli -- run {{ scenario }} {{ args }}
 
-# just inspect path/to/structure.litematic
+# just inspect path/to/structure.litematic --block 0,0,0 --json
 # 检查结构内容和未支持方块.
-inspect structure:
-    cargo run -p redstone-cli -- inspect {{ structure }}
+inspect structure *args:
+    cargo run -p redstone-cli -- inspect {{ structure }} {{ args }}
 
 # just bench --ticks 100
 # 运行大规模空闲刻基准.

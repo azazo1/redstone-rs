@@ -99,6 +99,7 @@ pub struct LoadedStructure {
     pub format: String,
     pub data_version: Option<i32>,
     pub block_counts: BTreeMap<String, usize>,
+    pub block_entity_nbt: BTreeMap<BlockPos, BTreeMap<String, serde_json::Value>>,
 }
 
 pub struct StructureLoader;
@@ -176,6 +177,7 @@ fn load_vanilla<R: StructureStateResolver>(
     let size = int_list(&root, "size")?;
     let mut world = SparseWorld::new(resolver.air_state());
     let mut counts = BTreeMap::new();
+    let mut block_entity_nbt = BTreeMap::new();
     let mut min = None::<BlockPos>;
     let mut max = None::<BlockPos>;
     for block in list(&root, "blocks")? {
@@ -190,6 +192,7 @@ fn load_vanilla<R: StructureStateResolver>(
         update_bounds(&mut min, &mut max, absolute);
         *counts.entry(names[palette_index].clone()).or_default() += 1;
         if let Some(Value::Compound(nbt)) = block.get("nbt") {
+            block_entity_nbt.insert(absolute, nbt_compound_to_json(nbt));
             world.set_block_entity(absolute, nbt_to_block_entity(nbt));
         }
     }
@@ -212,6 +215,7 @@ fn load_vanilla<R: StructureStateResolver>(
         format: "vanilla_structure".to_owned(),
         data_version: root.get("DataVersion").and_then(value_i32),
         block_counts: counts,
+        block_entity_nbt,
     })
 }
 
@@ -223,6 +227,7 @@ fn load_litematic<R: StructureStateResolver>(
     let regions = compound(&root, "Regions")?;
     let mut world = SparseWorld::new(resolver.air_state());
     let mut counts = BTreeMap::new();
+    let mut block_entity_nbt = BTreeMap::new();
     let mut min = None::<BlockPos>;
     let mut max = None::<BlockPos>;
 
@@ -297,6 +302,7 @@ fn load_litematic<R: StructureStateResolver>(
                 let y = integer(entry, "y")?;
                 let z = integer(entry, "z")?;
                 let absolute = transform.apply(BlockPos::new(start.x + x, start.y + y, start.z + z));
+                block_entity_nbt.insert(absolute, nbt_compound_to_json(entry));
                 world.set_block_entity(absolute, nbt_to_block_entity(entry));
             }
         }
@@ -316,6 +322,7 @@ fn load_litematic<R: StructureStateResolver>(
         format: "litematic".to_owned(),
         data_version: root.get("MinecraftDataVersion").and_then(value_i32),
         block_counts: counts,
+        block_entity_nbt,
     })
 }
 
@@ -370,6 +377,14 @@ fn nbt_to_block_entity(nbt: &HashMap<String, Value>) -> BlockEntityData {
         .collect::<BTreeMap<_, _>>();
     normalize_inventory_fields(&kind, nbt, &mut fields);
     BlockEntityData { kind, fields }
+}
+
+fn nbt_compound_to_json(
+    nbt: &HashMap<String, Value>,
+) -> BTreeMap<String, serde_json::Value> {
+    nbt.iter()
+        .map(|(key, value)| (key.clone(), nbt_value_to_json(value)))
+        .collect()
 }
 
 fn entity_from_nbt(entity: &HashMap<String, Value>) -> Result<Option<EntityData>, StructureError> {

@@ -24,6 +24,8 @@ use tracing_subscriber::EnvFilter;
 use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::util::SubscriberInitExt;
 
+mod inspect;
+
 #[derive(Debug, Parser)]
 #[command(name = "redstone", version, about = "Java 26.1.2 红石时序仿真器")]
 struct Cli {
@@ -34,7 +36,39 @@ struct Cli {
 #[derive(Debug, Subcommand)]
 enum Command {
     Inspect {
+        #[arg(help = "要检查的 litematic 或 structure NBT 文件")]
         structure: PathBuf,
+        #[arg(
+            long = "block",
+            value_name = "X,Y,Z",
+            value_parser = inspect::parse_block_pos,
+            conflicts_with_all = ["all", "block_types"],
+            help = "查询指定坐标的方块, 可重复使用"
+        )]
+        blocks: Vec<BlockPos>,
+        #[arg(
+            long,
+            conflicts_with_all = ["blocks", "block_types"],
+            help = "输出全部非空气方块"
+        )]
+        all: bool,
+        #[arg(
+            long = "type",
+            visible_aliases = ["block-type", "name"],
+            value_name = "BLOCK_ID",
+            conflicts_with_all = ["blocks", "all"],
+            help = "按方块 ID 筛选, 可重复使用"
+        )]
+        block_types: Vec<String>,
+        #[arg(
+            long,
+            value_enum,
+            default_value = "text",
+            help = "选择文本或 JSON 输出"
+        )]
+        format: inspect::OutputFormat,
+        #[arg(long, conflicts_with = "format", help = "使用 JSON 输出")]
+        json: bool,
     },
     Run {
         scenario: PathBuf,
@@ -85,7 +119,24 @@ async fn main() -> Result<()> {
         .init();
     let cli = Cli::parse();
     match cli.command {
-        Command::Inspect { structure } => inspect(&structure),
+        Command::Inspect {
+            structure,
+            blocks,
+            all,
+            block_types,
+            format,
+            json,
+        } => inspect::run(
+            &structure,
+            &blocks,
+            all,
+            &block_types,
+            if json {
+                inspect::OutputFormat::Json
+            } else {
+                format
+            },
+        ),
         Command::Run {
             scenario,
             trace,
@@ -219,34 +270,6 @@ fn resident_memory_bytes() -> Option<u64> {
     }
     #[allow(unreachable_code)]
     None
-}
-
-fn inspect(path: &Path) -> Result<()> {
-    let mut resolver = RegistryResolver(Java26Registry::new());
-    let structure = StructureLoader::load(path, redstone_core::BlockPos::ZERO, &mut resolver)?;
-    reject_newer_data_version(structure.data_version)?;
-    println!("format: {}", structure.format);
-    println!("data_version: {:?}", structure.data_version);
-    println!("bounds: {:?} .. {:?}", structure.min, structure.max);
-    println!("non_air_blocks: {}", structure.world.non_air_blocks());
-    println!("sections: {}", structure.world.section_count());
-    println!("block_types:");
-    for (name, count) in structure.block_counts {
-        println!("  {name}: {count}");
-    }
-    let unsupported = resolver
-        .0
-        .states()
-        .filter(|state| !state.supported)
-        .map(|state| state.name.clone())
-        .collect::<Vec<_>>();
-    if !unsupported.is_empty() {
-        println!("unsupported_active_blocks:");
-        for name in unsupported {
-            println!("  {name}");
-        }
-    }
-    Ok(())
 }
 
 #[derive(Debug)]
