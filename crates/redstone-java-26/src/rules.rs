@@ -1347,6 +1347,12 @@ impl BlockRules for Java26Rules {
                         );
                     }
                     ctx.update_neighbors(pos, state.kind, None, None);
+                    ctx.update_neighbors(
+                        pos.relative(Direction::Down),
+                        state.kind,
+                        None,
+                        None,
+                    );
                 }
             }
             _ => {}

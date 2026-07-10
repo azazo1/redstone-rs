@@ -1,0 +1,411 @@
+version = "26.1.2"
+mode = "experimental"
+seed = 0
+max_ticks = 160
+
+[source]
+path = "../schematics/mux3-8.nbt"
+initialization = "notify"
+
+[[actions]]
+tick = 21
+type = "pull_lever"
+pos = { x = 2, y = 2, z = 15 }
+
+[[actions]]
+tick = 41
+type = "pull_lever"
+pos = { x = 8, y = 2, z = 15 }
+
+[[actions]]
+tick = 61
+type = "pull_lever"
+pos = { x = 5, y = 2, z = 15 }
+
+[[actions]]
+tick = 81
+type = "pull_lever"
+pos = { x = 8, y = 2, z = 15 }
+
+[[actions]]
+tick = 101
+type = "pull_lever"
+pos = { x = 2, y = 2, z = 15 }
+
+[[actions]]
+tick = 121
+type = "pull_lever"
+pos = { x = 8, y = 2, z = 15 }
+
+[[actions]]
+tick = 141
+type = "pull_lever"
+pos = { x = 5, y = 2, z = 15 }
+
+[[probes]]
+name = "output_0"
+type = "property"
+pos = { x = 9, y = 0, z = 14 }
+property = "lit"
+
+[[probes]]
+name = "output_1"
+type = "property"
+pos = { x = 9, y = 0, z = 12 }
+property = "lit"
+
+[[probes]]
+name = "output_2"
+type = "property"
+pos = { x = 9, y = 0, z = 10 }
+property = "lit"
+
+[[probes]]
+name = "output_3"
+type = "property"
+pos = { x = 9, y = 0, z = 8 }
+property = "lit"
+
+[[probes]]
+name = "output_4"
+type = "property"
+pos = { x = 9, y = 0, z = 6 }
+property = "lit"
+
+[[probes]]
+name = "output_5"
+type = "property"
+pos = { x = 9, y = 0, z = 4 }
+property = "lit"
+
+[[probes]]
+name = "output_6"
+type = "property"
+pos = { x = 9, y = 0, z = 2 }
+property = "lit"
+
+[[probes]]
+name = "output_7"
+type = "property"
+pos = { x = 9, y = 0, z = 0 }
+property = "lit"
+
+[[expectations]]
+tick = 20
+probe = "output_0"
+equals = "true"
+
+[[expectations]]
+tick = 20
+probe = "output_1"
+equals = "false"
+
+[[expectations]]
+tick = 20
+probe = "output_2"
+equals = "false"
+
+[[expectations]]
+tick = 20
+probe = "output_3"
+equals = "false"
+
+[[expectations]]
+tick = 20
+probe = "output_4"
+equals = "false"
+
+[[expectations]]
+tick = 20
+probe = "output_5"
+equals = "false"
+
+[[expectations]]
+tick = 20
+probe = "output_6"
+equals = "false"
+
+[[expectations]]
+tick = 20
+probe = "output_7"
+equals = "false"
+
+[[expectations]]
+tick = 40
+probe = "output_0"
+equals = "false"
+
+[[expectations]]
+tick = 40
+probe = "output_1"
+equals = "false"
+
+[[expectations]]
+tick = 40
+probe = "output_2"
+equals = "false"
+
+[[expectations]]
+tick = 40
+probe = "output_3"
+equals = "false"
+
+[[expectations]]
+tick = 40
+probe = "output_4"
+equals = "true"
+
+[[expectations]]
+tick = 40
+probe = "output_5"
+equals = "false"
+
+[[expectations]]
+tick = 40
+probe = "output_6"
+equals = "false"
+
+[[expectations]]
+tick = 40
+probe = "output_7"
+equals = "false"
+
+[[expectations]]
+tick = 60
+probe = "output_0"
+equals = "false"
+
+[[expectations]]
+tick = 60
+probe = "output_1"
+equals = "false"
+
+[[expectations]]
+tick = 60
+probe = "output_2"
+equals = "false"
+
+[[expectations]]
+tick = 60
+probe = "output_3"
+equals = "false"
+
+[[expectations]]
+tick = 60
+probe = "output_4"
+equals = "false"
+
+[[expectations]]
+tick = 60
+probe = "output_5"
+equals = "true"
+
+[[expectations]]
+tick = 60
+probe = "output_6"
+equals = "false"
+
+[[expectations]]
+tick = 60
+probe = "output_7"
+equals = "false"
+
+[[expectations]]
+tick = 80
+probe = "output_0"
+equals = "false"
+
+[[expectations]]
+tick = 80
+probe = "output_1"
+equals = "false"
+
+[[expectations]]
+tick = 80
+probe = "output_2"
+equals = "false"
+
+[[expectations]]
+tick = 80
+probe = "output_3"
+equals = "false"
+
+[[expectations]]
+tick = 80
+probe = "output_4"
+equals = "false"
+
+[[expectations]]
+tick = 80
+probe = "output_5"
+equals = "false"
+
+[[expectations]]
+tick = 80
+probe = "output_6"
+equals = "false"
+
+[[expectations]]
+tick = 80
+probe = "output_7"
+equals = "true"
+
+[[expectations]]
+tick = 100
+probe = "output_0"
+equals = "false"
+
+[[expectations]]
+tick = 100
+probe = "output_1"
+equals = "false"
+
+[[expectations]]
+tick = 100
+probe = "output_2"
+equals = "false"
+
+[[expectations]]
+tick = 100
+probe = "output_3"
+equals = "false"
+
+[[expectations]]
+tick = 100
+probe = "output_4"
+equals = "false"
+
+[[expectations]]
+tick = 100
+probe = "output_5"
+equals = "false"
+
+[[expectations]]
+tick = 100
+probe = "output_6"
+equals = "true"
+
+[[expectations]]
+tick = 100
+probe = "output_7"
+equals = "false"
+
+[[expectations]]
+tick = 120
+probe = "output_0"
+equals = "false"
+
+[[expectations]]
+tick = 120
+probe = "output_1"
+equals = "false"
+
+[[expectations]]
+tick = 120
+probe = "output_2"
+equals = "true"
+
+[[expectations]]
+tick = 120
+probe = "output_3"
+equals = "false"
+
+[[expectations]]
+tick = 120
+probe = "output_4"
+equals = "false"
+
+[[expectations]]
+tick = 120
+probe = "output_5"
+equals = "false"
+
+[[expectations]]
+tick = 120
+probe = "output_6"
+equals = "false"
+
+[[expectations]]
+tick = 120
+probe = "output_7"
+equals = "false"
+
+[[expectations]]
+tick = 140
+probe = "output_0"
+equals = "false"
+
+[[expectations]]
+tick = 140
+probe = "output_1"
+equals = "false"
+
+[[expectations]]
+tick = 140
+probe = "output_2"
+equals = "false"
+
+[[expectations]]
+tick = 140
+probe = "output_3"
+equals = "true"
+
+[[expectations]]
+tick = 140
+probe = "output_4"
+equals = "false"
+
+[[expectations]]
+tick = 140
+probe = "output_5"
+equals = "false"
+
+[[expectations]]
+tick = 140
+probe = "output_6"
+equals = "false"
+
+[[expectations]]
+tick = 140
+probe = "output_7"
+equals = "false"
+
+[[expectations]]
+tick = 160
+probe = "output_0"
+equals = "false"
+
+[[expectations]]
+tick = 160
+probe = "output_1"
+equals = "true"
+
+[[expectations]]
+tick = 160
+probe = "output_2"
+equals = "false"
+
+[[expectations]]
+tick = 160
+probe = "output_3"
+equals = "false"
+
+[[expectations]]
+tick = 160
+probe = "output_4"
+equals = "false"
+
+[[expectations]]
+tick = 160
+probe = "output_5"
+equals = "false"
+
+[[expectations]]
+tick = 160
+probe = "output_6"
+equals = "false"
+
+[[expectations]]
+tick = 160
+probe = "output_7"
+equals = "false"

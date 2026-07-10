@@ -39,7 +39,7 @@ bench *args:
 
 # just decompile
 # 使用 Vineflower 反编译客户端 JAR.
-decompile: prepare-tools
+decompile-client: prepare-tools
     java -Xmx4g -jar {{ VINEFLOWER }} --folder --skip-extra-files=true --thread-count=8 {{ CLIENT_JAR }} {{ OUT_DIR }}
 
 # just prepare-tools
@@ -173,3 +173,12 @@ oracle-scenario-self-test: oracle-build
 # 使用 Java GameTest oracle 运行场景并输出 JSONL.
 oracle scenario output="/tmp/redstone-oracle.jsonl": oracle-build
     sh {{ ORACLE_DIR }}/run.sh "{{ scenario }}" "{{ output }}"
+
+# 使用 Rust 仿真器执行全部原理图场景并与 Java oracle 对比.
+test-schematic-scenarios: oracle-build
+    #!/usr/bin/env sh
+    set -eu
+    for scenario in assets/scenarios/*.toml; do
+      echo "测试原理图场景: $scenario"
+      cargo run -p redstone-cli -- test "$scenario" --oracle
+    done

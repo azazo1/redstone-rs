@@ -115,6 +115,12 @@ final class Scenario {
                         blockName = requiredString(action, "name");
                         properties = stringMap(action.getTable("properties"));
                     }
+                    case "set_block_entity" -> {
+                        pos = requiredPos(action, "pos");
+                        TomlTable data = requiredTable(action, "data");
+                        entityKind = requiredString(data, "kind");
+                        fields = jsonMap(data.getTable("fields"));
+                    }
                     case "break_block", "use_block", "press_button", "pull_lever" ->
                         pos = requiredPos(action, "pos");
                     case "spawn_entity" -> {

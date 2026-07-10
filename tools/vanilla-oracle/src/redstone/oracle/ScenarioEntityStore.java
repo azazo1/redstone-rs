@@ -219,7 +219,7 @@ final class ScenarioEntityStore {
         return null;
     }
 
-    private static void configureContainer(Container container, Map<String, JsonElement> fields) {
+    static void configureContainer(Container container, Map<String, JsonElement> fields) {
         JsonElement inventory = fields.get("inventory");
         if (inventory == null) {
             if (fields.containsKey("item_id") || fields.containsKey("item_count")) {

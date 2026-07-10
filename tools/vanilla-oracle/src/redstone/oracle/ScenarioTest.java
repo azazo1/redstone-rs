@@ -7,6 +7,7 @@ import com.google.gson.JsonPrimitive;
 import java.io.BufferedWriter;
 import java.io.IOException;
 import java.lang.reflect.Field;
+import java.lang.reflect.Method;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -28,15 +29,33 @@ import net.minecraft.world.entity.projectile.Projectile;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.entity.BlockEntity;
+import net.minecraft.world.level.block.entity.ChestBlockEntity;
+import net.minecraft.world.level.block.entity.ContainerOpenersCounter;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.block.state.properties.Property;
 import net.minecraft.world.level.levelgen.structure.templatesystem.StructurePlaceSettings;
 import net.minecraft.world.level.storage.ServerLevelData;
 import net.minecraft.world.flag.FeatureFlags;
+import net.minecraft.world.level.Level;
 import net.minecraft.world.phys.BlockHitResult;
 import net.minecraft.world.phys.Vec3;
 
 final class ScenarioTest {
+    private static final Field CHEST_OPENERS_COUNTER = field(
+        ChestBlockEntity.class,
+        "openersCounter"
+    );
+    private static final Field OPEN_COUNT = field(ContainerOpenersCounter.class, "openCount");
+    private static final Method SIGNAL_OPEN_COUNT = method(
+        ChestBlockEntity.class,
+        "signalOpenCount",
+        Level.class,
+        BlockPos.class,
+        BlockState.class,
+        int.class,
+        int.class
+    );
+
     private final Scenario scenario;
     private final Path output;
     private final List<Scenario.Action> actions;
@@ -174,6 +193,7 @@ final class ScenarioTest {
     private void applyAction(GameTestHelper helper, Scenario.Action action) {
         switch (action.type()) {
             case "set_block" -> helper.setBlock(actionPos(action), resolveBlockState(helper, action));
+            case "set_block_entity" -> setBlockEntity(helper, action);
             case "break_block" -> helper.destroyBlock(actionPos(action));
             case "use_block" -> helper.useBlock(actionPos(action));
             case "press_button" -> helper.pressButton(actionPos(action));
@@ -185,6 +205,60 @@ final class ScenarioTest {
                 entities.setField(action.entityId(), action.field(), action.value());
             case "hit_target" -> hitTarget(helper, actionPos(action), action);
             default -> throw new IllegalArgumentException("Java oracle 尚不支持动作: " + action.type());
+        }
+    }
+
+    private void setBlockEntity(GameTestHelper helper, Scenario.Action action) {
+        BlockPos relative = actionPos(action);
+        BlockPos absolute = helper.absolutePos(relative);
+        BlockEntity blockEntity = helper.getLevel().getBlockEntity(absolute);
+        if (blockEntity == null) {
+            throw new IllegalArgumentException("方块实体不存在: " + action.pos());
+        }
+        Identifier actualId = BuiltInRegistries.BLOCK_ENTITY_TYPE.getKey(blockEntity.getType());
+        if (actualId == null || !actualId.toString().equals(action.entityKind())) {
+            throw new IllegalArgumentException(
+                "方块实体类型不匹配: expected "
+                    + action.entityKind()
+                    + ", actual "
+                    + actualId
+            );
+        }
+        if (blockEntity instanceof Container container && action.fields().containsKey("inventory")) {
+            ScenarioEntityStore.configureContainer(container, action.fields());
+        }
+        JsonElement openCount = action.fields().get("open_count");
+        if (openCount != null) {
+            if (!(blockEntity instanceof ChestBlockEntity chest)) {
+                throw new IllegalArgumentException("open_count 仅支持箱子方块实体");
+            }
+            setChestOpenCount(helper, chest, openCount.getAsInt());
+        }
+        blockEntity.setChanged();
+    }
+
+    private static void setChestOpenCount(
+        GameTestHelper helper,
+        ChestBlockEntity chest,
+        int current
+    ) {
+        if (current < 0) {
+            throw new IllegalArgumentException("open_count 不能小于 0");
+        }
+        try {
+            Object counter = CHEST_OPENERS_COUNTER.get(chest);
+            int previous = OPEN_COUNT.getInt(counter);
+            OPEN_COUNT.setInt(counter, current);
+            SIGNAL_OPEN_COUNT.invoke(
+                chest,
+                helper.getLevel(),
+                chest.getBlockPos(),
+                chest.getBlockState(),
+                previous,
+                current
+            );
+        } catch (ReflectiveOperationException error) {
+            throw new IllegalStateException("设置箱子 open_count 失败", error);
         }
     }
 
@@ -345,6 +419,26 @@ final class ScenarioTest {
 
     private static BlockPos blockPos(Scenario.Pos pos) {
         return new BlockPos(pos.x(), pos.y(), pos.z());
+    }
+
+    private static Field field(Class<?> owner, String name) {
+        try {
+            Field field = owner.getDeclaredField(name);
+            field.setAccessible(true);
+            return field;
+        } catch (ReflectiveOperationException error) {
+            throw new ExceptionInInitializerError(error);
+        }
+    }
+
+    private static Method method(Class<?> owner, String name, Class<?>... parameters) {
+        try {
+            Method method = owner.getDeclaredMethod(name, parameters);
+            method.setAccessible(true);
+            return method;
+        } catch (ReflectiveOperationException error) {
+            throw new ExceptionInInitializerError(error);
+        }
     }
 
     private void closeOutput() {

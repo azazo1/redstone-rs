@@ -1,0 +1,331 @@
+version = "26.1.2"
+mode = "default"
+seed = 0
+max_ticks = 70
+
+[source]
+path = "../schematics/charging-tests.nbt"
+initialization = "raw"
+
+[[actions]]
+tick = 1
+type = "set_block_entity"
+pos = { x = 0, y = 3, z = 3 }
+data = { kind = "minecraft:trapped_chest", fields = { open_count = 1 } }
+
+[[actions]]
+tick = 1
+type = "spawn_entity"
+id = 100
+kind = "minecraft:generic_collision"
+position = [2.5, 3.1, 2.5]
+fields = { no_gravity = true }
+
+[[actions]]
+tick = 1
+type = "spawn_entity"
+id = 101
+kind = "minecraft:generic_collision"
+position = [6.5, 4.1, 3.5]
+fields = { no_gravity = true }
+
+[[actions]]
+tick = 41
+type = "pull_lever"
+pos = { x = 8, y = 3, z = 0 }
+
+[[probes]]
+name = "lamp_0_1_3"
+type = "property"
+pos = { x = 0, y = 1, z = 3 }
+property = "lit"
+
+[[probes]]
+name = "lamp_0_2_4"
+type = "property"
+pos = { x = 0, y = 2, z = 4 }
+property = "lit"
+
+[[probes]]
+name = "lamp_2_3_5"
+type = "property"
+pos = { x = 2, y = 3, z = 5 }
+property = "lit"
+
+[[probes]]
+name = "lamp_2_4_4"
+type = "property"
+pos = { x = 2, y = 4, z = 4 }
+property = "lit"
+
+[[probes]]
+name = "lamp_4_4_4"
+type = "property"
+pos = { x = 4, y = 4, z = 4 }
+property = "lit"
+
+[[probes]]
+name = "lamp_6_2_3"
+type = "property"
+pos = { x = 6, y = 2, z = 3 }
+property = "lit"
+
+[[probes]]
+name = "lamp_6_4_4"
+type = "property"
+pos = { x = 6, y = 4, z = 4 }
+property = "lit"
+
+[[probes]]
+name = "lamp_6_4_5"
+type = "property"
+pos = { x = 6, y = 4, z = 5 }
+property = "lit"
+
+[[probes]]
+name = "observer_lamp"
+type = "property"
+pos = { x = 8, y = 4, z = 4 }
+property = "lit"
+
+[[probes]]
+name = "lamp_10_4_4"
+type = "property"
+pos = { x = 10, y = 4, z = 4 }
+property = "lit"
+
+[[probes]]
+name = "lamp_12_4_4"
+type = "property"
+pos = { x = 12, y = 4, z = 4 }
+property = "lit"
+
+[[probes]]
+name = "lamp_14_4_4"
+type = "property"
+pos = { x = 14, y = 4, z = 4 }
+property = "lit"
+
+[[probes]]
+name = "lamp_16_4_4"
+type = "property"
+pos = { x = 16, y = 4, z = 4 }
+property = "lit"
+
+[[probes]]
+name = "lamp_18_2_4"
+type = "property"
+pos = { x = 18, y = 2, z = 4 }
+property = "lit"
+
+[[probes]]
+name = "lamp_18_3_5"
+type = "property"
+pos = { x = 18, y = 3, z = 5 }
+property = "lit"
+
+[[probes]]
+name = "lamp_18_4_4"
+type = "property"
+pos = { x = 18, y = 4, z = 4 }
+property = "lit"
+
+[[probes]]
+name = "lamp_20_2_0"
+type = "property"
+pos = { x = 20, y = 2, z = 0 }
+property = "lit"
+
+[[probes]]
+name = "lamp_20_2_1"
+type = "property"
+pos = { x = 20, y = 2, z = 1 }
+property = "lit"
+
+[[probes]]
+name = "lamp_20_2_3"
+type = "property"
+pos = { x = 20, y = 2, z = 3 }
+property = "lit"
+
+[[probes]]
+name = "lamp_20_4_2"
+type = "property"
+pos = { x = 20, y = 4, z = 2 }
+property = "lit"
+
+[[probes]]
+name = "lamp_22_0_2"
+type = "property"
+pos = { x = 22, y = 0, z = 2 }
+property = "lit"
+
+[[probes]]
+name = "lamp_22_1_2"
+type = "property"
+pos = { x = 22, y = 1, z = 2 }
+property = "lit"
+
+[[probes]]
+name = "lamp_22_1_3"
+type = "property"
+pos = { x = 22, y = 1, z = 3 }
+property = "lit"
+
+[[probes]]
+name = "lamp_22_2_3"
+type = "property"
+pos = { x = 22, y = 2, z = 3 }
+property = "lit"
+
+[[probes]]
+name = "lamp_22_2_4"
+type = "property"
+pos = { x = 22, y = 2, z = 4 }
+property = "lit"
+
+[[probes]]
+name = "lamp_22_4_2"
+type = "property"
+pos = { x = 22, y = 4, z = 2 }
+property = "lit"
+
+[[expectations]]
+tick = 20
+probe = "lamp_0_1_3"
+equals = "true"
+
+[[expectations]]
+tick = 20
+probe = "lamp_0_2_4"
+equals = "true"
+
+[[expectations]]
+tick = 20
+probe = "lamp_2_3_5"
+equals = "true"
+
+[[expectations]]
+tick = 20
+probe = "lamp_2_4_4"
+equals = "true"
+
+[[expectations]]
+tick = 20
+probe = "lamp_4_4_4"
+equals = "true"
+
+[[expectations]]
+tick = 20
+probe = "lamp_6_2_3"
+equals = "true"
+
+[[expectations]]
+tick = 20
+probe = "lamp_6_4_4"
+equals = "true"
+
+[[expectations]]
+tick = 20
+probe = "lamp_6_4_5"
+equals = "false"
+
+[[expectations]]
+tick = 20
+probe = "observer_lamp"
+equals = "false"
+
+[[expectations]]
+tick = 20
+probe = "lamp_10_4_4"
+equals = "true"
+
+[[expectations]]
+tick = 20
+probe = "lamp_12_4_4"
+equals = "true"
+
+[[expectations]]
+tick = 20
+probe = "lamp_14_4_4"
+equals = "true"
+
+[[expectations]]
+tick = 20
+probe = "lamp_16_4_4"
+equals = "false"
+
+[[expectations]]
+tick = 20
+probe = "lamp_18_2_4"
+equals = "true"
+
+[[expectations]]
+tick = 20
+probe = "lamp_18_3_5"
+equals = "true"
+
+[[expectations]]
+tick = 20
+probe = "lamp_18_4_4"
+equals = "true"
+
+[[expectations]]
+tick = 20
+probe = "lamp_20_2_0"
+equals = "false"
+
+[[expectations]]
+tick = 20
+probe = "lamp_20_2_1"
+equals = "true"
+
+[[expectations]]
+tick = 20
+probe = "lamp_20_2_3"
+equals = "false"
+
+[[expectations]]
+tick = 20
+probe = "lamp_20_4_2"
+equals = "true"
+
+[[expectations]]
+tick = 20
+probe = "lamp_22_0_2"
+equals = "false"
+
+[[expectations]]
+tick = 20
+probe = "lamp_22_1_2"
+equals = "false"
+
+[[expectations]]
+tick = 20
+probe = "lamp_22_1_3"
+equals = "false"
+
+[[expectations]]
+tick = 20
+probe = "lamp_22_2_3"
+equals = "true"
+
+[[expectations]]
+tick = 20
+probe = "lamp_22_2_4"
+equals = "false"
+
+[[expectations]]
+tick = 20
+probe = "lamp_22_4_2"
+equals = "true"
+
+[[expectations]]
+tick = 46
+probe = "observer_lamp"
+equals = "true"
+
+[[expectations]]
+tick = 60
+probe = "observer_lamp"
+equals = "false"
