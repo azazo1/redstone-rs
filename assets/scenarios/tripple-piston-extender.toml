@@ -1,0 +1,77 @@
+version = "26.1.2"
+mode = "default"
+seed = 0
+max_ticks = 103
+strict = true
+
+[source]
+path = "../schematics/tripple-piston-extender.nbt"
+initialization = "raw"
+
+[[actions]]
+tick = 2
+type = "press_button"
+pos = { x = 3, y = 1, z = 1 }
+
+[[actions]]
+tick = 53
+type = "press_button"
+pos = { x = 3, y = 1, z = 1 }
+
+[[probes]]
+name = "retracted_wool"
+type = "block_state"
+pos = { x = 5, y = 0, z = 5 }
+
+[[probes]]
+name = "extended_wool"
+type = "block_state"
+pos = { x = 8, y = 0, z = 5 }
+
+[[probes]]
+name = "retracted_piston_extended"
+type = "property"
+pos = { x = 3, y = 0, z = 5 }
+property = "extended"
+
+[[probes]]
+name = "extended_piston_extended"
+type = "property"
+pos = { x = 6, y = 0, z = 5 }
+property = "extended"
+
+[[probes]]
+name = "button_powered"
+type = "property"
+pos = { x = 3, y = 1, z = 1 }
+property = "powered"
+
+[[expectations]]
+tick = 1
+probe = "retracted_piston_extended"
+equals = "false"
+
+[[expectations]]
+tick = 1
+probe = "button_powered"
+equals = "false"
+
+[[expectations]]
+tick = 52
+probe = "extended_piston_extended"
+equals = "true"
+
+[[expectations]]
+tick = 52
+probe = "button_powered"
+equals = "false"
+
+[[expectations]]
+tick = 103
+probe = "retracted_piston_extended"
+equals = "false"
+
+[[expectations]]
+tick = 103
+probe = "button_powered"
+equals = "false"
