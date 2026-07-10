@@ -135,7 +135,11 @@ public final class OracleMain {
         String kind = state.getAsJsonPrimitive("kind").getAsString();
         int bits = state.getAsJsonPrimitive("bits").getAsInt();
         BlockState result = blockForState(kind, bits).defaultBlockState();
-        result = withProperty(result, "facing", directionName(bits & 7));
+        String facing = directionName(bits & 7);
+        if (kind.equals("Repeater") || kind.equals("Comparator")) {
+            facing = oppositeDirectionName(facing);
+        }
+        result = withProperty(result, "facing", facing);
         result = withProperty(result, "powered", Boolean.toString((bits & (1 << 3)) != 0));
         result = withProperty(result, "power", Integer.toString((bits >> 4) & 15));
         result = withProperty(result, "delay", Integer.toString(((bits >> 8) & 3) + 1));
@@ -228,6 +232,17 @@ public final class OracleMain {
             case 3 -> "east";
             case 4 -> "down";
             default -> "up";
+        };
+    }
+
+    private static String oppositeDirectionName(String direction) {
+        return switch (direction) {
+            case "north" -> "south";
+            case "south" -> "north";
+            case "west" -> "east";
+            case "east" -> "west";
+            case "down" -> "up";
+            default -> "down";
         };
     }
 
@@ -355,6 +370,9 @@ public final class OracleMain {
 
         private static int stateBits(BlockState state, String name, String kind) {
             int bits = directionBits(value(state, "facing"));
+            if (kind.equals("Repeater") || kind.equals("Comparator")) {
+                bits = oppositeDirectionBits(bits);
+            }
             if (booleanValue(state, "powered") || (kind.equals("RedstoneTorch") && booleanValue(state, "lit"))) bits |= 1 << 3;
             bits |= integerValue(state, "power") << 4;
             bits |= Math.max(0, integerValue(state, "delay") - 1) << 8;
@@ -377,6 +395,17 @@ public final class OracleMain {
                 case "down" -> 4;
                 case "up" -> 5;
                 default -> 0;
+            };
+        }
+
+        private static int oppositeDirectionBits(int direction) {
+            return switch (direction) {
+                case 0 -> 1;
+                case 1 -> 0;
+                case 2 -> 3;
+                case 3 -> 2;
+                case 4 -> 5;
+                default -> 4;
             };
         }
 

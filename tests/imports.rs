@@ -160,6 +160,24 @@ fn imports_redstone_wall_torch_with_horizontal_support_direction() {
 }
 
 #[test]
+fn imports_diode_facing_as_its_internal_output_direction() {
+    let mut palette = BTreeMap::new();
+    palette.insert("minecraft:air".to_owned(), 0);
+    palette.insert("minecraft:repeater[facing=east]".to_owned(), 1);
+    let bytes = to_bytes(&SpongeFixture {
+        width: 2,
+        height: 1,
+        length: 1,
+        palette,
+        block_data: ByteArray::new(vec![0, 1]),
+    })
+    .expect("fixture should serialize");
+
+    let structure = StructureInput::from_nbt(&bytes).expect("repeater should decode");
+    assert_eq!(structure.blocks[0].state.facing(), redstone_rs::Direction::West);
+}
+
+#[test]
 fn imports_open_door_without_marking_it_as_redstone_powered() {
     let mut palette = BTreeMap::new();
     palette.insert("minecraft:air".to_owned(), 0);

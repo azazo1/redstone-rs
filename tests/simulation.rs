@@ -661,6 +661,7 @@ async fn comparator_preserves_container_signal_strength() {
         })
         .await;
     session.step().await.expect("comparator should update");
+    session.step().await.expect("comparator delay should complete");
 
     assert_eq!(session.world().state(comparator).power(), 10);
     assert!(session.world().state(comparator).powered());
@@ -696,6 +697,7 @@ async fn comparator_derives_signal_from_container_inventory_fullness() {
         })
         .await;
     session.step().await.expect("comparator should observe inventory");
+    session.step().await.expect("comparator delay should complete");
 
     assert_eq!(session.world().state(comparator).power(), 8);
 }
@@ -730,11 +732,12 @@ async fn replacing_container_clears_its_comparator_signal() {
         })
         .await;
     session.step().await.expect("container should update comparator");
+    session.step().await.expect("comparator delay should complete");
     assert_eq!(session.world().state(comparator).power(), 15);
 
     session
         .apply(InputAction {
-            tick: 2,
+            tick: 3,
             operation: InputOperation::SetBlock {
                 position: container,
                 state: BlockState::new(BlockKind::Solid),
@@ -742,6 +745,7 @@ async fn replacing_container_clears_its_comparator_signal() {
         })
         .await;
     session.step().await.expect("replacement should update comparator");
+    session.step().await.expect("comparator delay should complete");
 
     assert!(session.world().block_entity(container).is_none());
     assert_eq!(session.world().state(comparator).power(), 0);
@@ -792,6 +796,7 @@ async fn comparator_subtract_mode_applies_side_signal_strength() {
         })
         .await;
     session.step().await.expect("comparator should update");
+    session.step().await.expect("comparator delay should complete");
 
     assert_eq!(session.world().state(comparator).power(), 5);
 }

@@ -82,6 +82,10 @@ async fn exports_simulator_blocks_as_gzipped_structure_template() {
                 position: Position::new(6, 8, 12),
                 state: BlockState::new(BlockKind::Button).with_wooden_button(true),
             },
+            SimStructureBlock {
+                position: Position::new(7, 8, 12),
+                state: BlockState::new(BlockKind::Repeater).with_facing(redstone_rs::Direction::East),
+            },
         ],
     };
     tokio::fs::create_dir_all(&root).await.expect("fixture directory should create");
@@ -94,12 +98,13 @@ async fn exports_simulator_blocks_as_gzipped_structure_template() {
     let structure: StructureTemplate = from_bytes(&decoded).expect("structure should be NBT");
     std::fs::remove_dir_all(&root).expect("fixture directory should remove");
 
-    assert_eq!(structure.size, vec![3, 1, 1]);
+    assert_eq!(structure.size, vec![4, 1, 1]);
     assert_eq!(structure.blocks[0].pos, vec![0, 0, 0]);
     assert_eq!(structure.palette[0].name, "minecraft:redstone_block");
     assert_eq!(structure.palette[1].name, "minecraft:redstone_wire");
     assert_eq!(structure.palette[1].properties["power"], "9");
     assert_eq!(structure.palette[2].name, "minecraft:oak_button");
+    assert_eq!(structure.palette[3].properties["facing"], "west");
 }
 
 #[tokio::test]

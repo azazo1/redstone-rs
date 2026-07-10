@@ -107,7 +107,12 @@ pub(crate) fn state_from_parts(
         state = state.with_wooden_button(true);
     }
     if let Some(facing) = properties.get("facing") {
-        state = state.with_facing(parse_direction(facing)?);
+        let facing = parse_direction(facing)?;
+        state = state.with_facing(if matches!(kind, BlockKind::Repeater | BlockKind::Comparator) {
+            facing.opposite()
+        } else {
+            facing
+        });
     }
     if let Some(powered) = properties.get("powered") {
         state = state.with_powered(parse_bool(powered)?);

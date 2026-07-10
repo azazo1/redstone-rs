@@ -265,7 +265,12 @@ fn palette_entry(state: BlockState) -> Result<PaletteEntry, GameTestError> {
         BlockKind::MovingPiston => return Err(GameTestError::UnsupportedBlock(state.kind)),
     };
     if needs_facing(state.kind) {
-        properties.insert("facing".to_owned(), direction_name(state.facing()).to_owned());
+        let facing = if matches!(state.kind, BlockKind::Repeater | BlockKind::Comparator) {
+            state.facing().opposite()
+        } else {
+            state.facing()
+        };
+        properties.insert("facing".to_owned(), direction_name(facing).to_owned());
     }
     if matches!(state.kind, BlockKind::Lever | BlockKind::Button | BlockKind::PressurePlate | BlockKind::Repeater | BlockKind::Comparator | BlockKind::Observer | BlockKind::CopperBulb | BlockKind::Door | BlockKind::Trapdoor | BlockKind::FenceGate) {
         properties.insert("powered".to_owned(), state.powered().to_string());

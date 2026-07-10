@@ -272,7 +272,7 @@ fn update_repeater(world: &mut World, position: Position) {
 fn schedule_comparator_update(world: &mut World, position: Position, state: BlockState) {
     let output = comparator_output(world, position, state);
     if output != state.power() && !world.has_scheduled_tick(position, BlockKind::Comparator) {
-        world.schedule_tick(position, BlockKind::Comparator, 1, diode_priority(world, position, state));
+        world.schedule_tick(position, BlockKind::Comparator, 2, diode_priority(world, position, state));
     }
 }
 
