@@ -88,10 +88,10 @@ equals = 15
 
 `just oracle-build` 会下载测试专用 TOML 解析依赖并构建 Java `26.1.2` 探针 JAR. `just oracle-scenario-self-test` 会运行真实 structure, 动作和探针场景. `VANILLA_ORACLE_JAR` 可以覆盖默认 JAR. 发布的 Rust 库和 CLI 不需要 Java.
 
-当前 GameTest oracle 支持原版 structure NBT, `raw`/`notify` 初始化, 非零原点, 旋转/镜像, 任意场景 seed, 默认/实验性红石模式, 基础方块与实体动作, 方块与实体探针. 测试场景可启用 ASM 邻居更新, 计划方块刻及方块事件采样, CLI 会同时差分探针, 同步嵌套顺序, `Orientation`, `moved_by_piston`, 计划刻优先级, `sub_tick_order` 和方块事件参数. 状态写入和形状更新的完整 ASM 微轨迹仍待完成.
+当前 GameTest oracle 支持原版 structure NBT, `raw`/`notify` 初始化, 非零原点, 旋转/镜像, 任意场景 seed, 默认/实验性红石模式, 基础方块与实体动作, 方块与实体探针. 测试场景可启用 ASM 邻居更新, 计划方块刻, 方块事件及状态写入采样. CLI 会差分探针和全局微轨迹, 包括同步嵌套顺序, `Orientation`, `moved_by_piston`, 计划刻优先级, `sub_tick_order`, 方块事件参数和官方全局 state ID. 当前 18 个真实 Java 场景达到零状态差异和零事件顺序差异. 形状更新的完整 ASM 微轨迹仍待完成.
 
 `redstone bench` 默认构建 100 万已放置方块和 1 万活跃元件, 运行 100 个空闲刻并输出 P50/P95/P99 与可获取的常驻内存.
 
 ## 当前限制
 
-目前仍处于行为覆盖和 oracle 差分阶段. 活塞零刻细节, 铁轨支撑破坏和矿车物理, 墙的精确碰撞判定, 发射器剩余物品行为, 全量物品标签和完整合成配方尚未达到稳定标准. TNT 引信和爆炸触发会进入轨迹, 但爆炸, 火传播和流体不修改世界.
+目前仍处于行为覆盖和 oracle 差分阶段. 多方块活塞分支及破坏反应顺序, 铁轨支撑破坏和矿车物理, 墙的精确碰撞判定, 发射器剩余物品行为, 全量物品标签和完整合成配方尚未达到稳定标准. TNT 引信和爆炸触发会进入轨迹, 但爆炸, 火传播和流体不修改世界.

@@ -910,6 +910,12 @@ impl BlockRules for Java26Rules {
             Action::SetBlock { pos, state } => {
                 self.set_state_and_notify(ctx, *pos, *state, "action_set_block", None)?;
                 self.repair_shape(ctx, *pos, true)?;
+                ctx.run_rule_task_after_neighbors(DeferredRuleTask {
+                    kind: shape::REPAIR_NEIGHBOR_SHAPES,
+                    pos: *pos,
+                    param_a: 0,
+                    param_b: 0,
+                });
             }
             Action::BreakBlock { pos } => {
                 self.set_state_and_notify(
@@ -919,6 +925,12 @@ impl BlockRules for Java26Rules {
                     "action_break_block",
                     None,
                 )?;
+                ctx.run_rule_task_after_neighbors(DeferredRuleTask {
+                    kind: shape::REPAIR_NEIGHBOR_SHAPES,
+                    pos: *pos,
+                    param_a: 0,
+                    param_b: 0,
+                });
             }
             Action::UseBlock { pos } => self.use_block(ctx, *pos, false, false)?,
             Action::PressButton { pos } => self.use_block(ctx, *pos, true, false)?,
@@ -1172,6 +1184,9 @@ impl BlockRules for Java26Rules {
             }
             piston::SETTLE_MOVING_PISTON => {
                 self.settle_moving_piston(ctx, task.pos, task.param_a != 0)?;
+            }
+            shape::REPAIR_NEIGHBOR_SHAPES => {
+                self.repair_neighbor_shapes(ctx, task.pos)?;
             }
             _ => {
                 return Err(RulesError::Message(format!(

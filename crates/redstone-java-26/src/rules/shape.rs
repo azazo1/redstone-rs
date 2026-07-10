@@ -12,7 +12,20 @@ enum ShapeFamily {
     Rail { straight: bool },
 }
 
+pub(super) const REPAIR_NEIGHBOR_SHAPES: &str = "repair_neighbor_shapes";
+
 impl Java26Rules {
+    pub(super) fn repair_neighbor_shapes(
+        &mut self,
+        ctx: &mut EventContext<'_>,
+        pos: BlockPos,
+    ) -> Result<(), RulesError> {
+        for direction in Direction::UPDATE_ORDER {
+            self.repair_shape(ctx, pos.relative(direction), true)?;
+        }
+        Ok(())
+    }
+
     pub(super) fn repair_shape(
         &mut self,
         ctx: &mut EventContext<'_>,

@@ -14,7 +14,7 @@ oracle scenario.toml output.jsonl
 
 - 完整轨迹 JSONL, 字段和排序与 `redstone-core::TraceEvent` 一致.
 - 首行为 `{"format":"probe_samples_v1"}` 的探针样本 JSONL, 后续行为 `tick`, `probe`, `value`. CLI 会提取 Rust 的 `post_tick` 探针并比较.
-- 首行为 `{"format":"oracle_samples_v2"}` 的组合样本 JSONL. `kind = "probe"` 记录逐 tick 探针, `kind = "neighbor_update"` 记录真实邻居执行顺序, `Orientation` 和 `moved_by_piston`, `kind = "scheduled_tick_queued"` 和 `kind = "scheduled_tick_executed"` 记录计划方块刻, `kind = "block_event_queued"` 和 `kind = "block_event_executed"` 记录方块事件.
+- 首行为 `{"format":"oracle_samples_v2"}` 的组合样本 JSONL. `kind = "probe"` 记录逐 tick 探针, `kind = "neighbor_update"` 记录真实邻居执行顺序, `Orientation` 和 `moved_by_piston`, `kind = "scheduled_tick_queued"` 和 `kind = "scheduled_tick_executed"` 记录计划方块刻, `kind = "block_event_queued"` 和 `kind = "block_event_executed"` 记录方块事件, `kind = "block_changed"` 使用官方全局 state ID 记录状态写入.
 
 先构建并校验本地 oracle 环境:
 
@@ -46,6 +46,6 @@ cargo run -p redstone-cli -- test scenarios --oracle
 - `signal`, `block_state`, `property`, `container_count`.
 - `entity_count`, `entity_field`, `entity_container_count`.
 - 原版注册实体及 `generic_collision` 测试别名, 物品实体和容器矿车字段适配.
-- 测试专用 `oracle_micro_trace = true`, 固定 GameTest 绝对原点并启用邻居更新, 计划方块刻及方块事件 ASM 采样.
+- 测试专用 `oracle_micro_trace = true`, 固定 GameTest 绝对原点并启用邻居更新, 计划方块刻, 方块事件及状态写入 ASM 采样.
 
-不在上述范围内的场景会被明确拒绝. 状态写入和形状更新的完整 ASM 微时序轨迹仍在实现中.
+不在上述范围内的场景会被明确拒绝. 形状更新的完整 ASM 微时序轨迹仍在实现中.

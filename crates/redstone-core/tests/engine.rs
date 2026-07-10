@@ -2,8 +2,9 @@ use std::collections::BTreeMap;
 
 use redstone_core::{
     Action, BlockEntityData, BlockEvent, BlockKindId, BlockPos, BlockRules, BlockStateId,
-    EventContext, NeighborUpdate, Probe, ProbeValue, RedstoneMode, RulesError, ScheduledTick,
-    Simulation, SimulationConfig, SparseWorld, TickPriority, TraceKind,
+    DeferredBlockChange, DeferredBlockEntityUpdate, EventContext, NeighborUpdate, Probe,
+    ProbeValue, RedstoneMode, RulesError, ScheduledTick, Simulation, SimulationConfig, SparseWorld,
+    TickPriority, TraceKind,
 };
 
 const AIR: BlockStateId = BlockStateId(0);
@@ -58,6 +59,24 @@ impl BlockRules for MockRules {
                 moved_by_piston: false,
             });
             ctx.schedule_tick_after_neighbors(*pos, KIND, 2, TickPriority::Normal);
+        }
+        if let Action::BreakBlock { pos } = action {
+            ctx.neighbor_changed(NeighborUpdate {
+                pos: pos.relative(redstone_core::Direction::East),
+                source_pos: *pos,
+                source_block: KIND,
+                orientation: None,
+                moved_by_piston: false,
+            });
+            ctx.apply_block_changes_after_neighbors(
+                vec![DeferredBlockChange {
+                    pos: *pos,
+                    state: AIR,
+                    cause: "deferred_break".to_owned(),
+                    block_entity: DeferredBlockEntityUpdate::Remove,
+                }],
+                Vec::new(),
+            );
         }
         Ok(())
     }
@@ -249,6 +268,40 @@ async fn deferred_scheduled_tick_is_queued_after_synchronous_neighbor_updates() 
         })
         .collect::<Vec<_>>();
     assert_eq!(ordered, ["neighbor", "scheduled"]);
+}
+
+#[tokio::test]
+async fn deferred_block_changes_are_applied_after_synchronous_neighbor_updates() {
+    let mut world = SparseWorld::new(AIR);
+    world.set_block(BlockPos::ZERO, BLOCK).unwrap();
+    let mut simulation = Simulation::load(
+        MockRules::default(),
+        world,
+        SimulationConfig::default(),
+    )
+    .await
+    .unwrap();
+
+    simulation
+        .step_with_actions(&[Action::BreakBlock { pos: BlockPos::ZERO }])
+        .await
+        .unwrap();
+
+    let ordered = simulation
+        .trace()
+        .events()
+        .iter()
+        .filter_map(|event| match event.kind {
+            TraceKind::NeighborUpdate { .. } => Some("neighbor"),
+            TraceKind::BlockChanged { .. } => Some("changed"),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(ordered, ["neighbor", "changed"]);
+    assert_eq!(
+        simulation.snapshot().await.world.get_block(BlockPos::ZERO),
+        AIR
+    );
 }
 
 #[tokio::test]
