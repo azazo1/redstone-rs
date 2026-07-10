@@ -8,11 +8,12 @@ use serde::Serialize;
 use thiserror::Error;
 
 use crate::core::{BlockKind, BlockState, Direction, Position};
-use crate::io::StructureInput;
+use crate::io::{StructureInput, TestVector};
 
 const PACK_FORMAT: u32 = 101;
 const NAMESPACE: &str = "redstone_oracle";
 const TEST_ID: &str = "smoke";
+const TRACE_TEST_ID: &str = "trace";
 
 #[derive(Debug, Error)]
 pub enum GameTestError {
@@ -24,6 +25,8 @@ pub enum GameTestError {
     UnsupportedBlock(BlockKind),
     #[error("GameTest structure has no blocks")]
     EmptyStructure,
+    #[error(transparent)]
+    Structure(#[from] crate::io::StructureError),
 }
 
 #[derive(Serialize)]
@@ -115,6 +118,53 @@ pub async fn write_structure_template(
     Ok(())
 }
 
+pub async fn write_oracle_case_datapack(
+    root: impl AsRef<Path>,
+    vector: &TestVector,
+    vector_root: impl AsRef<Path>,
+) -> Result<(), GameTestError> {
+    let root = root.as_ref();
+    let data_root = root.join("data").join(NAMESPACE);
+    tokio::fs::create_dir_all(data_root.join("test_instance")).await?;
+    tokio::fs::create_dir_all(data_root.join("structure")).await?;
+
+    let input = StructureInput::from_path(vector_root.as_ref().join(&vector.structure)).await?;
+    write_structure_template(data_root.join("structure").join(format!("{TRACE_TEST_ID}.nbt")), &input).await?;
+
+    let metadata = serde_json::json!({
+        "pack": {
+            "pack_format": PACK_FORMAT,
+            "min_format": PACK_FORMAT,
+            "max_format": PACK_FORMAT,
+            "description": "redstone-rs GameTest oracle case"
+        }
+    });
+    let instance = serde_json::json!({
+        "type": "minecraft:function",
+        "environment": "minecraft:default",
+        "structure": format!("{NAMESPACE}:{TRACE_TEST_ID}"),
+        "function": format!("{NAMESPACE}:{TRACE_TEST_ID}"),
+        "max_ticks": vector.ticks.saturating_add(3),
+        "setup_ticks": 1,
+        "required": true
+    });
+    let config = serde_json::json!({
+        "observe_min": vector.observe_min,
+        "observe_max": vector.observe_max,
+        "ticks": vector.ticks,
+        "actions": vector.actions,
+    });
+
+    tokio::fs::write(root.join("pack.mcmeta"), serde_json::to_vec_pretty(&metadata).expect("metadata is serializable")).await?;
+    tokio::fs::write(
+        data_root.join("test_instance").join(format!("{TRACE_TEST_ID}.json")),
+        serde_json::to_vec_pretty(&instance).expect("instance is serializable"),
+    )
+    .await?;
+    tokio::fs::write(root.join("oracle-case.json"), serde_json::to_vec_pretty(&config).expect("case is serializable")).await?;
+    Ok(())
+}
+
 fn encode_structure(template: &StructureTemplate) -> Result<Vec<u8>, GameTestError> {
     let encoded = to_bytes(template).map_err(|error| GameTestError::Nbt(error.to_string()))?;
     let mut encoder = GzEncoder::new(Vec::new(), Compression::default());
@@ -179,6 +229,7 @@ fn palette_entry(state: BlockState) -> Result<PaletteEntry, GameTestError> {
             }
         }
         BlockKind::Lever => "minecraft:lever",
+        BlockKind::Button if state.button_ticks() == 30 => "minecraft:oak_button",
         BlockKind::Button => "minecraft:stone_button",
         BlockKind::PressurePlate if state.analog_output() => "minecraft:light_weighted_pressure_plate",
         BlockKind::PressurePlate => "minecraft:stone_pressure_plate",

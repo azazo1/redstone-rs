@@ -93,18 +93,23 @@ download-server version="26.1.2":
     fi
     echo "server JAR 校验完成"
 
+# just oracle-bridge 26.1.2
+# 构建由官方 bundler 加载的 GameTest bridge server.
+oracle-bridge version="26.1.2":
+    sh oracle/build-bridge.sh {{ version }}
+
 # just gametest-oracle 26.1.2 --help
-# 使用项目内运行目录启动官方 GameTest server.
-gametest-oracle version="26.1.2" *args: (download-server version)
+# 使用项目内运行目录启动带 bridge 的官方 GameTest server.
+gametest-oracle version="26.1.2" *args: (oracle-bridge version)
     #!/usr/bin/env sh
     set -eu
-    runtime_dir=".gametest/{{ version }}"
+    runtime_dir="${REDSTONE_ORACLE_RUNTIME:-.gametest/{{ version }}}"
     mkdir -p "$runtime_dir"
     echo "启动 GameTest oracle: $runtime_dir"
     exec java \
-      -DbundlerMainClass=net.minecraft.gametest.Main \
+      -DbundlerMainClass=io.redstoners.oracle.OracleMain \
       -DbundlerRepoDir="$runtime_dir" \
-      -jar "assets/server-{{ version }}.jar" \
+      -jar "oracle/build/{{ version }}/redstone-oracle-server-{{ version }}.jar" \
       --universe "$runtime_dir/world" \
       {{args}}
 
@@ -116,6 +121,25 @@ oracle-init output=".gametest/oracle-pack":
 # 导出结构为 Java GameTest 可读取的 gzip NBT 模板.
 oracle-structure structure output:
     cargo run -- oracle-structure --structure {{ structure }} --output {{ output }}
+
+# just oracle-case case.json .gametest/oracle-case
+# 从 Rust 测试向量导出可由 Java GameTest 执行的数据包.
+oracle-case vector output=".gametest/oracle-case":
+    cargo run -- oracle-case --vector {{ vector }} --output {{ output }}
+
+# just oracle-run case.json 26.1.2 .gametest/oracle-case
+# 运行 Java oracle 并生成逐 tick vanilla 和 Rust trace 及差分结果.
+oracle-run vector version="26.1.2" output=".gametest/oracle-case": (oracle-case vector output)
+    #!/usr/bin/env sh
+    set -eu
+    case_dir="{{ output }}"
+    packs_dir="$(dirname "$case_dir")"
+    echo "运行 Java GameTest oracle"
+    REDSTONE_ORACLE_CASE="$case_dir/oracle-case.json" REDSTONE_ORACLE_OUTPUT="$case_dir/vanilla-trace.json" REDSTONE_ORACLE_RUNTIME="$case_dir/runtime" \
+      just gametest-oracle {{ version }} --packs "$packs_dir" --tests redstone_oracle:trace --report "$case_dir/oracle.xml"
+    echo "运行 Rust 对照仿真"
+    cargo run -- vector --vector {{ vector }} --output "$case_dir/rust-trace.json"
+    cargo run -- diff --snapshots-only --expected "$case_dir/vanilla-trace.json" --actual "$case_dir/rust-trace.json" --output "$case_dir/differences.json"
 
 # 运行 Rust 静态检查.
 clippy:

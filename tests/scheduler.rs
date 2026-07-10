@@ -55,3 +55,27 @@ fn neighbor_updates_follow_java_default_direction_order() {
     assert_eq!(positions, expected);
     updater.finish();
 }
+
+#[test]
+fn neighbor_updater_accepts_reentrant_updates_without_restarting_the_drain() {
+    let origin = Position::new(4, 8, 12);
+    let nested = Position::new(9, 9, 9);
+    let mut updater = NeighborUpdater::new(32);
+    assert!(updater.enqueue(NeighborUpdate::Multi {
+        source: origin,
+        changed_block: BlockKind::Solid,
+        skip: None,
+        next_index: 0,
+    }));
+    assert!(updater.begin_if_idle());
+    assert_eq!(updater.take_next_event().map(|event| event.0), Some(origin.offset(Direction::West)));
+
+    assert!(updater.enqueue(NeighborUpdate::Single {
+        position: nested,
+        changed_block: BlockKind::Lever,
+        source: origin,
+    }));
+    assert!(!updater.begin_if_idle());
+    assert_eq!(updater.take_next_event().map(|event| event.0), Some(nested));
+    updater.finish();
+}

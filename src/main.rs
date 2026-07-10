@@ -2,7 +2,7 @@ use std::path::PathBuf;
 
 use clap::{Parser, Subcommand};
 use redstone_rs::{
-    io::{diff_traces, write_smoke_datapack, write_structure_template, SimulationTrace, StructureBlock, StructureInput, TestVector}, BlockKind, BlockState,
+    io::{diff_traces, write_oracle_case_datapack, write_smoke_datapack, write_structure_template, SimulationTrace, StructureBlock, StructureInput, TestVector}, BlockKind, BlockState,
     Position, SimulationSession,
 };
 use tracing::{info, Level};
@@ -48,6 +48,8 @@ enum Command {
         actual: PathBuf,
         #[arg(long)]
         output: PathBuf,
+        #[arg(long)]
+        snapshots_only: bool,
     },
     OracleInit {
         #[arg(long)]
@@ -56,6 +58,12 @@ enum Command {
     OracleStructure {
         #[arg(long)]
         structure: PathBuf,
+        #[arg(long)]
+        output: PathBuf,
+    },
+    OracleCase {
+        #[arg(long)]
+        vector: PathBuf,
         #[arg(long)]
         output: PathBuf,
     },
@@ -126,14 +134,19 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             expected,
             actual,
             output,
+            snapshots_only,
         } => {
             let expected_trace: SimulationTrace = serde_json::from_slice(&tokio::fs::read(&expected).await?)?;
             let actual_trace: SimulationTrace = serde_json::from_slice(&tokio::fs::read(&actual).await?)?;
-            let differences = diff_traces(&expected_trace, &actual_trace);
+            let mut differences = diff_traces(&expected_trace, &actual_trace);
+            if snapshots_only {
+                differences.events.clear();
+            }
             tokio::fs::write(&output, serde_json::to_vec_pretty(&differences)?).await?;
             info!(
                 snapshots = differences.snapshots.len(),
                 events = differences.events.len(),
+                snapshots_only,
                 matched = differences.is_empty(),
                 path = %output.display(),
                 "simulation traces compared"
@@ -147,6 +160,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             let input = StructureInput::from_path(&structure).await?;
             write_structure_template(&output, &input).await?;
             info!(blocks = input.blocks.len(), path = %output.display(), "GameTest structure template written");
+        }
+        Command::OracleCase { vector, output } => {
+            let case = TestVector::from_path(&vector).await?;
+            let root = vector.parent().unwrap_or_else(|| std::path::Path::new("."));
+            write_oracle_case_datapack(&output, &case, root).await?;
+            info!(ticks = case.ticks, actions = case.actions.len(), path = %output.display(), "GameTest oracle case written");
         }
     }
 

@@ -76,13 +76,12 @@ impl NeighborUpdater {
         if self.count > self.limit {
             return false;
         }
-        let should_start = !self.running;
         if self.running {
             self.added_this_layer.push(update);
         } else {
             self.stack.push(update);
         }
-        should_start
+        true
     }
 
     pub fn begin(&mut self) {
@@ -121,4 +120,9 @@ impl NeighborUpdater {
         self.stack.clear();
         self.added_this_layer.clear();
     }
+
+    pub fn queued_len(&self) -> usize {
+        self.stack.len() + self.added_this_layer.len()
+    }
+
 }

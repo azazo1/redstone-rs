@@ -368,7 +368,7 @@ impl World {
 
     fn enqueue_neighbor_update(&mut self, update: NeighborUpdate) {
         if !self.neighbors.enqueue(update) {
-            warn!(tick = self.game_tick, "neighbor update limit reached");
+            warn!(tick = self.game_tick, queued = self.neighbors.queued_len(), "neighbor update limit reached");
             return;
         }
         if self.neighbors.begin_if_idle() {

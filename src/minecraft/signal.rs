@@ -169,7 +169,7 @@ fn refresh_wire(world: &mut World, position: Position) {
         .max()
         .unwrap_or(0);
     let power = direct.max(incoming_wire).min(15);
-    let next = state.with_power(power).with_powered(power > 0);
+    let next = state.with_power(power);
     if next != state {
         let _ = world.set_state(position, next, "wire_power");
         for neighbor in connected_wires {
@@ -418,9 +418,11 @@ pub(crate) fn set_external_power(world: &mut World, position: Position, powered:
     } else {
         state.power()
     };
-    let next = state
-        .with_powered(powered)
-        .with_power(power);
+    let next = if state.kind == BlockKind::RedstoneWire {
+        state.with_power(power)
+    } else {
+        state.with_powered(powered).with_power(power)
+    };
     world.set_state(position, next, "external_power")?;
     if matches!(state.kind, BlockKind::Lever | BlockKind::Button | BlockKind::PressurePlate) {
         notify_attached_conductors(world, position, state.kind);
@@ -434,7 +436,11 @@ pub(crate) fn set_external_power(world: &mut World, position: Position, powered:
 pub(crate) fn set_external_signal(world: &mut World, position: Position, signal: u8) -> Result<(), WorldError> {
     let state = world.state(position);
     let signal = signal.min(15);
-    let next = state.with_power(signal).with_powered(signal > 0);
+    let next = if state.kind == BlockKind::RedstoneWire {
+        state.with_power(signal)
+    } else {
+        state.with_power(signal).with_powered(signal > 0)
+    };
     world.set_state(position, next, "external_signal")?;
     if state.kind == BlockKind::Target && signal > 0 {
         world.schedule_tick(position, BlockKind::Target, 20, TickPriority::Normal);

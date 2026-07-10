@@ -80,7 +80,6 @@ impl SimulationSession {
         let initialization_total = positions.len();
         let initialization_interval = (initialization_total / 10).max(1);
         for (index, block) in positions.into_iter().enumerate() {
-            world.neighbor_changed(block.position, block.state.kind);
             world.update_neighbors_at(block.position, block.state.kind);
             if initialization_total >= 10_000 && (index + 1) % initialization_interval == 0 {
                 info!(initialized = index + 1, total = initialization_total, "structure initialization progress");
