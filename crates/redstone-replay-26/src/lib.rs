@@ -541,9 +541,9 @@ fn camera_for_region(region: ReplayRegion) -> Camera {
         (f64::from(region.min.y) + f64::from(region.max.y) + 1.0) / 2.0,
         (f64::from(region.min.z) + f64::from(region.max.z) + 1.0) / 2.0,
     ];
-    let width = f64::from((region.max.x - region.min.x + 1).max(1));
-    let height = f64::from((region.max.y - region.min.y + 1).max(1));
-    let depth = f64::from((region.max.z - region.min.z + 1).max(1));
+    let width = (f64::from(region.max.x) - f64::from(region.min.x) + 1.0).max(1.0);
+    let height = (f64::from(region.max.y) - f64::from(region.min.y) + 1.0).max(1.0);
+    let depth = (f64::from(region.max.z) - f64::from(region.min.z) + 1.0).max(1.0);
     let distance = width.max(depth).max(height).max(6.0) * 1.35;
     let horizontal_offset = distance.min(12.0);
     let source_chunks = ChunkArea::from_region(region);
@@ -685,6 +685,10 @@ mod tests {
                 seed: 7,
                 experimental: false,
                 recorded_at: UNIX_EPOCH + Duration::from_millis(1234),
+                region: ReplayRegion::new(
+                    BlockPos::new(-1, -64, 16),
+                    BlockPos::new(-1, -64, 16),
+                ),
             },
             &world,
         )
@@ -744,7 +748,12 @@ mod tests {
         let world = SparseWorld::new(BlockStateId(0));
         let mut writer = ReplayWriter::new(
             &output,
-            ReplayOptions::new("invalid.toml", 0, false),
+            ReplayOptions::new(
+                "invalid.toml",
+                0,
+                false,
+                ReplayRegion::new(BlockPos::ZERO, BlockPos::ZERO),
+            ),
             &world,
         )
         .unwrap();

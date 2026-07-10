@@ -17,7 +17,7 @@ use redstone_io::{
 use redstone_java_26::{
     JAVA_DATA_VERSION, JAVA_VERSION, Java26Registry, Java26Rules, StateResolveError, StateResolver,
 };
-use redstone_replay_26::{ReplayOptions, ReplayStats, ReplayWriter};
+use redstone_replay_26::{ReplayOptions, ReplayRegion, ReplayStats, ReplayWriter};
 use tokio::sync::Semaphore;
 use tracing::info;
 use tracing_indicatif::{IndicatifLayer, span_ext::IndicatifSpanExt, style::ProgressStyle};
@@ -335,6 +335,7 @@ async fn execute_scenario(
         &mut resolver,
     )?;
     reject_newer_data_version(loaded.data_version)?;
+    let replay_region = ReplayRegion::new(loaded.region_min, loaded.region_max);
     let mut actions = scenario
         .actions
         .iter()
@@ -377,6 +378,7 @@ async fn execute_scenario(
                     name,
                     scenario.seed,
                     scenario.mode == RedstoneMode::Experimental,
+                    replay_region,
                 ),
                 simulation.world(),
             )

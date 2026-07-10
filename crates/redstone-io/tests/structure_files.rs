@@ -120,6 +120,8 @@ fn vanilla_structure_round_trip_loads_blocks_block_entities_and_entities() {
 
     let block_pos = BlockPos::new(10, 20, 31);
     assert_ne!(loaded.world.get_block(block_pos), BlockStateId(0));
+    assert_eq!(loaded.region_min, BlockPos::new(10, 20, 30));
+    assert_eq!(loaded.region_max, BlockPos::new(10, 20, 31));
     let block_entity = loaded.world.block_entity(block_pos).unwrap();
     assert_eq!(block_entity.fields["item_count"], serde_json::Value::from(12));
     assert_eq!(block_entity.fields["item_id"], "minecraft:redstone");
@@ -196,6 +198,8 @@ fn gzip_litematic_loads_negative_regions_from_their_minimum_corner() {
     assert_ne!(loaded.world.get_block(BlockPos::new(4, 0, 0)), BlockStateId(0));
     assert_eq!(loaded.min, BlockPos::new(3, 0, 0));
     assert_eq!(loaded.max, BlockPos::new(4, 0, 0));
+    assert_eq!(loaded.region_min, BlockPos::new(3, 0, 0));
+    assert_eq!(loaded.region_max, BlockPos::new(4, 0, 0));
     let entity = loaded.world.entities().next().unwrap().1;
     assert_eq!(entity.position, [4.25, 0.0, 0.5]);
 }

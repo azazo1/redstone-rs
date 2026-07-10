@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap};
 use std::fs::{self, File};
 use std::io::Read;
 use std::path::{Path, PathBuf};
@@ -25,20 +25,29 @@ fn run_exports_parseable_replay_and_atomically_replaces_target() {
 
     let initial = packets
         .iter()
-        .filter(|packet| packet.id == LEVEL_CHUNK_WITH_LIGHT)
+        .filter(|packet| packet.id == LEVEL_CHUNK_WITH_LIGHT && packet.timestamp == 0)
         .map(|packet| decode_chunk(packet.payload))
         .collect::<HashMap<_, _>>();
-    let min_x = initial.keys().map(|(x, _)| *x).min().unwrap();
-    let max_x = initial.keys().map(|(x, _)| *x).max().unwrap();
-    let min_z = initial.keys().map(|(_, z)| *z).min().unwrap();
-    let max_z = initial.keys().map(|(_, z)| *z).max().unwrap();
-    assert_eq!(initial.len(), ((max_x - min_x + 1) * (max_z - min_z + 1)) as usize);
-    assert!(packets
-        .iter()
-        .filter(|packet| packet.id == LEVEL_CHUNK_WITH_LIGHT)
-        .all(|packet| packet.timestamp == 0));
+    assert_eq!(
+        initial.keys().copied().collect::<BTreeSet<_>>(),
+        chunk_rectangle(-3, 5, -2, 0),
+    );
     assert_ne!(initial[&(-2, -1)][section_index(15, 0, 15)], 0);
     assert_ne!(initial[&(1, -1)][section_index(0, 0, 15)], 0);
+    assert!(initial[&(4, -1)].iter().all(|state| *state == 0));
+
+    let expanded_at_tick_one = packets
+        .iter()
+        .filter(|packet| packet.id == LEVEL_CHUNK_WITH_LIGHT && packet.timestamp == 50)
+        .map(|packet| decode_chunk(packet.payload).0)
+        .collect::<BTreeSet<_>>();
+    assert_eq!(expanded_at_tick_one, chunk_rectangle(6, 6, -2, 0));
+    let expanded_at_tick_two = packets
+        .iter()
+        .filter(|packet| packet.id == LEVEL_CHUNK_WITH_LIGHT && packet.timestamp == 100)
+        .map(|packet| decode_chunk(packet.payload).0)
+        .collect::<BTreeSet<_>>();
+    assert_eq!(expanded_at_tick_two, chunk_rectangle(7, 7, -2, 0));
 
     let updates = packets
         .iter()
@@ -46,11 +55,13 @@ fn run_exports_parseable_replay_and_atomically_replaces_target() {
         .map(|packet| decode_block_update(packet.timestamp, packet.payload))
         .collect::<Vec<_>>();
     assert_eq!(
-        updates.iter().take(3).map(|update| (update.0, update.1)).collect::<Vec<_>>(),
+        updates.iter().map(|update| (update.0, update.1)).collect::<Vec<_>>(),
         [
             (50, (-17, 0, -1)),
             (50, (16, 0, -1)),
+            (50, (80, 0, -1)),
             (100, (-17, 0, -1)),
+            (100, (96, 0, -1)),
         ]
     );
 }
@@ -122,7 +133,7 @@ fn structure() -> Vec<u8> {
         ("DataVersion".to_owned(), Value::Int(4790)),
         (
             "size".to_owned(),
-            Value::List(vec![Value::Int(34), Value::Int(1), Value::Int(1)]),
+            Value::List(vec![Value::Int(96), Value::Int(1), Value::Int(1)]),
         ),
         (
             "palette".to_owned(),
@@ -195,12 +206,30 @@ pos = {{ x = 16, y = 0, z = -1 }}
 name = "minecraft:redstone_block"
 
 [[actions]]
+tick = 1
+type = "set_block"
+pos = {{ x = 80, y = 0, z = -1 }}
+name = "minecraft:redstone_block"
+
+[[actions]]
 tick = 2
 type = "set_block"
 pos = {{ x = -17, y = 0, z = -1 }}
 name = "minecraft:stone"
+
+[[actions]]
+tick = 2
+type = "set_block"
+pos = {{ x = 96, y = 0, z = -1 }}
+name = "minecraft:redstone_block"
 {expectation}"#
     )
+}
+
+fn chunk_rectangle(min_x: i32, max_x: i32, min_z: i32, max_z: i32) -> BTreeSet<(i32, i32)> {
+    (min_x..=max_x)
+        .flat_map(|x| (min_z..=max_z).map(move |z| (x, z)))
+        .collect()
 }
 
 fn read_recording(path: &Path) -> Vec<u8> {
