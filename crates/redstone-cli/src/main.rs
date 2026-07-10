@@ -1,6 +1,6 @@
 use std::collections::BTreeMap;
 use std::fs::File;
-use std::process::Command as ProcessCommand;
+use std::process::Stdio;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use std::path::{Path, PathBuf};
@@ -18,8 +18,10 @@ use redstone_java_26::{
     JAVA_DATA_VERSION, JAVA_VERSION, Java26Registry, Java26Rules, StateResolveError, StateResolver,
 };
 use redstone_replay_26::{ReplayOptions, ReplayRegion, ReplayStats, ReplayWriter};
+use tokio::io::{AsyncBufReadExt, AsyncRead, BufReader};
+use tokio::process::Command as ProcessCommand;
 use tokio::sync::Semaphore;
-use tracing::info;
+use tracing::{Instrument, debug, info};
 use tracing_indicatif::{IndicatifLayer, span_ext::IndicatifSpanExt, style::ProgressStyle};
 use tracing_subscriber::EnvFilter;
 use tracing_subscriber::layer::SubscriberExt;
@@ -309,6 +311,21 @@ struct RunSummary {
     trace_events: usize,
 }
 
+const TICK_PROGRESS_UPDATE_INTERVAL: u64 = 10;
+
+fn simulation_progress_style() -> Result<ProgressStyle> {
+    Ok(ProgressStyle::with_template(
+        "{span_child_prefix}{spinner:.green} {msg} [{bar:28.green}] {pos}/{len} {per_sec:2} ETA:{eta}",
+    )?
+    .progress_chars("=> "))
+}
+
+fn oracle_progress_style() -> Result<ProgressStyle> {
+    Ok(ProgressStyle::with_template(
+        "{span_child_prefix}{spinner} {msg:72!}",
+    )?)
+}
+
 async fn run(
     scenario_path: &Path,
     replay_path: Option<&Path>,
@@ -408,6 +425,17 @@ async fn execute_scenario(
 
     let mut action_index = 0;
     let mut samples = BTreeMap::<(GameTick, String), ProbeValue>::new();
+    let progress = tracing::info_span!("scenario_ticks");
+    progress.pb_set_style(&simulation_progress_style()?);
+    progress.pb_set_length(scenario.max_ticks);
+    progress.pb_set_message(&format!(
+        "计算 ticks {}",
+        scenario_path
+            .file_name()
+            .unwrap_or(scenario_path.as_os_str())
+            .to_string_lossy()
+    ));
+    progress.pb_start();
     while simulation.current_tick().0 < scenario.max_ticks {
         let next_tick = GameTick(simulation.current_tick().0 + 1);
         let mut current_actions = Vec::new();
@@ -419,6 +447,7 @@ async fn execute_scenario(
             action_index += 1;
         }
         let delta = simulation.step_with_actions(&current_actions).await?;
+        let completed_tick = delta.tick.0;
         if let Some(replay) = replay.as_mut() {
             replay.record_delta(&delta).with_context(|| {
                 format!(
@@ -431,7 +460,13 @@ async fn execute_scenario(
         for sample in delta.probes {
             samples.insert((delta.tick, sample.name), sample.value);
         }
+        if completed_tick % TICK_PROGRESS_UPDATE_INTERVAL == 0
+            || completed_tick == scenario.max_ticks
+        {
+            progress.pb_set_position(completed_tick);
+        }
     }
+    drop(progress);
 
     let mut failures = Vec::new();
     for expectation in scenario.expectations() {
@@ -453,7 +488,7 @@ async fn execute_scenario(
     if let Some(path) = trace_path {
         let output = File::create(path).with_context(|| format!("创建轨迹文件失败: {}", path.display()))?;
         simulation.trace().write_jsonl(output)?;
-        info!(path = %path.display(), "写入 JSONL 轨迹");
+        debug!(path = %path.display(), "写入 JSONL 轨迹");
     }
     if let Some(path) = vcd_path {
         let output = File::create(path).with_context(|| format!("创建 VCD 文件失败: {}", path.display()))?;
@@ -461,10 +496,7 @@ async fn execute_scenario(
         info!(path = %path.display(), "写入 VCD 波形");
     }
     if !failures.is_empty() {
-        for failure in &failures {
-            eprintln!("FAIL {failure}");
-        }
-        bail!("{} 个断言失败", failures.len());
+        bail!("{} 个断言失败\n{}", failures.len(), failures.join("\n"));
     }
     Ok(RunSummary {
         ticks: simulation.current_tick().0,
@@ -511,10 +543,7 @@ async fn test_path(
     let concurrency = std::thread::available_parallelism().map_or(1, usize::from);
     let semaphore = Arc::new(Semaphore::new(concurrency));
     let progress = tracing::info_span!("scenario_tests");
-    progress.pb_set_style(
-        &ProgressStyle::with_template("{span_child_prefix}{msg} {wide_bar} {pos}/{len}")?
-            .progress_chars("=>-"),
-    );
+    progress.pb_set_style(&simulation_progress_style()?);
     progress.pb_set_length(scenarios.len() as u64);
     progress.pb_set_message("批量场景");
     progress.pb_start();
@@ -522,25 +551,30 @@ async fn test_path(
     for (index, scenario) in scenarios.into_iter().enumerate() {
         let permit = semaphore.clone().acquire_owned().await?;
         let progress = progress.clone();
+        let progress_parent = progress.clone();
         let replay = replay.map(Path::to_path_buf);
-        tasks.push(tokio::spawn(async move {
-            let _permit = permit;
-            let result = execute_test_scenario(
-                &scenario,
-                replay.as_deref(),
-                replay_anim,
-                oracle,
-                allow_static_fallback,
-            )
-            .await;
-            progress.pb_inc(1);
-            (index, scenario, result)
-        }));
+        tasks.push(tokio::spawn(
+            async move {
+                let _permit = permit;
+                let result = execute_test_scenario(
+                    &scenario,
+                    replay.as_deref(),
+                    replay_anim,
+                    oracle,
+                    allow_static_fallback,
+                )
+                .await;
+                progress.pb_inc(1);
+                (index, scenario, result)
+            }
+            .instrument(progress_parent),
+        ));
     }
     let mut results = Vec::new();
     for task in tasks {
         results.push(task.await?);
     }
+    drop(progress);
     results.sort_by_key(|(index, _, _)| *index);
     let mut failures = 0;
     for (_, scenario, result) in results {
@@ -586,7 +620,7 @@ async fn execute_test_scenario(
     )
     .await;
     let comparison = if let (Ok(_), Some(trace_path)) = (&result, trace_path.as_deref()) {
-        compare_with_oracle(scenario, trace_path)
+        compare_with_oracle(scenario, trace_path).await
     } else {
         Ok(())
     };
@@ -597,7 +631,7 @@ async fn execute_test_scenario(
     result
 }
 
-fn compare_with_oracle(scenario: &Path, rust_trace: &Path) -> Result<()> {
+async fn compare_with_oracle(scenario: &Path, rust_trace: &Path) -> Result<()> {
     let oracle = std::env::var_os("REDSTONE_ORACLE")
         .map(PathBuf::from)
         .unwrap_or_else(|| PathBuf::from("tools/vanilla-oracle/run.sh"));
@@ -619,15 +653,43 @@ fn compare_with_oracle(scenario: &Path, rust_trace: &Path) -> Result<()> {
     } else {
         ProcessCommand::new(&oracle)
     };
-    let comparison = (|| {
-        let status = command
+    let scenario_name = scenario
+        .file_name()
+        .unwrap_or(scenario.as_os_str())
+        .to_string_lossy()
+        .into_owned();
+    let progress = tracing::info_span!("java_oracle");
+    progress.pb_set_style(&oracle_progress_style()?);
+    progress.pb_set_message(&format!("Java oracle {scenario_name}"));
+    progress.pb_start();
+    let comparison = async {
+        command
             .arg(scenario)
             .arg(&oracle_trace)
-            .status()
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .kill_on_drop(true);
+        let mut child = command
+            .spawn()
             .with_context(|| format!("启动 Java oracle 失败: {}", oracle.display()))?;
+        let stdout = child.stdout.take().context("捕获 Java oracle stdout 失败")?;
+        let stderr = child.stderr.take().context("捕获 Java oracle stderr 失败")?;
+        let (status, stdout, stderr) = tokio::join!(
+            child.wait(),
+            capture_oracle_stream(stdout, "stdout", &scenario_name, &progress),
+            capture_oracle_stream(stderr, "stderr", &scenario_name, &progress),
+        );
+        let status = status.context("等待 Java oracle 失败")?;
+        let stdout = stdout.context("读取 Java oracle stdout 失败")?;
+        let stderr = stderr.context("读取 Java oracle stderr 失败")?;
         if !status.success() {
-            bail!("Java oracle 返回失败状态: {status}");
+            bail!(
+                "Java oracle 返回失败状态: {status}\nstdout:\n{}\nstderr:\n{}",
+                String::from_utf8_lossy(&stdout),
+                String::from_utf8_lossy(&stderr)
+            );
         }
+        progress.pb_set_message(&format!("Java oracle {scenario_name}: 比较轨迹"));
         let rust = std::fs::read(rust_trace)?;
         let java = std::fs::read(&oracle_trace)?;
         if is_oracle_samples_v2(&java)? {
@@ -640,9 +702,41 @@ fn compare_with_oracle(scenario: &Path, rust_trace: &Path) -> Result<()> {
         } else {
             Ok(())
         }
-    })();
+    }
+    .await;
+    drop(progress);
     let _ = std::fs::remove_file(&oracle_trace);
     comparison
+}
+
+async fn capture_oracle_stream(
+    stream: impl AsyncRead + Unpin,
+    stream_name: &'static str,
+    scenario_name: &str,
+    progress: &tracing::Span,
+) -> std::io::Result<Vec<u8>> {
+    let mut reader = BufReader::new(stream);
+    let mut captured = Vec::new();
+    let mut line = Vec::new();
+    loop {
+        line.clear();
+        if reader.read_until(b'\n', &mut line).await? == 0 {
+            break;
+        }
+        captured.extend_from_slice(&line);
+        let message = String::from_utf8_lossy(&line);
+        let message = message.trim();
+        if !message.is_empty() {
+            progress.pb_set_message(&format!("Java oracle {scenario_name}: {message}"));
+            debug!(
+                parent: progress,
+                stream = stream_name,
+                output = message,
+                "Java oracle 输出"
+            );
+        }
+    }
+    Ok(captured)
 }
 
 #[derive(Debug, serde::Deserialize, Eq, PartialEq)]
