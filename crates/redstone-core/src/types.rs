@@ -2,6 +2,8 @@ use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
 
+use crate::event::BlockEvent;
+
 #[derive(
     Clone, Copy, Debug, Default, Deserialize, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize,
 )]
@@ -282,6 +284,10 @@ impl BlockEntityChange {
 pub enum WorldEvent {
     Block { change: BlockChange },
     BlockEntity { change: BlockEntityChange },
+    BlockEvent {
+        event: BlockEvent,
+        block_name: String,
+    },
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]

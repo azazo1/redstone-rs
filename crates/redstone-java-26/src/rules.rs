@@ -1342,16 +1342,19 @@ impl BlockRules for Java26Rules {
         &mut self,
         ctx: &mut EventContext<'_>,
         event: BlockEvent,
-    ) -> Result<(), RulesError> {
+    ) -> Result<bool, RulesError> {
         let state_id = ctx.world.get_block(event.pos);
         let state = self.state(state_id)?.clone();
-        if state.kind == event.block
-            && matches!(state.behavior, BlockBehavior::Piston { .. })
-            && let Err(error) = self.move_piston(ctx, event.pos, state_id, event.param_a)
-        {
-            debug!(?error, pos = ?event.pos, "活塞事件未执行");
+        if state.kind != event.block || !matches!(state.behavior, BlockBehavior::Piston { .. }) {
+            return Ok(false);
         }
-        Ok(())
+        match self.move_piston(ctx, event.pos, state_id, event.param_a) {
+            Ok(executed) => Ok(executed),
+            Err(error) => {
+                debug!(?error, pos = ?event.pos, "活塞事件未执行");
+                Ok(false)
+            }
+        }
     }
 
     fn on_deferred_task(

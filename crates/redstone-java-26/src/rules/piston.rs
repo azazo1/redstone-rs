@@ -104,13 +104,13 @@ impl Java26Rules {
         pos: BlockPos,
         state_id: BlockStateId,
         event: i32,
-    ) -> Result<(), RulesError> {
+    ) -> Result<bool, RulesError> {
         let state = self.state(state_id)?.clone();
         let facing = state.direction_property("facing").unwrap_or(Direction::North);
         let sticky = matches!(state.behavior, BlockBehavior::Piston { sticky: true });
         if event == 0 {
             if !self.is_quasi_powered(ctx.world, pos, facing) {
-                return Ok(());
+                return Ok(false);
             }
             let structure = self.resolve_push_structure(ctx.world, pos.relative(facing), facing)?;
             let snapshots = structure
@@ -238,7 +238,7 @@ impl Java26Rules {
             );
         } else {
             if self.is_quasi_powered(ctx.world, pos, facing) {
-                return Ok(());
+                return Ok(false);
             }
             let head_pos = pos.relative(facing);
             let head_finalized = self.settle_moving_piston(ctx, head_pos, true)?;
@@ -249,11 +249,11 @@ impl Java26Rules {
                     param_a: event,
                     param_b: direction_index(facing) as i32,
                 });
-                return Ok(());
+                return Ok(true);
             }
             self.continue_piston_retraction(ctx, pos, state_id, event)?;
         }
-        Ok(())
+        Ok(true)
     }
 
     pub(super) fn continue_piston_retraction(

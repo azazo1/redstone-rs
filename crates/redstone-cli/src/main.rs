@@ -75,6 +75,8 @@ enum Command {
         scenario: PathBuf,
         #[arg(long)]
         replay: Option<PathBuf>,
+        #[arg(long, requires = "replay", help = "在 Replay Mod 录像中保留活塞动画和声音")]
+        replay_anim: bool,
         #[arg(long)]
         trace: Option<PathBuf>,
         #[arg(long)]
@@ -86,6 +88,8 @@ enum Command {
         path: PathBuf,
         #[arg(long)]
         replay: Option<PathBuf>,
+        #[arg(long, requires = "replay", help = "在 Replay Mod 录像中保留活塞动画和声音")]
+        replay_anim: bool,
         #[arg(long)]
         oracle: bool,
         #[arg(long)]
@@ -145,6 +149,7 @@ async fn main() -> Result<()> {
         Command::Run {
             scenario,
             replay,
+            replay_anim,
             trace,
             vcd,
             allow_static_fallback,
@@ -152,6 +157,7 @@ async fn main() -> Result<()> {
             run(
                 &scenario,
                 replay.as_deref(),
+                replay_anim,
                 trace.as_deref(),
                 vcd.as_deref(),
                 allow_static_fallback,
@@ -161,14 +167,22 @@ async fn main() -> Result<()> {
         Command::Test {
             path,
             replay,
+            replay_anim,
             oracle,
             allow_static_fallback,
-        } => test_path(&path, replay.as_deref(), oracle, allow_static_fallback).await,
+        } => test_path(
+            &path,
+            replay.as_deref(),
+            replay_anim,
+            oracle,
+            allow_static_fallback,
+        )
+        .await,
         Command::Trace {
             scenario,
             output,
             vcd,
-        } => run(&scenario, None, Some(&output), vcd.as_deref(), false).await,
+        } => run(&scenario, None, false, Some(&output), vcd.as_deref(), false).await,
         Command::Bench {
             blocks,
             active,
@@ -298,6 +312,7 @@ struct RunSummary {
 async fn run(
     scenario_path: &Path,
     replay_path: Option<&Path>,
+    replay_anim: bool,
     trace_path: Option<&Path>,
     vcd_path: Option<&Path>,
     allow_static_fallback: bool,
@@ -305,6 +320,7 @@ async fn run(
     let summary = execute_scenario(
         scenario_path,
         replay_path,
+        replay_anim,
         trace_path,
         vcd_path,
         allow_static_fallback,
@@ -320,6 +336,7 @@ async fn run(
 async fn execute_scenario(
     scenario_path: &Path,
     replay_path: Option<&Path>,
+    replay_anim: bool,
     trace_path: Option<&Path>,
     vcd_path: Option<&Path>,
     allow_static_fallback: bool,
@@ -379,7 +396,8 @@ async fn execute_scenario(
                     scenario.seed,
                     scenario.mode == RedstoneMode::Experimental,
                     replay_region,
-                ),
+                )
+                .with_piston_animation(replay_anim),
                 simulation.world(),
             )
             .with_context(|| format!("初始化 Replay Mod 录像失败: {}", path.display()))?,
@@ -470,6 +488,7 @@ fn log_replay_stats(path: &Path, stats: &ReplayStats) {
 async fn test_path(
     path: &Path,
     replay: Option<&Path>,
+    replay_anim: bool,
     oracle: bool,
     allow_static_fallback: bool,
 ) -> Result<()> {
@@ -509,6 +528,7 @@ async fn test_path(
             let result = execute_test_scenario(
                 &scenario,
                 replay.as_deref(),
+                replay_anim,
                 oracle,
                 allow_static_fallback,
             )
@@ -545,6 +565,7 @@ async fn test_path(
 async fn execute_test_scenario(
     scenario: &Path,
     replay: Option<&Path>,
+    replay_anim: bool,
     oracle: bool,
     allow_static_fallback: bool,
 ) -> Result<RunSummary> {
@@ -558,6 +579,7 @@ async fn execute_test_scenario(
     let result = execute_scenario(
         scenario,
         replay,
+        replay_anim,
         trace_path.as_deref(),
         None,
         allow_static_fallback,

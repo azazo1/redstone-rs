@@ -10,6 +10,7 @@ use zip::ZipArchive;
 
 const LEVEL_CHUNK_WITH_LIGHT: i32 = 45;
 const BLOCK_ENTITY_DATA: i32 = 6;
+const BLOCK_EVENT: i32 = 7;
 const BLOCK_UPDATE: i32 = 8;
 const PISTON_BLOCK_ENTITY_TYPE: i32 = 11;
 
@@ -114,6 +115,9 @@ fn piston_scenario_exports_vanilla_moving_piston_packets() {
     assert_success(&output);
     let recording = read_recording(&replay);
     let packets = parse_packets(&recording);
+    assert!(packets
+        .iter()
+        .all(|packet| packet.timestamp == 0 || packet.id != BLOCK_EVENT));
     let mut moving_pistons = 0;
     let mut moved_wool = false;
     for (index, packet) in packets.iter().enumerate() {
@@ -145,6 +149,115 @@ fn piston_scenario_exports_vanilla_moving_piston_packets() {
     }
     assert!(moving_pistons > 0);
     assert!(moved_wool);
+}
+
+#[test]
+fn piston_animation_exports_vanilla_block_events_for_the_3x3_gate() {
+    let directory = TestDirectory::new("replay-piston-animation");
+    let scenario = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../assets/scenarios/piston-gate-3x3.toml");
+    let replay = directory.path().join("piston-animation.mcpr");
+
+    let output = Command::new(env!("CARGO_BIN_EXE_redstone"))
+        .arg("run")
+        .arg(&scenario)
+        .arg("--replay")
+        .arg(&replay)
+        .arg("--replay-anim")
+        .output()
+        .unwrap();
+    assert_success(&output);
+
+    let recording = read_recording(&replay);
+    let events = parse_packets(&recording)
+        .into_iter()
+        .filter(|packet| packet.timestamp > 0 && packet.id == BLOCK_EVENT)
+        .map(|packet| decode_block_event(packet.timestamp, packet.payload))
+        .collect::<Vec<_>>();
+
+    assert!(!events.is_empty());
+    assert!(events.iter().any(|event| {
+        event.pos == (4, 3, 1)
+            && event.param_a == 0
+            && event.param_b == 1
+            && event.block == 128
+    }));
+    assert!(events.iter().any(|event| {
+        event.pos == (8, 7, 1)
+            && event.param_a == 0
+            && event.param_b == 0
+            && event.block == 138
+    }));
+}
+
+#[test]
+fn piston_animation_starts_before_slime_and_honey_branch_updates() {
+    let directory = TestDirectory::new("replay-piston-sticky-branches");
+    let structure_path = directory.path().join("sticky-branches.nbt");
+    let scenario_path = directory.path().join("sticky-branches.toml");
+    let replay = directory.path().join("sticky-branches.mcpr");
+    fs::write(&structure_path, sticky_branch_structure()).unwrap();
+    fs::write(&scenario_path, sticky_branch_scenario()).unwrap();
+
+    let output = Command::new(env!("CARGO_BIN_EXE_redstone"))
+        .arg("run")
+        .arg(&scenario_path)
+        .arg("--replay")
+        .arg(&replay)
+        .arg("--replay-anim")
+        .output()
+        .unwrap();
+    assert_success(&output);
+
+    let recording = read_recording(&replay);
+    let packets = parse_packets(&recording);
+    let event_index = packets
+        .iter()
+        .position(|packet| {
+            packet.timestamp > 0
+                && packet.id == BLOCK_EVENT
+                && decode_block_event(packet.timestamp, packet.payload).pos == (1, 1, 0)
+        })
+        .unwrap();
+    let event = decode_block_event(
+        packets[event_index].timestamp,
+        packets[event_index].payload,
+    );
+    assert_eq!((event.param_a, event.param_b, event.block), (0, 5, 138));
+
+    let moving_updates = packets
+        .iter()
+        .enumerate()
+        .filter(|(_, packet)| packet.timestamp == packets[event_index].timestamp)
+        .filter(|(_, packet)| packet.id == BLOCK_ENTITY_DATA)
+        .filter_map(|(index, packet)| {
+            let (pos, kind, nbt) = decode_block_entity_data(packet.payload);
+            (kind == PISTON_BLOCK_ENTITY_TYPE).then_some((index, pos, nbt))
+        })
+        .collect::<Vec<_>>();
+    assert!(moving_updates.iter().all(|(index, _, _)| *index > event_index));
+    assert!(moving_updates.iter().any(|(_, pos, nbt)| {
+        *pos == (3, 1, 0) && contains(nbt, b"minecraft:slime_block")
+    }));
+    assert!(moving_updates.iter().any(|(_, pos, nbt)| {
+        *pos == (3, 2, 0) && contains(nbt, b"minecraft:stone")
+    }));
+    assert!(moving_updates.iter().all(|(_, pos, _)| *pos != (3, 0, 0)));
+}
+
+#[test]
+fn piston_animation_requires_a_replay_output() {
+    let directory = TestDirectory::new("replay-piston-animation-argument");
+    let scenario = write_fixture(directory.path(), false);
+
+    let output = Command::new(env!("CARGO_BIN_EXE_redstone"))
+        .arg("run")
+        .arg(&scenario)
+        .arg("--replay-anim")
+        .output()
+        .unwrap();
+
+    assert!(!output.status.success());
 }
 
 fn run_command(command: &str, scenario: &Path, replay: &Path) -> Output {
@@ -194,11 +307,57 @@ fn structure() -> Vec<u8> {
     fastnbt::to_bytes(&root).unwrap()
 }
 
+fn sticky_branch_structure() -> Vec<u8> {
+    let palette = Value::List(vec![
+        block_state_with_properties(
+            "minecraft:piston",
+            &[("extended", "false"), ("facing", "east")],
+        ),
+        block_state("minecraft:slime_block"),
+        block_state("minecraft:stone"),
+        block_state("minecraft:honey_block"),
+    ]);
+    let blocks = Value::List(vec![
+        structure_block_at([1, 1, 0], 0),
+        structure_block_at([2, 1, 0], 1),
+        structure_block_at([2, 2, 0], 2),
+        structure_block_at([2, 0, 0], 3),
+    ]);
+    fastnbt::to_bytes(&HashMap::from([
+        ("DataVersion".to_owned(), Value::Int(4790)),
+        (
+            "size".to_owned(),
+            Value::List(vec![Value::Int(4), Value::Int(3), Value::Int(1)]),
+        ),
+        ("palette".to_owned(), palette),
+        ("blocks".to_owned(), blocks),
+        ("entities".to_owned(), Value::List(Vec::new())),
+    ]))
+    .unwrap()
+}
+
 fn block_state(name: &str) -> Value {
     Value::Compound(HashMap::from([(
         "Name".to_owned(),
         Value::String(name.to_owned()),
     )]))
+}
+
+fn block_state_with_properties(name: &str, properties: &[(&str, &str)]) -> Value {
+    Value::Compound(HashMap::from([
+        ("Name".to_owned(), Value::String(name.to_owned())),
+        (
+            "Properties".to_owned(),
+            Value::Compound(
+                properties
+                    .iter()
+                    .map(|(key, value)| {
+                        ((*key).to_owned(), Value::String((*value).to_owned()))
+                    })
+                    .collect(),
+            ),
+        ),
+    ]))
 }
 
 fn structure_block(x: i32) -> Value {
@@ -208,6 +367,16 @@ fn structure_block(x: i32) -> Value {
             Value::List(vec![Value::Int(x), Value::Int(0), Value::Int(0)]),
         ),
         ("state".to_owned(), Value::Int(0)),
+    ]))
+}
+
+fn structure_block_at(pos: [i32; 3], state: i32) -> Value {
+    Value::Compound(HashMap::from([
+        (
+            "pos".to_owned(),
+            Value::List(pos.into_iter().map(Value::Int).collect()),
+        ),
+        ("state".to_owned(), Value::Int(state)),
     ]))
 }
 
@@ -270,6 +439,25 @@ pos = {{ x = 96, y = 0, z = -1 }}
 name = "minecraft:redstone_block"
 {expectation}"#
     )
+}
+
+fn sticky_branch_scenario() -> &'static str {
+    r#"version = "26.1.2"
+mode = "default"
+seed = 0
+max_ticks = 4
+strict = true
+
+[source]
+path = "sticky-branches.nbt"
+initialization = "raw"
+
+[[actions]]
+tick = 1
+type = "set_block"
+pos = { x = 0, y = 1, z = 0 }
+name = "minecraft:redstone_block"
+"#
 }
 
 fn chunk_rectangle(min_x: i32, max_x: i32, min_z: i32, max_z: i32) -> BTreeSet<(i32, i32)> {
@@ -372,6 +560,27 @@ fn decode_block_update(timestamp: i32, payload: &[u8]) -> (i32, (i32, i32, i32),
     (timestamp, pos, cursor.var_int() as u32)
 }
 
+struct DecodedBlockEvent {
+    pos: (i32, i32, i32),
+    param_a: u8,
+    param_b: u8,
+    block: i32,
+}
+
+fn decode_block_event(_timestamp: i32, payload: &[u8]) -> DecodedBlockEvent {
+    let mut cursor = Cursor::new(payload);
+    let pos = unpack_block_pos(cursor.u64());
+    let param_a = cursor.u8();
+    let param_b = cursor.u8();
+    let block = cursor.var_int();
+    DecodedBlockEvent {
+        pos,
+        param_a,
+        param_b,
+        block,
+    }
+}
+
 fn decode_block_entity_data(payload: &[u8]) -> ((i32, i32, i32), i32, &[u8]) {
     let mut cursor = Cursor::new(payload);
     let pos = unpack_block_pos(cursor.u64());
@@ -388,6 +597,10 @@ fn unpack_block_pos(packed: u64) -> (i32, i32, i32) {
 
 fn sign_extend(value: u64, bits: u32) -> i64 {
     ((value << (64 - bits)) as i64) >> (64 - bits)
+}
+
+fn contains(haystack: &[u8], needle: &[u8]) -> bool {
+    haystack.windows(needle.len()).any(|value| value == needle)
 }
 
 struct Cursor<'a> {

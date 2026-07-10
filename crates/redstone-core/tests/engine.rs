@@ -16,6 +16,7 @@ struct MockRules {
     scheduled_executions: usize,
     neighbor_positions: Vec<BlockPos>,
     block_entity_order: Vec<(&'static str, BlockPos)>,
+    execute_block_events: bool,
 }
 
 impl BlockRules for MockRules {
@@ -81,6 +82,14 @@ impl BlockRules for MockRules {
         if let Action::SetBlockEntity { pos, data } = action {
             ctx.set_block(*pos, BLOCK, "test_block_entity_state")?;
             ctx.set_block_entity(*pos, data.clone());
+        }
+        if let Action::HitTarget { pos, .. } = action {
+            ctx.queue_block_event(BlockEvent {
+                pos: *pos,
+                block: KIND,
+                param_a: 2,
+                param_b: 5,
+            });
         }
         Ok(())
     }
@@ -149,15 +158,67 @@ impl BlockRules for MockRules {
 
     fn on_block_event(
         &mut self,
-        _ctx: &mut EventContext<'_>,
-        _event: BlockEvent,
-    ) -> Result<(), RulesError> {
-        Ok(())
+        ctx: &mut EventContext<'_>,
+        event: BlockEvent,
+    ) -> Result<bool, RulesError> {
+        if !self.execute_block_events {
+            return Ok(false);
+        }
+        ctx.set_block(event.pos, AIR, "test_block_event")?;
+        Ok(true)
     }
 
     fn read_probe(&self, _world: &SparseWorld, _probe: &Probe) -> ProbeValue {
         ProbeValue::Integer(self.scheduled_executions as i64)
     }
+}
+
+#[tokio::test]
+async fn successful_block_event_precedes_its_world_changes() {
+    let mut world = SparseWorld::new(AIR);
+    world.set_block(BlockPos::ZERO, BLOCK).unwrap();
+    let mut simulation = Simulation::load(
+        MockRules {
+            execute_block_events: true,
+            ..MockRules::default()
+        },
+        world,
+        SimulationConfig::default(),
+    )
+    .await
+    .unwrap();
+
+    let delta = simulation
+        .step_with_actions(&[Action::HitTarget {
+            pos: BlockPos::ZERO,
+            face: redstone_core::Direction::East,
+            location: [0.5, 0.5, 0.5],
+            arrow: false,
+        }])
+        .await
+        .unwrap();
+
+    assert_eq!(
+        delta.events,
+        [
+            WorldEvent::BlockEvent {
+                event: BlockEvent {
+                    pos: BlockPos::ZERO,
+                    block: KIND,
+                    param_a: 2,
+                    param_b: 5,
+                },
+                block_name: "test:block".to_owned(),
+            },
+            WorldEvent::Block {
+                change: redstone_core::BlockChange {
+                    pos: BlockPos::ZERO,
+                    old_state: BLOCK,
+                    new_state: AIR,
+                },
+            },
+        ]
+    );
 }
 
 #[tokio::test]

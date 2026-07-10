@@ -285,6 +285,7 @@ impl<R: BlockRules> Simulation<R> {
     ) -> Result<(), SimulationError> {
         while let Some(event) = self.block_events.pop_front() {
             self.block_event_keys.remove(&event);
+            let block_name = self.rules.block_name(self.world.get_block(event.pos)).to_owned();
             self.push_trace(
                 SimulationPhase::BlockEvents,
                 TraceKind::BlockEventExecuted {
@@ -294,16 +295,27 @@ impl<R: BlockRules> Simulation<R> {
                     param_b: event.param_b,
                 },
             );
+            let event_index = changes.len();
+            let mut executed = false;
             let tasks = self.with_context_and_changes(
                 SimulationPhase::BlockEvents,
                 changes,
-                |rules, ctx| rules.on_block_event(ctx, event),
+                |rules, ctx| {
+                    executed = rules.on_block_event(ctx, event)?;
+                    Ok(())
+                },
             )?;
             self.process_neighbor_tasks_with_changes(
                 tasks,
                 SimulationPhase::BlockEvents,
                 changes,
             )?;
+            if executed {
+                changes.insert(event_index, WorldEvent::BlockEvent {
+                    event,
+                    block_name,
+                });
+            }
         }
         Ok(())
     }

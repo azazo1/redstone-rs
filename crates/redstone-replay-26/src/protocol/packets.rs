@@ -9,6 +9,7 @@ pub(crate) const CONFIG_ENABLED_FEATURES: i32 = 12;
 pub(crate) const CONFIG_UPDATE_TAGS: i32 = 13;
 pub(crate) const CONFIG_SELECT_KNOWN_PACKS: i32 = 14;
 pub(crate) const PLAY_BLOCK_ENTITY_DATA: i32 = 6;
+pub(crate) const PLAY_BLOCK_EVENT: i32 = 7;
 pub(crate) const PLAY_BLOCK_UPDATE: i32 = 8;
 pub(crate) const PLAY_CHUNK_BATCH_FINISHED: i32 = 11;
 pub(crate) const PLAY_CHUNK_BATCH_START: i32 = 12;
@@ -135,6 +136,15 @@ pub(crate) fn block_update(pos: BlockPos, state: u32) -> Vec<u8> {
     let mut output = PacketBuf::new();
     output.write_block_pos(pos);
     output.write_var_i32(state as i32);
+    output.into_inner()
+}
+
+pub(crate) fn block_event(pos: BlockPos, param_a: u8, param_b: u8, block: i32) -> Vec<u8> {
+    let mut output = PacketBuf::new();
+    output.write_block_pos(pos);
+    output.write_u8(param_a);
+    output.write_u8(param_b);
+    output.write_var_i32(block);
     output.into_inner()
 }
 

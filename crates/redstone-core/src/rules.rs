@@ -54,7 +54,7 @@ pub trait BlockRules: Send {
         &mut self,
         ctx: &mut EventContext<'_>,
         event: BlockEvent,
-    ) -> Result<(), RulesError>;
+    ) -> Result<bool, RulesError>;
 
     fn on_deferred_task(
         &mut self,

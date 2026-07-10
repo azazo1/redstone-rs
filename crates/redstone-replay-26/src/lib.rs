@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use crc32fast::Hasher;
-use redstone_core::{BlockEntityChange, BlockPos, SparseWorld, WorldDelta, WorldEvent};
+use redstone_core::{BlockEntityChange, BlockEvent, BlockPos, SparseWorld, WorldDelta, WorldEvent};
 use serde::Serialize;
 use thiserror::Error;
 use zip::ZipWriter;
@@ -19,10 +19,10 @@ use crate::protocol::chunk::{
 use crate::protocol::packets::{
     Camera, CONFIG_ENABLED_FEATURES, CONFIG_FINISH, CONFIG_REGISTRY_DATA,
     CONFIG_SELECT_KNOWN_PACKS, CONFIG_UPDATE_TAGS, LOGIN_FINISHED, PLAY_BLOCK_ENTITY_DATA,
-    PLAY_BLOCK_UPDATE, PLAY_CHUNK_BATCH_FINISHED, PLAY_CHUNK_BATCH_START,
+    PLAY_BLOCK_EVENT, PLAY_BLOCK_UPDATE, PLAY_CHUNK_BATCH_FINISHED, PLAY_CHUNK_BATCH_START,
     PLAY_LEVEL_CHUNK_WITH_LIGHT, PLAY_LOGIN, PLAY_PLAYER_POSITION, PLAY_SET_CHUNK_CACHE_CENTER,
     PLAY_SET_CHUNK_CACHE_RADIUS, PLAY_SET_DEFAULT_SPAWN, PLAY_SET_SIMULATION_DISTANCE,
-    PLAY_SET_TIME, block_update, chunk_cache_center, default_spawn, enabled_features,
+    PLAY_SET_TIME, block_event, block_update, chunk_cache_center, default_spawn, enabled_features,
     login_finished, play_login, player_position, select_known_packs, set_time, single_var_int,
 };
 use crate::protocol::registry::{registry_packets, required_tags_packet};
@@ -65,6 +65,7 @@ pub struct ReplayOptions {
     pub experimental: bool,
     pub recorded_at: SystemTime,
     pub region: ReplayRegion,
+    pub piston_animation: bool,
 }
 
 impl ReplayOptions {
@@ -80,7 +81,13 @@ impl ReplayOptions {
             experimental,
             recorded_at: SystemTime::now(),
             region,
+            piston_animation: false,
         }
+    }
+
+    pub fn with_piston_animation(mut self, enabled: bool) -> Self {
+        self.piston_animation = enabled;
+        self
     }
 }
 
@@ -179,41 +186,80 @@ impl ReplayWriter {
         }
         let timestamp = timestamp_for_tick(delta.tick.0)?;
         for event in &delta.events {
-            match event {
-                WorldEvent::Block { change } => {
-                    validate_block(change.pos, change.new_state.0)?;
-                    self.ensure_chunk_area(timestamp, chunk_pos(change.pos))?;
-                    self.write_packet(
-                        timestamp,
-                        PacketState::Play,
-                        PLAY_BLOCK_UPDATE,
-                        &block_update(change.pos, change.new_state.0),
-                    )?;
-                    self.block_updates += 1;
-                }
-                WorldEvent::BlockEntity { change } => match change {
-                    BlockEntityChange::Create { pos, data }
-                    | BlockEntityChange::Update {
-                        pos,
-                        new_data: data,
-                        ..
-                    } => {
-                        validate_position(*pos)?;
-                        self.ensure_chunk_area(timestamp, chunk_pos(*pos))?;
-                        self.write_packet(
-                            timestamp,
-                            PacketState::Play,
-                            PLAY_BLOCK_ENTITY_DATA,
-                            &block_entity_data(*pos, data)?,
-                        )?;
-                    }
-                    BlockEntityChange::Remove { .. } => {}
-                },
-            }
+            self.record_event(timestamp, event)?;
         }
         self.last_tick = delta.tick.0;
         self.last_timestamp = timestamp;
         Ok(())
+    }
+
+    fn record_event(&mut self, timestamp: i32, event: &WorldEvent) -> Result<(), ReplayError> {
+        match event {
+            WorldEvent::Block { change } => {
+                validate_block(change.pos, change.new_state.0)?;
+                self.ensure_chunk_area(timestamp, chunk_pos(change.pos))?;
+                self.write_packet(
+                    timestamp,
+                    PacketState::Play,
+                    PLAY_BLOCK_UPDATE,
+                    &block_update(change.pos, change.new_state.0),
+                )?;
+                self.block_updates += 1;
+            }
+            WorldEvent::BlockEntity { change } => match change {
+                BlockEntityChange::Create { pos, data }
+                | BlockEntityChange::Update {
+                    pos,
+                    new_data: data,
+                    ..
+                } => {
+                    validate_position(*pos)?;
+                    self.ensure_chunk_area(timestamp, chunk_pos(*pos))?;
+                    self.write_packet(
+                        timestamp,
+                        PacketState::Play,
+                        PLAY_BLOCK_ENTITY_DATA,
+                        &block_entity_data(*pos, data)?,
+                    )?;
+                }
+                BlockEntityChange::Remove { .. } => {}
+            },
+            WorldEvent::BlockEvent {
+                event,
+                block_name,
+            } => {
+                if self.options.piston_animation
+                    && let Some(block) = piston_block_registry_id(block_name)
+                {
+                    self.write_block_event(timestamp, *event, block)?;
+                }
+            }
+        }
+        Ok(())
+    }
+
+    fn write_block_event(
+        &mut self,
+        timestamp: i32,
+        event: BlockEvent,
+        block: i32,
+    ) -> Result<(), ReplayError> {
+        validate_position(event.pos)?;
+        self.ensure_chunk_area(timestamp, chunk_pos(event.pos))?;
+        let param_a = u8::try_from(event.param_a).map_err(|_| ReplayError::BlockEventParameter {
+            name: "param_a",
+            value: event.param_a,
+        })?;
+        let param_b = u8::try_from(event.param_b).map_err(|_| ReplayError::BlockEventParameter {
+            name: "param_b",
+            value: event.param_b,
+        })?;
+        self.write_packet(
+            timestamp,
+            PacketState::Play,
+            PLAY_BLOCK_EVENT,
+            &block_event(event.pos, param_a, param_b, block),
+        )
     }
 
     pub fn finish(mut self) -> Result<ReplayStats, ReplayError> {
@@ -613,6 +659,14 @@ fn chunk_pos(pos: BlockPos) -> (i32, i32) {
     (pos.x.div_euclid(16), pos.z.div_euclid(16))
 }
 
+fn piston_block_registry_id(block_name: &str) -> Option<i32> {
+    match block_name {
+        "minecraft:sticky_piston" => Some(128),
+        "minecraft:piston" => Some(138),
+        _ => None,
+    }
+}
+
 fn validate_block(pos: BlockPos, state: u32) -> Result<(), ReplayError> {
     validate_position(pos)?;
     if state > MAX_BLOCK_STATE_ID {
@@ -660,6 +714,8 @@ pub enum ReplayError {
     PositionOutOfRange { pos: BlockPos },
     #[error("方块状态 ID 超出 26.1.2 全局注册表范围: {state}")]
     BlockStateOutOfRange { state: u32 },
+    #[error("block event {name} 超出无符号字节范围: {value}")]
+    BlockEventParameter { name: &'static str, value: i32 },
     #[error("tick {tick} 无法转换为 MCPR 毫秒时间戳")]
     TimestampOverflow { tick: u64 },
     #[error("录像时间戳倒退: {previous} -> {next}")]
@@ -730,6 +786,7 @@ mod tests {
                     BlockPos::new(-1, -64, 16),
                     BlockPos::new(-1, -64, 16),
                 ),
+                piston_animation: false,
             },
             &world,
         )
