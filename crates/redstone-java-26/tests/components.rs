@@ -1817,6 +1817,80 @@ async fn lectern_emits_a_two_tick_use_pulse() {
 }
 
 #[tokio::test]
+async fn piston_rejects_block_entity_container_states_without_runtime_data() {
+    let containers: &[(&str, &[(&str, &str)])] = &[
+        (
+            "minecraft:chest",
+            &[("facing", "north"), ("type", "single"), ("waterlogged", "false")],
+        ),
+        (
+            "minecraft:hopper",
+            &[("enabled", "true"), ("facing", "down")],
+        ),
+        (
+            "minecraft:furnace",
+            &[("facing", "north"), ("lit", "false")],
+        ),
+        (
+            "minecraft:barrel",
+            &[("facing", "north"), ("open", "false")],
+        ),
+        (
+            "minecraft:dropper",
+            &[("facing", "north"), ("triggered", "false")],
+        ),
+        (
+            "minecraft:dispenser",
+            &[("facing", "north"), ("triggered", "false")],
+        ),
+        (
+            "minecraft:crafter",
+            &[
+                ("crafting", "false"),
+                ("orientation", "north_up"),
+                ("triggered", "false"),
+            ],
+        ),
+    ];
+
+    for &(name, properties) in containers {
+        let mut registry = Java26Registry::new();
+        let piston = state(
+            &mut registry,
+            "minecraft:piston",
+            &[("extended", "false"), ("facing", "east")],
+        );
+        let source = state(&mut registry, "minecraft:redstone_block", &[]);
+        let container_state = state(&mut registry, name, properties);
+        assert!(registry.state(container_state).unwrap().has_block_entity);
+
+        let mut world = SparseWorld::new(registry.air_state());
+        world.set_block(BlockPos::ZERO, piston).unwrap();
+        world.set_block(BlockPos::new(-1, 0, 0), source).unwrap();
+        world.set_block(BlockPos::new(1, 0, 0), container_state).unwrap();
+        let rules = Java26Rules::new(registry);
+        let mut simulation = Simulation::load(rules, world, SimulationConfig::default())
+            .await
+            .unwrap();
+        simulation.initialize().await.unwrap();
+
+        simulation.step().await.unwrap();
+
+        let piston_state = simulation.world().get_block(BlockPos::ZERO);
+        assert_eq!(
+            simulation.rules().registry().state(piston_state).unwrap().property("extended"),
+            Some("false"),
+            "{name}"
+        );
+        assert_eq!(simulation.world().get_block(BlockPos::new(1, 0, 0)), container_state);
+        assert_eq!(
+            simulation.world().get_block(BlockPos::new(2, 0, 0)),
+            simulation.rules().registry().air_state()
+        );
+    }
+}
+
+#[tokio::test]
 async fn piston_moves_slime_branches_without_sticking_to_honey() {
     let mut registry = Java26Registry::new();
     let piston = state(

@@ -1,4 +1,4 @@
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::{Arc, OnceLock};
 
 use redstone_core::{BlockKindId, BlockStateId, Direction};
@@ -67,6 +67,7 @@ pub struct StateDefinition {
     pub redstone_conductor: bool,
     pub sturdy_faces: [bool; 6],
     pub push_reaction: PushReaction,
+    pub has_block_entity: bool,
     pub supported: bool,
 }
 
@@ -212,6 +213,7 @@ impl StateResolver for Java26Registry {
             return Ok(id);
         }
 
+        let has_block_entity = self.catalog.blocks_with_entities.contains(name);
         let kind = self.intern_kind(name);
         let traits = classify(name, properties);
         self.states[id.0 as usize] = Some(StateDefinition {
@@ -223,6 +225,7 @@ impl StateResolver for Java26Registry {
             redstone_conductor: traits.redstone_conductor,
             sturdy_faces: traits.sturdy_faces,
             push_reaction: traits.push_reaction,
+            has_block_entity,
             supported: traits.supported,
         });
         Ok(id)
@@ -232,12 +235,20 @@ impl StateResolver for Java26Registry {
 #[derive(Debug)]
 struct OfficialStateCatalog {
     states_by_key: HashMap<String, BlockStateId>,
+    blocks_with_entities: HashSet<String>,
     max_state_id: u32,
 }
 
 #[derive(Deserialize)]
 struct BlockReportEntry {
+    definition: BlockReportDefinition,
     states: Vec<BlockReportState>,
+}
+
+#[derive(Deserialize)]
+struct BlockReportDefinition {
+    #[serde(rename = "type")]
+    block_type: String,
 }
 
 #[derive(Deserialize)]
@@ -256,8 +267,12 @@ fn official_catalog() -> Arc<OfficialStateCatalog> {
             ))
             .expect("官方 26.1.2 blocks.json 必须可解析");
             let mut states_by_key = HashMap::new();
+            let mut blocks_with_entities = HashSet::new();
             let mut max_state_id = 0;
             for (name, entry) in report {
+                if block_definition_has_entity(&entry.definition.block_type) {
+                    blocks_with_entities.insert(name.clone());
+                }
                 for state in entry.states {
                     max_state_id = max_state_id.max(state.id);
                     let old = states_by_key.insert(
@@ -269,10 +284,78 @@ fn official_catalog() -> Arc<OfficialStateCatalog> {
             }
             Arc::new(OfficialStateCatalog {
                 states_by_key,
+                blocks_with_entities,
                 max_state_id,
             })
         })
         .clone()
+}
+
+fn block_definition_has_entity(block_type: &str) -> bool {
+    matches!(
+        block_type.strip_prefix("minecraft:").unwrap_or(block_type),
+        "banner"
+            | "barrel"
+            | "beacon"
+            | "bed"
+            | "beehive"
+            | "bell"
+            | "blast_furnace"
+            | "brewing_stand"
+            | "brushable"
+            | "calibrated_sculk_sensor"
+            | "campfire"
+            | "ceiling_hanging_sign"
+            | "chest"
+            | "chiseled_book_shelf"
+            | "command"
+            | "comparator"
+            | "conduit"
+            | "copper_chest"
+            | "copper_golem_statue"
+            | "crafter"
+            | "creaking_heart"
+            | "daylight_detector"
+            | "decorated_pot"
+            | "dispenser"
+            | "dropper"
+            | "enchantment_table"
+            | "end_gateway"
+            | "end_portal"
+            | "ender_chest"
+            | "furnace"
+            | "hopper"
+            | "jigsaw"
+            | "jukebox"
+            | "lectern"
+            | "moving_piston"
+            | "piglinwallskull"
+            | "player_head"
+            | "player_wall_head"
+            | "sculk_catalyst"
+            | "sculk_sensor"
+            | "sculk_shrieker"
+            | "shelf"
+            | "shulker_box"
+            | "skull"
+            | "smoker"
+            | "spawner"
+            | "standing_sign"
+            | "structure"
+            | "test"
+            | "test_instance"
+            | "trapped_chest"
+            | "trial_spawner"
+            | "vault"
+            | "wall_banner"
+            | "wall_hanging_sign"
+            | "wall_sign"
+            | "wall_skull"
+            | "weathering_copper_chest"
+            | "weathering_copper_golem_statue"
+            | "wither_skull"
+            | "wither_wall_skull"
+    )
 }
 
 fn state_key(name: &str, properties: &BTreeMap<String, String>) -> String {

@@ -438,6 +438,7 @@ impl Java26Rules {
             let definition = self.state(source_state)?.clone();
             if source_state != self.registry.air_state()
                 && definition.push_reaction == PushReaction::Normal
+                && self.piston_can_push(&definition, facing.opposite(), false, facing)
             {
                 ctx.run_rule_task_after_neighbors(DeferredRuleTask {
                     kind: MOVE_RETRACTED_STRUCTURE,
@@ -778,7 +779,7 @@ impl Java26Rules {
         connection_direction: Direction,
     ) -> bool {
         match state.push_reaction {
-            PushReaction::Normal => true,
+            PushReaction::Normal => !state.has_block_entity,
             PushReaction::Block => false,
             PushReaction::Destroy => allow_destroy,
             PushReaction::PushOnly => push_direction == connection_direction,
