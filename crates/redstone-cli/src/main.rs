@@ -527,6 +527,29 @@ struct OracleNeighborSample {
     pos: BlockPos,
 }
 
+#[derive(Debug, serde::Deserialize, Eq, PartialEq)]
+struct OracleScheduledTickQueuedSample {
+    tick: u64,
+    pos: BlockPos,
+    trigger_tick: u64,
+    priority: i8,
+    sub_tick_order: i64,
+}
+
+#[derive(Debug, serde::Deserialize, Eq, PartialEq)]
+struct OracleScheduledTickExecutedSample {
+    tick: u64,
+    pos: BlockPos,
+}
+
+#[derive(Debug, serde::Deserialize, Eq, PartialEq)]
+struct OracleBlockEventSample {
+    tick: u64,
+    pos: BlockPos,
+    param_a: i32,
+    param_b: i32,
+}
+
 fn is_probe_sample_oracle(output: &[u8]) -> Result<bool> {
     oracle_format(output).map(|format| format.as_deref() == Some("probe_samples_v1"))
 }
@@ -619,9 +642,78 @@ fn compare_oracle_samples_v2(rust_trace: &[u8], java_output: &[u8]) -> Result<()
             _ => None,
         })
         .collect::<Vec<_>>();
+    let rust_scheduled_queued = rust_events
+        .iter()
+        .filter_map(|event| match event.kind {
+            TraceKind::ScheduledTickQueued {
+                pos,
+                trigger_tick,
+                priority,
+                sub_tick_order,
+                ..
+            } => Some(OracleScheduledTickQueuedSample {
+                tick: event.tick.0,
+                pos,
+                trigger_tick: trigger_tick.0,
+                priority,
+                sub_tick_order,
+            }),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    let rust_scheduled_executed = rust_events
+        .iter()
+        .filter_map(|event| match event.kind {
+            TraceKind::ScheduledTickExecuted { pos, .. } => {
+                Some(OracleScheduledTickExecutedSample {
+                    tick: event.tick.0,
+                    pos,
+                })
+            }
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    let rust_block_events_queued = rust_events
+        .iter()
+        .filter_map(|event| match event.kind {
+            TraceKind::BlockEventQueued {
+                pos,
+                param_a,
+                param_b,
+                ..
+            } => Some(OracleBlockEventSample {
+                tick: event.tick.0,
+                pos,
+                param_a,
+                param_b,
+            }),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    let rust_block_events_executed = rust_events
+        .iter()
+        .filter_map(|event| match event.kind {
+            TraceKind::BlockEventExecuted {
+                pos,
+                param_a,
+                param_b,
+                ..
+            } => Some(OracleBlockEventSample {
+                tick: event.tick.0,
+                pos,
+                param_a,
+                param_b,
+            }),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
 
     let mut java_probes = Vec::new();
     let mut java_neighbors = Vec::new();
+    let mut java_scheduled_queued = Vec::new();
+    let mut java_scheduled_executed = Vec::new();
+    let mut java_block_events_queued = Vec::new();
+    let mut java_block_events_executed = Vec::new();
     for line in java_output
         .split(|byte| *byte == b'\n')
         .skip(1)
@@ -638,11 +730,47 @@ fn compare_oracle_samples_v2(rust_trace: &[u8], java_output: &[u8]) -> Result<()
                 serde_json::from_value::<OracleNeighborSample>(value)
                     .context("解析 Java oracle 邻居更新样本失败")?,
             ),
+            Some("scheduled_tick_queued") => java_scheduled_queued.push(
+                serde_json::from_value::<OracleScheduledTickQueuedSample>(value)
+                    .context("解析 Java oracle 计划刻入队样本失败")?,
+            ),
+            Some("scheduled_tick_executed") => java_scheduled_executed.push(
+                serde_json::from_value::<OracleScheduledTickExecutedSample>(value)
+                    .context("解析 Java oracle 计划刻执行样本失败")?,
+            ),
+            Some("block_event_queued") => java_block_events_queued.push(
+                serde_json::from_value::<OracleBlockEventSample>(value)
+                    .context("解析 Java oracle 方块事件入队样本失败")?,
+            ),
+            Some("block_event_executed") => java_block_events_executed.push(
+                serde_json::from_value::<OracleBlockEventSample>(value)
+                    .context("解析 Java oracle 方块事件执行样本失败")?,
+            ),
             other => bail!("Java oracle 返回未知样本类型: {other:?}"),
         }
     }
     compare_sample_vectors("探针", &rust_probes, &java_probes)?;
-    compare_sample_vectors("邻居更新", &rust_neighbors, &java_neighbors)
+    compare_sample_vectors("邻居更新", &rust_neighbors, &java_neighbors)?;
+    compare_sample_vectors(
+        "计划刻入队",
+        &rust_scheduled_queued,
+        &java_scheduled_queued,
+    )?;
+    compare_sample_vectors(
+        "计划刻执行",
+        &rust_scheduled_executed,
+        &java_scheduled_executed,
+    )?;
+    compare_sample_vectors(
+        "方块事件入队",
+        &rust_block_events_queued,
+        &java_block_events_queued,
+    )?;
+    compare_sample_vectors(
+        "方块事件执行",
+        &rust_block_events_executed,
+        &java_block_events_executed,
+    )
 }
 
 fn compare_sample_vectors<T>(kind: &str, rust: &[T], java: &[T]) -> Result<()>
@@ -657,11 +785,15 @@ where
         .zip(java)
         .position(|(rust, java)| rust != java)
         .unwrap_or(rust.len().min(java.len()));
+    let rust_end = difference.saturating_add(8).min(rust.len());
+    let java_end = difference.saturating_add(8).min(java.len());
     bail!(
-        "Rust 与 Java oracle {kind}不一致, 样本 {}, Rust={:?}, Java={:?}",
+        "Rust 与 Java oracle {kind}不一致, 样本 {}, Rust={:?}, Java={:?}, Rust 后续={:?}, Java 后续={:?}",
         difference + 1,
         rust.get(difference),
-        java.get(difference)
+        java.get(difference),
+        &rust[difference..rust_end],
+        &java[difference..java_end]
     )
 }
 
@@ -800,5 +932,27 @@ mod tests {
 "#;
         assert!(is_probe_sample_oracle(java).unwrap());
         compare_probe_samples(rust, java).unwrap();
+    }
+
+    #[test]
+    fn oracle_samples_v2_compares_probes_and_neighbor_order() {
+        let rust = br#"{"tick":1,"micro_step":1,"phase":"pre_tick","event":"neighbor_update","pos":{"x":-1,"y":0,"z":0},"source_pos":{"x":0,"y":0,"z":0},"source_block":1,"moved_by_piston":false,"orientation":null}
+{"tick":1,"micro_step":2,"phase":"pre_tick","event":"scheduled_tick_queued","pos":{"x":0,"y":0,"z":0},"block":1,"trigger_tick":9,"priority":0,"sub_tick_order":0}
+{"tick":1,"micro_step":3,"phase":"pre_tick","event":"block_event_queued","pos":{"x":1,"y":0,"z":0},"block":2,"param_a":0,"param_b":5}
+{"tick":1,"micro_step":4,"phase":"block_events","event":"block_event_executed","pos":{"x":1,"y":0,"z":0},"block":2,"param_a":0,"param_b":5}
+{"tick":9,"micro_step":1,"phase":"scheduled_ticks","event":"scheduled_tick_executed","pos":{"x":0,"y":0,"z":0},"block":1}
+{"tick":9,"micro_step":2,"phase":"post_tick","event":"probe_sample","sample":{"name":"power","probe":{"type":"property","pos":{"x":0,"y":0,"z":0},"property":"power"},"value":"0"}}
+"#;
+        let java = br#"{"format":"oracle_samples_v2"}
+{"tick":9,"probe":"power","value":"0","kind":"probe"}
+{"kind":"neighbor_update","tick":1,"pos":{"x":-1,"y":0,"z":0}}
+{"kind":"scheduled_tick_queued","tick":1,"pos":{"x":0,"y":0,"z":0},"trigger_tick":9,"priority":0,"sub_tick_order":0}
+{"kind":"scheduled_tick_executed","tick":9,"pos":{"x":0,"y":0,"z":0}}
+{"kind":"block_event_queued","tick":1,"pos":{"x":1,"y":0,"z":0},"block":"minecraft:piston","param_a":0,"param_b":5}
+{"kind":"block_event_executed","tick":1,"pos":{"x":1,"y":0,"z":0},"block":"minecraft:piston","param_a":0,"param_b":5}
+"#;
+
+        assert!(is_oracle_samples_v2(java).unwrap());
+        compare_oracle_samples_v2(rust, java).unwrap();
     }
 }

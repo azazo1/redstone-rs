@@ -13,7 +13,6 @@ import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import net.minecraft.core.BlockPos;
 import org.tomlj.Toml;
 import org.tomlj.TomlArray;
 import org.tomlj.TomlParseResult;
@@ -28,7 +27,7 @@ final class Scenario {
     final String mode;
     final long seed;
     final int maxTicks;
-    final boolean oracleNeighborTrace;
+    final boolean oracleMicroTrace;
     final Source source;
     final List<Action> actions;
     final List<Probe> probes;
@@ -38,7 +37,7 @@ final class Scenario {
         String mode,
         long seed,
         int maxTicks,
-        boolean oracleNeighborTrace,
+        boolean oracleMicroTrace,
         Source source,
         List<Action> actions,
         List<Probe> probes
@@ -47,7 +46,7 @@ final class Scenario {
         this.mode = mode;
         this.seed = seed;
         this.maxTicks = maxTicks;
-        this.oracleNeighborTrace = oracleNeighborTrace;
+        this.oracleMicroTrace = oracleMicroTrace;
         this.source = source;
         this.actions = actions;
         this.probes = probes;
@@ -69,7 +68,7 @@ final class Scenario {
         }
         long seed = optionalLong(document, "seed", 0L);
         int maxTicks = Math.toIntExact(optionalLong(document, "max_ticks", 100L));
-        boolean oracleNeighborTrace = optionalBoolean(document, "oracle_neighbor_trace", false);
+        boolean oracleMicroTrace = optionalBoolean(document, "oracle_micro_trace", false);
         if (maxTicks <= 0) {
             throw new IllegalArgumentException("max_ticks 必须大于 0");
         }
@@ -244,7 +243,7 @@ final class Scenario {
             mode,
             seed,
             maxTicks,
-            oracleNeighborTrace,
+            oracleMicroTrace,
             source,
             List.copyOf(actions),
             List.copyOf(probes)
@@ -452,13 +451,6 @@ final class Scenario {
             };
         }
 
-        Pos fromFrame(BlockPos relative, FrameGeometry frame) {
-            return new Pos(
-                Math.addExact(origin.x(), Math.subtractExact(relative.getX(), frame.offset().x())),
-                Math.addExact(origin.y(), Math.subtractExact(relative.getY(), frame.offset().y())),
-                Math.addExact(origin.z(), Math.subtractExact(relative.getZ(), frame.offset().z()))
-            );
-        }
     }
 
     record Action(

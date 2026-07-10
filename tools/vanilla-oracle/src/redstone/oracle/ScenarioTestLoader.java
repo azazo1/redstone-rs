@@ -31,10 +31,12 @@ final class ScenarioTestLoader extends TestFunctionLoader {
         }
         Scenario scenario = Scenario.load(Path.of(scenarioPath));
         scenario.validateSupported();
+        FrameGeometry frame = FrameGeometry.fromEnvironment();
+        OracleHooks.configureTestStart(scenario, frame);
         return new ScenarioTestLoader(
             scenario,
             Path.of(outputPath).toAbsolutePath().normalize(),
-            FrameGeometry.fromEnvironment()
+            frame
         );
     }
 

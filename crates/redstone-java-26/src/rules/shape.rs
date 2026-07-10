@@ -40,10 +40,15 @@ impl Java26Rules {
         if repaired == state_id {
             return Ok(state_id);
         }
-        if notify {
+        if notify && family != ShapeFamily::Wire {
             self.set_state_and_notify(ctx, pos, repaired, "shape_update", None)?;
         } else {
-            ctx.set_block(pos, repaired, "shape_initialize")?;
+            let cause = if notify {
+                "shape_update"
+            } else {
+                "shape_initialize"
+            };
+            ctx.set_block(pos, repaired, cause)?;
         }
         Ok(repaired)
     }

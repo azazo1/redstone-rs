@@ -142,6 +142,7 @@ download-oracle-deps:
     download tomlj-1.1.1.jar https://repo1.maven.org/maven2/org/tomlj/tomlj/1.1.1/tomlj-1.1.1.jar
     download antlr4-runtime-4.11.1.jar https://repo1.maven.org/maven2/org/antlr/antlr4-runtime/4.11.1/antlr4-runtime-4.11.1.jar
     download checker-qual-3.21.2.jar https://repo1.maven.org/maven2/org/checkerframework/checker-qual/3.21.2/checker-qual-3.21.2.jar
+    download asm-9.8.jar https://repo1.maven.org/maven2/org/ow2/asm/asm/9.8/asm-9.8.jar
 
 # 构建 Java 26.1.2 oracle JAR.
 oracle-build: download-runtime download-oracle-deps

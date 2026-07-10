@@ -69,9 +69,16 @@ public final class Main {
             Files.deleteIfExists(output);
 
             String java = Path.of(System.getProperty("java.home"), "bin", "java").toString();
+            Path agent = Path.of(
+                Main.class.getProtectionDomain().getCodeSource().getLocation().toURI()
+            );
+            if (!Files.isRegularFile(agent)) {
+                throw new IllegalStateException("Java oracle agent 必须从 JAR 运行: " + agent);
+            }
             ProcessBuilder processBuilder = new ProcessBuilder(
                 java,
                 "-Xmx4g",
+                "-javaagent:" + agent,
                 "-cp",
                 System.getProperty("java.class.path"),
                 Main.class.getName(),

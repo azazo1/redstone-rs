@@ -10,10 +10,11 @@ oracle scenario.toml output.jsonl
 
 探针必须加载 Java `26.1.2`, 按场景声明执行 GameTest 或 ASM 注入, 并将结果写入第二个参数.
 
-当前支持两种输出:
+当前支持三种输出:
 
 - 完整轨迹 JSONL, 字段和排序与 `redstone-core::TraceEvent` 一致.
 - 首行为 `{"format":"probe_samples_v1"}` 的探针样本 JSONL, 后续行为 `tick`, `probe`, `value`. CLI 会提取 Rust 的 `post_tick` 探针并比较.
+- 首行为 `{"format":"oracle_samples_v2"}` 的组合样本 JSONL. `kind = "probe"` 记录逐 tick 探针, `kind = "neighbor_update"` 记录真实邻居执行顺序, `kind = "scheduled_tick_queued"` 和 `kind = "scheduled_tick_executed"` 记录计划方块刻入队及执行.
 
 先构建并校验本地 oracle 环境:
 
@@ -45,5 +46,6 @@ cargo run -p redstone-cli -- test scenarios --oracle
 - `signal`, `block_state`, `property`, `container_count`.
 - `entity_count`, `entity_field`, `entity_container_count`.
 - 原版注册实体及 `generic_collision` 测试别名, 物品实体和容器矿车字段适配.
+- 测试专用 `oracle_micro_trace = true`, 固定 GameTest 绝对原点并启用邻居更新及计划方块刻 ASM 采样.
 
-不在上述范围内的场景会被明确拒绝. ASM 微时序轨迹采集仍在实现中.
+不在上述范围内的场景会被明确拒绝. 方块事件, 状态写入和形状更新的完整 ASM 微时序轨迹仍在实现中.

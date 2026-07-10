@@ -9,6 +9,7 @@ source="$root/tools/vanilla-oracle/src"
 build="$root/tools/vanilla-oracle/build"
 classes="$build/classes"
 output="$build/vanilla-oracle.jar"
+manifest="$root/tools/vanilla-oracle/MANIFEST.MF"
 
 if [ ! -f "$client" ]; then
   echo "缺少 Minecraft client JAR: $client" >&2
@@ -37,5 +38,5 @@ fi
 
 echo "编译 Java oracle: $total 个源文件"
 javac --release 25 -encoding UTF-8 -cp "$classpath" -d "$classes" @"$sources"
-jar --create --file "$output" --main-class redstone.oracle.Main -C "$classes" .
+jar --create --file "$output" --manifest "$manifest" -C "$classes" .
 echo "Java oracle 已构建: $output"

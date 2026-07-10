@@ -94,6 +94,35 @@ async fn redstone_block_powers_a_wire_in_both_modes() {
 }
 
 #[tokio::test]
+async fn default_wire_does_not_power_itself_through_a_conductor() {
+    let mut registry = Java26Registry::new();
+    let source = state(&mut registry, "minecraft:redstone_block", &[]);
+    let stone = state(&mut registry, "minecraft:stone", &[]);
+    let powered_wire = wire(&mut registry, 15);
+    let mut world = SparseWorld::new(registry.air_state());
+    world.set_block(BlockPos::ZERO, source).unwrap();
+    world.set_block(BlockPos::new(1, -1, 0), stone).unwrap();
+    world.set_block(BlockPos::new(1, 0, 0), powered_wire).unwrap();
+    let rules = Java26Rules::new(registry);
+    let mut simulation = Simulation::load(rules, world, SimulationConfig::default())
+        .await
+        .unwrap();
+
+    simulation
+        .step_with_actions(&[Action::BreakBlock {
+            pos: BlockPos::ZERO,
+        }])
+        .await
+        .unwrap();
+
+    let wire_id = simulation.world().get_block(BlockPos::new(1, 0, 0));
+    assert_eq!(
+        simulation.rules().registry().state(wire_id).unwrap().property("power"),
+        Some("0")
+    );
+}
+
+#[tokio::test]
 async fn repeater_waits_for_its_configured_delay_and_outputs_forward() {
     let mut registry = Java26Registry::new();
     let source = state(&mut registry, "minecraft:redstone_block", &[]);

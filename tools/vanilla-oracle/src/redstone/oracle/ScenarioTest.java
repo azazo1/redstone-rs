@@ -43,7 +43,7 @@ final class ScenarioTest {
     private final FrameGeometry frame;
     private final ScenarioEntityStore entities;
     private BufferedWriter writer;
-    private NeighborTraceRecorder neighborTrace;
+    private OracleTraceRecorder microTrace;
     private int actionIndex;
 
     ScenarioTest(Scenario scenario, Path output, FrameGeometry frame) {
@@ -68,7 +68,7 @@ final class ScenarioTest {
                 StandardOpenOption.WRITE
             );
             writer.write(
-                scenario.oracleNeighborTrace
+                scenario.oracleMicroTrace
                     ? "{\"format\":\"oracle_samples_v2\"}"
                     : "{\"format\":\"probe_samples_v1\"}"
             );
@@ -100,6 +100,15 @@ final class ScenarioTest {
                     + actualExperimental
             );
         }
+        if (scenario.oracleMicroTrace) {
+            BlockPos actualOrigin = helper.absolutePos(blockPos(frame.offset()));
+            BlockPos expectedOrigin = blockPos(scenario.source.origin());
+            if (!actualOrigin.equals(expectedOrigin)) {
+                throw new IllegalStateException(
+                    "场景绝对原点不匹配: expected " + expectedOrigin + ", actual " + actualOrigin
+                );
+            }
+        }
         var template = helper.getLevel()
             .getStructureManager()
             .get(Identifier.parse("redstone:scenario"))
@@ -119,9 +128,9 @@ final class ScenarioTest {
         int tick = Math.toIntExact(helper.getTick());
         try {
             if (tick == 0) {
-                if (scenario.oracleNeighborTrace) {
-                    neighborTrace = new NeighborTraceRecorder(scenario, frame, helper);
-                    neighborTrace.setTick(0);
+                if (scenario.oracleMicroTrace) {
+                    microTrace = new OracleTraceRecorder(scenario, frame, helper);
+                    microTrace.setTick(0);
                 }
                 initialize(helper);
             }
@@ -131,8 +140,8 @@ final class ScenarioTest {
                 }
             }
             int nextTick = tick + 1;
-            if (neighborTrace != null) {
-                neighborTrace.setTick(nextTick);
+            if (microTrace != null) {
+                microTrace.setTick(nextTick);
             }
             if (actionIndex < actions.size() && actions.get(actionIndex).tick() == nextTick) {
                 withNextGameTime(helper, () -> {
@@ -142,8 +151,8 @@ final class ScenarioTest {
                     }
                 });
             }
-            if (neighborTrace != null) {
-                neighborTrace.writePending(writer);
+            if (microTrace != null) {
+                microTrace.writePending(writer);
             }
             writer.flush();
             if (tick >= scenario.maxTicks) {
@@ -244,7 +253,7 @@ final class ScenarioTest {
         sample.addProperty("tick", tick);
         sample.addProperty("probe", probe.name());
         sample.add("value", readProbe(helper, probe));
-        if (scenario.oracleNeighborTrace) {
+        if (scenario.oracleMicroTrace) {
             sample.addProperty("kind", "probe");
         }
         writer.write(sample.toString());
@@ -347,10 +356,10 @@ final class ScenarioTest {
     }
 
     private void closeNeighborTrace() {
-        if (neighborTrace == null) {
+        if (microTrace == null) {
             return;
         }
-        neighborTrace.close();
-        neighborTrace = null;
+        microTrace.close();
+        microTrace = null;
     }
 }

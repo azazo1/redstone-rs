@@ -56,6 +56,66 @@ fn real_java_oracle_matches_neighbor_update_order() {
     );
 }
 
+#[test]
+#[ignore = "需要先执行 just oracle-build"]
+fn real_java_oracle_matches_nested_neighbor_update_order() {
+    assert_oracle_matches(
+        "oracle-nested-neighbors",
+        powered_wire_structure(),
+        nested_neighbor_scenario(),
+    );
+}
+
+#[test]
+#[ignore = "需要先执行 just oracle-build"]
+fn real_java_oracle_matches_coordinate_sensitive_wire_order() {
+    assert_oracle_matches(
+        "oracle-coordinate-hash",
+        powered_wire_structure(),
+        coordinate_sensitive_wire_scenario(),
+    );
+}
+
+#[test]
+#[ignore = "需要先执行 just oracle-build"]
+fn real_java_oracle_matches_default_wire_power_off_order() {
+    assert_oracle_matches(
+        "oracle-wire-off",
+        lit_wire_structure(),
+        wire_power_off_scenario(),
+    );
+}
+
+#[test]
+#[ignore = "需要先执行 just oracle-build"]
+fn real_java_oracle_matches_default_wire_chain_order() {
+    assert_oracle_matches(
+        "oracle-wire-chain",
+        wire_chain_structure(),
+        wire_chain_scenario(),
+    );
+}
+
+#[test]
+#[ignore = "需要先执行 just oracle-build"]
+fn real_java_oracle_matches_scheduled_tick_priority_and_order() {
+    assert_oracle_matches(
+        "oracle-scheduled-order",
+        scheduler_structure(),
+        scheduler_scenario(),
+    );
+}
+
+#[test]
+#[ignore = "需要先执行 just oracle-build"]
+fn real_java_oracle_matches_piston_block_event_order() {
+    assert_oracle_matches(
+        "oracle-piston-event",
+        piston_event_structure(),
+        piston_event_scenario(),
+    );
+}
+
 fn assert_oracle_matches(name: &str, structure: Vec<u8>, scenario: &str) {
     let directory = TestDirectory::new(name);
     let structure_path = directory.path().join("machine.nbt");
@@ -113,10 +173,18 @@ fn structure(size_x: i32, block_x: i32) -> Vec<u8> {
 }
 
 fn powered_wire_structure() -> Vec<u8> {
+    wire_structure("0")
+}
+
+fn lit_wire_structure() -> Vec<u8> {
+    wire_structure("15")
+}
+
+fn wire_structure(power: &str) -> Vec<u8> {
     let properties = HashMap::from([
         ("east".to_owned(), Value::String("none".to_owned())),
         ("north".to_owned(), Value::String("none".to_owned())),
-        ("power".to_owned(), Value::String("0".to_owned())),
+        ("power".to_owned(), Value::String(power.to_owned())),
         ("south".to_owned(), Value::String("none".to_owned())),
         ("west".to_owned(), Value::String("none".to_owned())),
     ]);
@@ -160,6 +228,51 @@ fn powered_wire_structure() -> Vec<u8> {
     fastnbt::to_bytes(&root).unwrap()
 }
 
+fn wire_chain_structure() -> Vec<u8> {
+    let properties = HashMap::from([
+        ("east".to_owned(), Value::String("side".to_owned())),
+        ("north".to_owned(), Value::String("none".to_owned())),
+        ("power".to_owned(), Value::String("0".to_owned())),
+        ("south".to_owned(), Value::String("none".to_owned())),
+        ("west".to_owned(), Value::String("side".to_owned())),
+    ]);
+    let root = HashMap::from([
+        ("DataVersion".to_owned(), Value::Int(4790)),
+        (
+            "size".to_owned(),
+            Value::List(vec![Value::Int(3), Value::Int(2), Value::Int(1)]),
+        ),
+        (
+            "palette".to_owned(),
+            Value::List(vec![
+                Value::Compound(HashMap::from([(
+                    "Name".to_owned(),
+                    Value::String("minecraft:stone".to_owned()),
+                )])),
+                Value::Compound(HashMap::from([
+                    (
+                        "Name".to_owned(),
+                        Value::String("minecraft:redstone_wire".to_owned()),
+                    ),
+                    ("Properties".to_owned(), Value::Compound(properties)),
+                ])),
+            ]),
+        ),
+        (
+            "blocks".to_owned(),
+            Value::List(vec![
+                structure_block(0, 0, 0, 0),
+                structure_block(1, 0, 0, 0),
+                structure_block(2, 0, 0, 0),
+                structure_block(1, 1, 0, 1),
+                structure_block(2, 1, 0, 1),
+            ]),
+        ),
+        ("entities".to_owned(), Value::List(Vec::new())),
+    ]);
+    fastnbt::to_bytes(&root).unwrap()
+}
+
 fn target_structure() -> Vec<u8> {
     let root = HashMap::from([
         ("DataVersion".to_owned(), Value::Int(4790)),
@@ -186,6 +299,114 @@ fn target_structure() -> Vec<u8> {
         (
             "blocks".to_owned(),
             Value::List(vec![structure_block(0, 0, 0, 0)]),
+        ),
+        ("entities".to_owned(), Value::List(Vec::new())),
+    ]);
+    fastnbt::to_bytes(&root).unwrap()
+}
+
+fn scheduler_structure() -> Vec<u8> {
+    let repeater_properties = HashMap::from([
+        ("delay".to_owned(), Value::String("1".to_owned())),
+        ("facing".to_owned(), Value::String("west".to_owned())),
+        ("locked".to_owned(), Value::String("false".to_owned())),
+        ("powered".to_owned(), Value::String("false".to_owned())),
+    ]);
+    let target_properties = HashMap::from([(
+        "power".to_owned(),
+        Value::String("0".to_owned()),
+    )]);
+    let root = HashMap::from([
+        ("DataVersion".to_owned(), Value::Int(4790)),
+        (
+            "size".to_owned(),
+            Value::List(vec![Value::Int(4), Value::Int(2), Value::Int(1)]),
+        ),
+        (
+            "palette".to_owned(),
+            Value::List(vec![
+                Value::Compound(HashMap::from([(
+                    "Name".to_owned(),
+                    Value::String("minecraft:stone".to_owned()),
+                )])),
+                Value::Compound(HashMap::from([
+                    (
+                        "Name".to_owned(),
+                        Value::String("minecraft:repeater".to_owned()),
+                    ),
+                    (
+                        "Properties".to_owned(),
+                        Value::Compound(repeater_properties),
+                    ),
+                ])),
+                Value::Compound(HashMap::from([
+                    (
+                        "Name".to_owned(),
+                        Value::String("minecraft:target".to_owned()),
+                    ),
+                    (
+                        "Properties".to_owned(),
+                        Value::Compound(target_properties),
+                    ),
+                ])),
+            ]),
+        ),
+        (
+            "blocks".to_owned(),
+            Value::List(vec![
+                structure_block(0, 0, 0, 0),
+                structure_block(1, 0, 0, 0),
+                structure_block(2, 0, 0, 0),
+                structure_block(3, 0, 0, 0),
+                structure_block(1, 1, 0, 1),
+                structure_block(3, 1, 0, 2),
+            ]),
+        ),
+        ("entities".to_owned(), Value::List(Vec::new())),
+    ]);
+    fastnbt::to_bytes(&root).unwrap()
+}
+
+fn piston_event_structure() -> Vec<u8> {
+    let piston_properties = HashMap::from([
+        ("extended".to_owned(), Value::String("false".to_owned())),
+        ("facing".to_owned(), Value::String("east".to_owned())),
+    ]);
+    let root = HashMap::from([
+        ("DataVersion".to_owned(), Value::Int(4790)),
+        (
+            "size".to_owned(),
+            Value::List(vec![Value::Int(4), Value::Int(2), Value::Int(1)]),
+        ),
+        (
+            "palette".to_owned(),
+            Value::List(vec![
+                Value::Compound(HashMap::from([(
+                    "Name".to_owned(),
+                    Value::String("minecraft:stone".to_owned()),
+                )])),
+                Value::Compound(HashMap::from([
+                    (
+                        "Name".to_owned(),
+                        Value::String("minecraft:piston".to_owned()),
+                    ),
+                    (
+                        "Properties".to_owned(),
+                        Value::Compound(piston_properties),
+                    ),
+                ])),
+            ]),
+        ),
+        (
+            "blocks".to_owned(),
+            Value::List(vec![
+                structure_block(0, 0, 0, 0),
+                structure_block(1, 0, 0, 0),
+                structure_block(2, 0, 0, 0),
+                structure_block(3, 0, 0, 0),
+                structure_block(1, 1, 0, 1),
+                structure_block(2, 1, 0, 0),
+            ]),
         ),
         ("entities".to_owned(), Value::List(Vec::new())),
     ]);
@@ -295,6 +516,7 @@ mode = "default"
 seed = 0
 max_ticks = 9
 strict = true
+oracle_micro_trace = true
 
 [source]
 path = "machine.nbt"
@@ -442,7 +664,7 @@ mode = "default"
 seed = 0
 max_ticks = 1
 strict = true
-oracle_neighbor_trace = true
+oracle_micro_trace = true
 
 [source]
 path = "machine.nbt"
@@ -457,6 +679,187 @@ pos = { x = 0, y = 0, z = 0 }
 name = "state"
 type = "block_state"
 pos = { x = 0, y = 0, z = 0 }
+"#
+}
+
+fn nested_neighbor_scenario() -> &'static str {
+    r#"version = "26.1.2"
+mode = "default"
+seed = 0
+max_ticks = 1
+strict = true
+oracle_micro_trace = true
+
+[source]
+path = "machine.nbt"
+initialization = "raw"
+
+[[actions]]
+tick = 1
+type = "set_block"
+pos = { x = 2, y = 1, z = 0 }
+name = "minecraft:redstone_block"
+
+[[probes]]
+name = "wire_power"
+type = "property"
+pos = { x = 1, y = 1, z = 0 }
+property = "power"
+"#
+}
+
+fn coordinate_sensitive_wire_scenario() -> &'static str {
+    r#"version = "26.1.2"
+mode = "default"
+seed = 0
+max_ticks = 1
+strict = true
+oracle_micro_trace = true
+
+[source]
+path = "machine.nbt"
+origin = { x = 1000, y = 10, z = -2000 }
+initialization = "raw"
+
+[[actions]]
+tick = 1
+type = "set_block"
+pos = { x = 1002, y = 11, z = -2000 }
+name = "minecraft:redstone_block"
+
+[[probes]]
+name = "wire_power"
+type = "property"
+pos = { x = 1001, y = 11, z = -2000 }
+property = "power"
+"#
+}
+
+fn wire_power_off_scenario() -> &'static str {
+    r#"version = "26.1.2"
+mode = "default"
+seed = 0
+max_ticks = 1
+strict = true
+oracle_micro_trace = true
+
+[source]
+path = "machine.nbt"
+initialization = "raw"
+
+[[actions]]
+tick = 1
+type = "break_block"
+pos = { x = 0, y = 1, z = 0 }
+
+[[probes]]
+name = "wire_power"
+type = "property"
+pos = { x = 1, y = 1, z = 0 }
+property = "power"
+"#
+}
+
+fn wire_chain_scenario() -> &'static str {
+    r#"version = "26.1.2"
+mode = "default"
+seed = 0
+max_ticks = 1
+strict = true
+oracle_micro_trace = true
+
+[source]
+path = "machine.nbt"
+initialization = "raw"
+
+[[actions]]
+tick = 1
+type = "set_block"
+pos = { x = 0, y = 1, z = 0 }
+name = "minecraft:redstone_block"
+
+[[probes]]
+name = "near_power"
+type = "property"
+pos = { x = 1, y = 1, z = 0 }
+property = "power"
+
+[[probes]]
+name = "far_power"
+type = "property"
+pos = { x = 2, y = 1, z = 0 }
+property = "power"
+"#
+}
+
+fn scheduler_scenario() -> &'static str {
+    r#"version = "26.1.2"
+mode = "default"
+seed = 0
+max_ticks = 9
+strict = true
+oracle_micro_trace = true
+
+[source]
+path = "machine.nbt"
+initialization = "raw"
+
+[[actions]]
+tick = 1
+type = "set_block"
+pos = { x = 0, y = 1, z = 0 }
+name = "minecraft:redstone_block"
+
+[[actions]]
+tick = 1
+type = "hit_target"
+pos = { x = 3, y = 1, z = 0 }
+face = "north"
+location = [3.9, 1.5, 0.0]
+arrow = false
+
+[[probes]]
+name = "repeater_powered"
+type = "property"
+pos = { x = 1, y = 1, z = 0 }
+property = "powered"
+
+[[probes]]
+name = "target_power"
+type = "property"
+pos = { x = 3, y = 1, z = 0 }
+property = "power"
+"#
+}
+
+fn piston_event_scenario() -> &'static str {
+    r#"version = "26.1.2"
+mode = "default"
+seed = 0
+max_ticks = 2
+strict = true
+oracle_micro_trace = true
+
+[source]
+path = "machine.nbt"
+initialization = "raw"
+
+[[actions]]
+tick = 1
+type = "set_block"
+pos = { x = 0, y = 1, z = 0 }
+name = "minecraft:redstone_block"
+
+[[probes]]
+name = "piston_extended"
+type = "property"
+pos = { x = 1, y = 1, z = 0 }
+property = "extended"
+
+[[probes]]
+name = "moved_block"
+type = "block_state"
+pos = { x = 3, y = 1, z = 0 }
 "#
 }
 

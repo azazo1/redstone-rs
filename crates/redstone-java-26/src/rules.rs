@@ -117,6 +117,52 @@ impl Java26Rules {
         Ok(true)
     }
 
+    fn update_diode_output_neighbors(
+        &mut self,
+        ctx: &mut EventContext<'_>,
+        pos: BlockPos,
+        state: &StateDefinition,
+    ) {
+        let facing = state.direction_property("facing").unwrap_or(Direction::North);
+        let output_direction = facing.opposite();
+        let output_pos = pos.relative(output_direction);
+        let orientation = match ctx.mode {
+            RedstoneMode::Default => None,
+            RedstoneMode::Experimental => Some(
+                Orientation::from_index(ctx.random_bounded(48) as u8)
+                    .with_side_bias(SideBias::Left)
+                    .with_up(Direction::Up)
+                    .with_front(output_direction)
+                    .index(),
+            ),
+        };
+        ctx.neighbor_changed(NeighborUpdate {
+            pos: output_pos,
+            source_pos: pos,
+            source_block: state.kind,
+            orientation,
+            moved_by_piston: false,
+        });
+        ctx.update_neighbors(output_pos, state.kind, Some(facing), orientation);
+    }
+
+    fn set_diode_state(
+        &mut self,
+        ctx: &mut EventContext<'_>,
+        pos: BlockPos,
+        state: BlockStateId,
+        cause: &str,
+    ) -> Result<bool, RulesError> {
+        let old = ctx.set_block(pos, state, cause)?;
+        if old == state {
+            return Ok(false);
+        }
+        self.sync_entity_sensor(pos, old, state);
+        let definition = self.state(state)?.clone();
+        self.update_diode_output_neighbors(ctx, pos, &definition);
+        Ok(true)
+    }
+
     fn set_state_and_notify_piston(
         &mut self,
         ctx: &mut EventContext<'_>,
@@ -337,6 +383,42 @@ impl Java26Rules {
         }
     }
 
+    fn signal_without_wire_feedback(
+        &self,
+        world: &SparseWorld,
+        pos: BlockPos,
+        direction: Direction,
+    ) -> u8 {
+        let state_id = world.get_block(pos);
+        let Ok(state) = self.state(state_id) else {
+            return 0;
+        };
+        let own_signal = if matches!(state.behavior, BlockBehavior::Wire) {
+            0
+        } else {
+            self.weak_signal(world, pos, state, direction)
+        };
+        if !state.redstone_conductor {
+            return own_signal;
+        }
+        Direction::UPDATE_ORDER
+            .into_iter()
+            .map(|neighbor_direction| {
+                let neighbor_pos = pos.relative(neighbor_direction);
+                let Ok(neighbor) = self.state(world.get_block(neighbor_pos)) else {
+                    return 0;
+                };
+                if matches!(neighbor.behavior, BlockBehavior::Wire) {
+                    0
+                } else {
+                    self.direct_signal(world, neighbor_pos, neighbor_direction)
+                }
+            })
+            .max()
+            .unwrap_or(0)
+            .max(own_signal)
+    }
+
     fn wire_target_power(&self, world: &SparseWorld, pos: BlockPos) -> u8 {
         let mut block_power = 0u8;
         let mut wire_power = 0u8;
@@ -354,7 +436,7 @@ impl Java26Rules {
                         .clamp(0, 15) as u8,
                 );
             } else {
-                block_power = block_power.max(self.signal(
+                block_power = block_power.max(self.signal_without_wire_feedback(
                     world,
                     neighbor,
                     direction,
@@ -394,27 +476,21 @@ impl Java26Rules {
     ) -> Result<(), RulesError> {
         match ctx.mode {
             RedstoneMode::Default => {
-                let mut queue = VecDeque::from([initial_pos]);
-                let mut queued = BTreeSet::from([initial_pos]);
-                while let Some(pos) = queue.pop_front() {
-                    queued.remove(&pos);
-                    let state_id = ctx.world.get_block(pos);
-                    let state = self.state(state_id)?.clone();
-                    if !matches!(state.behavior, BlockBehavior::Wire) {
-                        continue;
-                    }
-                    let old_power = state.int_property("power").unwrap_or(0).clamp(0, 15) as u8;
-                    let new_power = self.wire_target_power(ctx.world, pos);
-                    if old_power == new_power {
-                        continue;
-                    }
-                    let new_state = self.changed_state(state_id, "power", new_power.to_string())?;
-                    self.set_state_and_notify(ctx, pos, new_state, "default_wire", None)?;
-                    for candidate in wire_neighbors(ctx.world, pos, &self.registry) {
-                        if queued.insert(candidate) {
-                            queue.push_back(candidate);
-                        }
-                    }
+                let state_id = ctx.world.get_block(initial_pos);
+                let state = self.state(state_id)?.clone();
+                if !matches!(state.behavior, BlockBehavior::Wire) {
+                    return Ok(());
+                }
+                let old_power = state.int_property("power").unwrap_or(0).clamp(0, 15) as u8;
+                let new_power = self.wire_target_power(ctx.world, initial_pos);
+                if old_power == new_power {
+                    return Ok(());
+                }
+                let new_state = self.changed_state(state_id, "power", new_power.to_string())?;
+                let old_state = ctx.set_block(initial_pos, new_state, "default_wire")?;
+                self.sync_entity_sensor(initial_pos, old_state, new_state);
+                for candidate in default_wire_update_positions(initial_pos) {
+                    ctx.update_neighbors(candidate, state.kind, None, None);
                 }
             }
             RedstoneMode::Experimental => {
@@ -988,22 +1064,42 @@ impl BlockRules for Java26Rules {
             }
             BlockBehavior::Repeater => {
                 if !self.repeater_locked(ctx.world, tick.pos, &state) {
-                    let powered = self.diode_input(ctx.world, tick.pos, &state) > 0;
-                    if powered != state.bool_property("powered") {
-                        let next = self.changed_state(state_id, "powered", powered.to_string())?;
-                        self.set_state_and_notify(ctx, tick.pos, next, "repeater_tick", None)?;
+                    let should_power = self.diode_input(ctx.world, tick.pos, &state) > 0;
+                    if state.bool_property("powered") && !should_power {
+                        let next = self.changed_state(state_id, "powered", "false")?;
+                        self.set_diode_state(ctx, tick.pos, next, "repeater_tick")?;
+                    } else if !state.bool_property("powered") {
+                        let next = self.changed_state(state_id, "powered", "true")?;
+                        self.set_diode_state(ctx, tick.pos, next, "repeater_tick")?;
+                        if !should_power {
+                            let delay = state
+                                .int_property("delay")
+                                .unwrap_or(1)
+                                .clamp(1, 4) as u64
+                                * 2;
+                            ctx.schedule_tick(
+                                tick.pos,
+                                state.kind,
+                                delay,
+                                TickPriority::VeryHigh,
+                            );
+                        }
                     }
                 }
             }
             BlockBehavior::Comparator => {
                 let output = self.comparator_output(ctx.world, tick.pos, &state);
+                let old_output = self.comparator_outputs.get(&tick.pos).copied().unwrap_or(0);
                 self.comparator_outputs.insert(tick.pos, output);
-                let powered = output > 0;
-                let mut next = state_id;
-                if powered != state.bool_property("powered") {
-                    next = self.changed_state(state_id, "powered", powered.to_string())?;
+                if old_output != output || state.property("mode") == Some("compare") {
+                    let powered = output > 0;
+                    if powered != state.bool_property("powered") {
+                        let next =
+                            self.changed_state(state_id, "powered", powered.to_string())?;
+                        self.set_diode_state(ctx, tick.pos, next, "comparator_tick")?;
+                    }
+                    self.update_diode_output_neighbors(ctx, tick.pos, &state);
                 }
-                self.set_state_and_notify(ctx, tick.pos, next, "comparator_tick", None)?;
             }
             BlockBehavior::Observer => {
                 let powered = !state.bool_property("powered");
@@ -1663,39 +1759,31 @@ fn torch_input_direction(state: &StateDefinition) -> Direction {
     }
 }
 
-fn wire_neighbors(
-    world: &SparseWorld,
-    pos: BlockPos,
-    registry: &Java26Registry,
-) -> Vec<BlockPos> {
-    let mut result = Vec::new();
-    for direction in Direction::UPDATE_ORDER {
-        let candidate = pos.relative(direction);
-        if registry
-            .state(world.get_block(candidate))
-            .is_some_and(|state| matches!(state.behavior, BlockBehavior::Wire))
-        {
-            result.push(candidate);
-        }
-    }
-    for direction in Direction::HORIZONTAL {
-        let side = pos.relative(direction);
-        let candidate = if registry
-            .state(world.get_block(side))
-            .is_some_and(|state| state.redstone_conductor)
-        {
-            side.relative(Direction::Up)
-        } else {
-            side.relative(Direction::Down)
-        };
-        if registry
-            .state(world.get_block(candidate))
-            .is_some_and(|state| matches!(state.behavior, BlockBehavior::Wire))
-        {
-            result.push(candidate);
-        }
-    }
-    result
+fn default_wire_update_positions(pos: BlockPos) -> Vec<BlockPos> {
+    const JAVA_DIRECTION_VALUES: [Direction; 6] = [
+        Direction::Down,
+        Direction::Up,
+        Direction::North,
+        Direction::South,
+        Direction::West,
+        Direction::East,
+    ];
+    let mut positions = Vec::with_capacity(7);
+    positions.push(pos);
+    positions.extend(JAVA_DIRECTION_VALUES.map(|direction| pos.relative(direction)));
+    positions.sort_by_key(|candidate| java_hash_map_bucket(*candidate));
+    positions
+}
+
+fn java_hash_map_bucket(pos: BlockPos) -> u32 {
+    let hash = pos
+        .z
+        .wrapping_mul(31)
+        .wrapping_add(pos.y)
+        .wrapping_mul(31)
+        .wrapping_add(pos.x);
+    let spread = hash ^ ((hash as u32 >> 16) as i32);
+    spread as u32 & 15
 }
 
 fn oriented_wire_neighbors(
@@ -1778,5 +1866,28 @@ fn direction_name(direction: Direction) -> &'static str {
         Direction::Up => "up",
         Direction::North => "north",
         Direction::South => "south",
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn default_wire_positions_follow_java_hash_set_bucket_order() {
+        let pos = BlockPos::new(1, 1, 0);
+
+        assert_eq!(
+            default_wire_update_positions(pos),
+            [
+                pos,
+                pos.relative(Direction::North),
+                pos.relative(Direction::Down),
+                pos.relative(Direction::South),
+                pos.relative(Direction::East),
+                pos.relative(Direction::Up),
+                pos.relative(Direction::West),
+            ]
+        );
     }
 }
