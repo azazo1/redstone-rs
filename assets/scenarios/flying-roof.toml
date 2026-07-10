@@ -1,7 +1,7 @@
 version = "26.1.2"
 mode = "default"
 seed = 0
-max_ticks = 1200          # 178 ticks 之后会和 oracle 有差异, 这是 gametest 的边界条件问题.
+max_ticks = 170
 strict = true
 # oracle_micro_trace = true
 

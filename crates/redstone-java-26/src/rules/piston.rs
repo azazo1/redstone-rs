@@ -166,6 +166,7 @@ impl Java26Rules {
                 "piston_extend",
                 state.kind,
             );
+            self.queue_observer_shape_updates(ctx, pos);
         } else {
             if self.is_quasi_powered(ctx.world, pos, facing) {
                 return Ok(false);
@@ -423,6 +424,7 @@ impl Java26Rules {
                 });
             }
         }
+        self.queue_observer_shape_updates(ctx, pos);
         let mut pulled = false;
         if sticky && event == 2 {
             let source = head_pos.relative(facing);

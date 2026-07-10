@@ -403,6 +403,99 @@ async fn moved_observer_schedules_an_air_update_after_settling() {
 }
 
 #[tokio::test]
+async fn observer_detects_piston_base_extension() {
+    let mut registry = Java26Registry::new();
+    let piston = state(
+        &mut registry,
+        "minecraft:piston",
+        &[("extended", "false"), ("facing", "east")],
+    );
+    let observer = state(
+        &mut registry,
+        "minecraft:observer",
+        &[("facing", "south"), ("powered", "false")],
+    );
+    let source = state(&mut registry, "minecraft:redstone_block", &[]);
+    let observer_pos = BlockPos::new(0, 0, -1);
+    let mut world = SparseWorld::new(registry.air_state());
+    world.set_block(BlockPos::ZERO, piston).unwrap();
+    world.set_block(observer_pos, observer).unwrap();
+    let rules = Java26Rules::new(registry);
+    let mut simulation = Simulation::load(rules, world, SimulationConfig::default())
+        .await
+        .unwrap();
+    simulation.initialize().await.unwrap();
+
+    simulation
+        .step_with_actions(&[Action::SetBlock {
+            pos: BlockPos::new(-1, 0, 0),
+            state: source,
+        }])
+        .await
+        .unwrap();
+
+    assert!(simulation.trace().events().iter().any(|event| {
+        matches!(
+            event.kind,
+            TraceKind::ScheduledTickQueued {
+                pos,
+                trigger_tick,
+                ..
+            } if pos == observer_pos && trigger_tick == redstone_core::GameTick(3)
+        )
+    }));
+}
+
+#[tokio::test]
+async fn observer_detects_piston_base_retraction() {
+    let mut registry = Java26Registry::new();
+    let piston = state(
+        &mut registry,
+        "minecraft:piston",
+        &[("extended", "true"), ("facing", "east")],
+    );
+    let piston_head = state(
+        &mut registry,
+        "minecraft:piston_head",
+        &[("facing", "east"), ("short", "false"), ("type", "normal")],
+    );
+    let observer = state(
+        &mut registry,
+        "minecraft:observer",
+        &[("facing", "south"), ("powered", "false")],
+    );
+    let source = state(&mut registry, "minecraft:redstone_block", &[]);
+    let observer_pos = BlockPos::new(0, 0, -1);
+    let source_pos = BlockPos::new(-1, 0, 0);
+    let mut world = SparseWorld::new(registry.air_state());
+    world.set_block(BlockPos::ZERO, piston).unwrap();
+    world.set_block(BlockPos::new(1, 0, 0), piston_head).unwrap();
+    world.set_block(observer_pos, observer).unwrap();
+    world.set_block(source_pos, source).unwrap();
+    let rules = Java26Rules::new(registry);
+    let mut simulation = Simulation::load(rules, world, SimulationConfig::default())
+        .await
+        .unwrap();
+    simulation.initialize().await.unwrap();
+
+    simulation
+        .step_with_actions(&[Action::BreakBlock { pos: source_pos }])
+        .await
+        .unwrap();
+
+    assert!(simulation.trace().events().iter().any(|event| {
+        matches!(
+            event.kind,
+            TraceKind::ScheduledTickQueued {
+                pos,
+                trigger_tick,
+                ..
+            } if pos == observer_pos && trigger_tick == redstone_core::GameTick(3)
+        )
+    }));
+}
+
+#[tokio::test]
 async fn powered_observer_resets_when_placed() {
     let mut registry = Java26Registry::new();
     let observer = state(
