@@ -198,3 +198,50 @@ async fn hopper_minecart_absorbs_one_item_per_entity_tick() {
     assert_eq!(second.probes[0].value, ProbeValue::Integer(2));
     assert!(simulation.world().entity(EntityId(2)).is_none());
 }
+
+#[tokio::test]
+async fn item_pickup_delay_stops_at_zero_and_preserves_never_pickup() {
+    let registry = Java26Registry::new();
+    let mut world = SparseWorld::new(registry.air_state());
+    world
+        .spawn_entity_with_id(
+            EntityId(1),
+            EntityData {
+                kind: "minecraft:item".to_owned(),
+                position: [0.5, 0.0, 0.5],
+                fields: BTreeMap::from([
+                    ("pickup_delay".to_owned(), serde_json::Value::from(0)),
+                    ("age".to_owned(), serde_json::Value::from(0)),
+                ]),
+            },
+        )
+        .unwrap();
+    world
+        .spawn_entity_with_id(
+            EntityId(2),
+            EntityData {
+                kind: "minecraft:item".to_owned(),
+                position: [2.5, 0.0, 0.5],
+                fields: BTreeMap::from([
+                    ("pickup_delay".to_owned(), serde_json::Value::from(32_767)),
+                    ("age".to_owned(), serde_json::Value::from(0)),
+                ]),
+            },
+        )
+        .unwrap();
+    let rules = Java26Rules::new(registry);
+    let mut simulation = Simulation::load(rules, world, SimulationConfig::default())
+        .await
+        .unwrap();
+
+    simulation.step().await.unwrap();
+
+    assert_eq!(
+        simulation.world().entity(EntityId(1)).unwrap().fields["pickup_delay"],
+        0
+    );
+    assert_eq!(
+        simulation.world().entity(EntityId(2)).unwrap().fields["pickup_delay"],
+        32_767
+    );
+}

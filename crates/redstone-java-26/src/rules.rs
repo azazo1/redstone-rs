@@ -1242,8 +1242,12 @@ impl Java26Rules {
                     let pickup_delay = fields
                         .get("pickup_delay")
                         .and_then(serde_json::Value::as_i64)
-                        .unwrap_or(0)
-                        .saturating_sub(1);
+                        .unwrap_or(0);
+                    let pickup_delay = if pickup_delay > 0 && pickup_delay != 32_767 {
+                        pickup_delay.saturating_sub(1)
+                    } else {
+                        pickup_delay
+                    };
                     fields.insert("age".to_owned(), serde_json::Value::from(age));
                     fields.insert(
                         "pickup_delay".to_owned(),

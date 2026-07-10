@@ -1,12 +1,19 @@
 package redstone.oracle;
 
+import com.google.gson.JsonArray;
+import com.google.gson.JsonElement;
+import com.google.gson.JsonNull;
+import com.google.gson.JsonObject;
+import com.google.gson.JsonPrimitive;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import net.minecraft.core.BlockPos;
 import org.tomlj.Toml;
 import org.tomlj.TomlArray;
 import org.tomlj.TomlParseResult;
@@ -21,6 +28,7 @@ final class Scenario {
     final String mode;
     final long seed;
     final int maxTicks;
+    final boolean oracleNeighborTrace;
     final Source source;
     final List<Action> actions;
     final List<Probe> probes;
@@ -30,6 +38,7 @@ final class Scenario {
         String mode,
         long seed,
         int maxTicks,
+        boolean oracleNeighborTrace,
         Source source,
         List<Action> actions,
         List<Probe> probes
@@ -38,6 +47,7 @@ final class Scenario {
         this.mode = mode;
         this.seed = seed;
         this.maxTicks = maxTicks;
+        this.oracleNeighborTrace = oracleNeighborTrace;
         this.source = source;
         this.actions = actions;
         this.probes = probes;
@@ -59,6 +69,7 @@ final class Scenario {
         }
         long seed = optionalLong(document, "seed", 0L);
         int maxTicks = Math.toIntExact(optionalLong(document, "max_ticks", 100L));
+        boolean oracleNeighborTrace = optionalBoolean(document, "oracle_neighbor_trace", false);
         if (maxTicks <= 0) {
             throw new IllegalArgumentException("max_ticks 必须大于 0");
         }
@@ -87,24 +98,49 @@ final class Scenario {
                     throw new IllegalArgumentException("actions[" + index + "].tick 必须大于 0");
                 }
                 String type = requiredString(action, "type");
-                Pos pos = requiredPos(action, "pos");
+                Pos pos = null;
                 String blockName = null;
                 Map<String, String> properties = Map.of();
                 String face = null;
                 double[] location = null;
                 boolean arrow = false;
-                if (type.equals("set_block")) {
-                    blockName = requiredString(action, "name");
-                    properties = stringMap(action.getTable("properties"));
-                } else if (type.equals("hit_target")) {
-                    face = requiredString(action, "face");
-                    location = requiredDoubleArray(action, "location");
-                    arrow = optionalBoolean(action, "arrow", false);
-                } else if (!type.equals("break_block")
-                    && !type.equals("use_block")
-                    && !type.equals("press_button")
-                    && !type.equals("pull_lever")) {
-                    throw new IllegalArgumentException("Java oracle 尚不支持动作: " + type);
+                Long entityId = null;
+                String entityKind = null;
+                double[] position = null;
+                Map<String, JsonElement> fields = Map.of();
+                String field = null;
+                JsonElement value = JsonNull.INSTANCE;
+                switch (type) {
+                    case "set_block" -> {
+                        pos = requiredPos(action, "pos");
+                        blockName = requiredString(action, "name");
+                        properties = stringMap(action.getTable("properties"));
+                    }
+                    case "break_block", "use_block", "press_button", "pull_lever" ->
+                        pos = requiredPos(action, "pos");
+                    case "spawn_entity" -> {
+                        entityId = optionalEntityId(action, "id");
+                        entityKind = requiredString(action, "kind");
+                        position = requiredDoubleArray(action, "position");
+                        fields = jsonMap(action.getTable("fields"));
+                    }
+                    case "move_entity" -> {
+                        entityId = requiredEntityId(action, "id");
+                        position = requiredDoubleArray(action, "position");
+                    }
+                    case "remove_entity" -> entityId = requiredEntityId(action, "id");
+                    case "set_entity_field" -> {
+                        entityId = requiredEntityId(action, "id");
+                        field = requiredString(action, "field");
+                        value = requiredJsonValue(action, "value");
+                    }
+                    case "hit_target" -> {
+                        pos = requiredPos(action, "pos");
+                        face = requiredString(action, "face");
+                        location = requiredDoubleArray(action, "location");
+                        arrow = optionalBoolean(action, "arrow", false);
+                    }
+                    default -> throw new IllegalArgumentException("Java oracle 尚不支持动作: " + type);
                 }
                 actions.add(new Action(
                     tick,
@@ -115,7 +151,13 @@ final class Scenario {
                     properties,
                     face,
                     location,
-                    arrow
+                    arrow,
+                    entityId,
+                    entityKind,
+                    position,
+                    fields,
+                    field,
+                    value
                 ));
             }
         }
@@ -126,19 +168,71 @@ final class Scenario {
             for (int index = 0; index < probeArray.size(); index++) {
                 TomlTable probe = probeArray.getTable(index);
                 String type = requiredString(probe, "type");
-                if (!type.equals("signal")
-                    && !type.equals("block_state")
-                    && !type.equals("property")
-                    && !type.equals("container_count")) {
-                    throw new IllegalArgumentException("Java oracle 尚不支持探针: " + type);
-                }
-                probes.add(new Probe(
-                    requiredString(probe, "name"),
-                    type,
-                    requiredPos(probe, "pos"),
-                    optionalString(probe, "direction", null),
-                    optionalString(probe, "property", null)
-                ));
+                String name = requiredString(probe, "name");
+                Probe parsed = switch (type) {
+                    case "signal" -> new Probe(
+                        name,
+                        type,
+                        requiredPos(probe, "pos"),
+                        optionalString(probe, "direction", null),
+                        null,
+                        null,
+                        null,
+                        null
+                    );
+                    case "block_state", "container_count" -> new Probe(
+                        name,
+                        type,
+                        requiredPos(probe, "pos"),
+                        null,
+                        null,
+                        null,
+                        null,
+                        null
+                    );
+                    case "property" -> new Probe(
+                        name,
+                        type,
+                        requiredPos(probe, "pos"),
+                        null,
+                        requiredString(probe, "property"),
+                        null,
+                        null,
+                        null
+                    );
+                    case "entity_count" -> new Probe(
+                        name,
+                        type,
+                        null,
+                        null,
+                        null,
+                        null,
+                        optionalString(probe, "kind", null),
+                        null
+                    );
+                    case "entity_field" -> new Probe(
+                        name,
+                        type,
+                        null,
+                        null,
+                        null,
+                        requiredEntityId(probe, "id"),
+                        null,
+                        requiredString(probe, "field")
+                    );
+                    case "entity_container_count" -> new Probe(
+                        name,
+                        type,
+                        null,
+                        null,
+                        null,
+                        requiredEntityId(probe, "id"),
+                        null,
+                        null
+                    );
+                    default -> throw new IllegalArgumentException("Java oracle 尚不支持探针: " + type);
+                };
+                probes.add(parsed);
             }
         }
         actions.sort((left, right) -> {
@@ -150,6 +244,7 @@ final class Scenario {
             mode,
             seed,
             maxTicks,
+            oracleNeighborTrace,
             source,
             List.copyOf(actions),
             List.copyOf(probes)
@@ -210,6 +305,22 @@ final class Scenario {
         return value == null ? defaultValue : value;
     }
 
+    private static Long optionalEntityId(TomlTable table, String key) {
+        Long value = table.getLong(key);
+        if (value != null && value < 0L) {
+            throw new IllegalArgumentException("实体 id 不能是负数: " + value);
+        }
+        return value;
+    }
+
+    private static long requiredEntityId(TomlTable table, String key) {
+        long value = requiredLong(table, key);
+        if (value < 0L) {
+            throw new IllegalArgumentException("实体 id 不能是负数: " + value);
+        }
+        return value;
+    }
+
     private static boolean optionalBoolean(TomlTable table, String key, boolean defaultValue) {
         Boolean value = table.getBoolean(key);
         return value == null ? defaultValue : value;
@@ -256,7 +367,53 @@ final class Scenario {
             }
             values.put(key, text);
         }
-        return Map.copyOf(values);
+        return Collections.unmodifiableMap(values);
+    }
+
+    private static Map<String, JsonElement> jsonMap(TomlTable table) {
+        if (table == null) {
+            return Map.of();
+        }
+        Map<String, JsonElement> values = new LinkedHashMap<>();
+        for (String key : table.keySet().stream().sorted().toList()) {
+            values.put(key, jsonValue(table.get(key), key));
+        }
+        return Collections.unmodifiableMap(values);
+    }
+
+    private static JsonElement requiredJsonValue(TomlTable table, String key) {
+        Object value = table.get(key);
+        if (value == null) {
+            throw new IllegalArgumentException("缺少字段: " + key);
+        }
+        return jsonValue(value, key);
+    }
+
+    private static JsonElement jsonValue(Object value, String path) {
+        if (value instanceof String text) {
+            return new JsonPrimitive(text);
+        }
+        if (value instanceof Boolean flag) {
+            return new JsonPrimitive(flag);
+        }
+        if (value instanceof Number number) {
+            return new JsonPrimitive(number);
+        }
+        if (value instanceof TomlArray array) {
+            JsonArray result = new JsonArray(array.size());
+            for (int index = 0; index < array.size(); index++) {
+                result.add(jsonValue(array.get(index), path + "[" + index + "]"));
+            }
+            return result;
+        }
+        if (value instanceof TomlTable table) {
+            JsonObject result = new JsonObject();
+            for (String key : table.keySet().stream().sorted().toList()) {
+                result.add(key, jsonValue(table.get(key), path + "." + key));
+            }
+            return result;
+        }
+        throw new IllegalArgumentException("不支持的 TOML 字段类型: " + path);
     }
 
     record Source(Path path, Pos origin, String initialization, String rotation, String mirror) {
@@ -294,6 +451,14 @@ final class Scenario {
                 frame.offset().z() + absolute[2] - origin.z()
             };
         }
+
+        Pos fromFrame(BlockPos relative, FrameGeometry frame) {
+            return new Pos(
+                Math.addExact(origin.x(), Math.subtractExact(relative.getX(), frame.offset().x())),
+                Math.addExact(origin.y(), Math.subtractExact(relative.getY(), frame.offset().y())),
+                Math.addExact(origin.z(), Math.subtractExact(relative.getZ(), frame.offset().z()))
+            );
+        }
     }
 
     record Action(
@@ -305,11 +470,26 @@ final class Scenario {
         Map<String, String> properties,
         String face,
         double[] location,
-        boolean arrow
+        boolean arrow,
+        Long entityId,
+        String entityKind,
+        double[] position,
+        Map<String, JsonElement> fields,
+        String field,
+        JsonElement value
     ) {
     }
 
-    record Probe(String name, String type, Pos pos, String direction, String property) {
+    record Probe(
+        String name,
+        String type,
+        Pos pos,
+        String direction,
+        String property,
+        Long entityId,
+        String entityKind,
+        String field
+    ) {
     }
 
     record Pos(int x, int y, int z) {

@@ -499,7 +499,9 @@ fn compare_with_oracle(scenario: &Path, rust_trace: &Path) -> Result<()> {
         }
         let rust = std::fs::read(rust_trace)?;
         let java = std::fs::read(&oracle_trace)?;
-        if is_probe_sample_oracle(&java)? {
+        if is_oracle_samples_v2(&java)? {
+            compare_oracle_samples_v2(&rust, &java)
+        } else if is_probe_sample_oracle(&java)? {
             compare_probe_samples(&rust, &java)
         } else if rust != java {
             let line = first_different_line(&rust, &java);
@@ -519,16 +521,33 @@ struct OracleProbeSample {
     value: serde_json::Value,
 }
 
+#[derive(Debug, serde::Deserialize, Eq, PartialEq)]
+struct OracleNeighborSample {
+    tick: u64,
+    pos: BlockPos,
+}
+
 fn is_probe_sample_oracle(output: &[u8]) -> Result<bool> {
+    oracle_format(output).map(|format| format.as_deref() == Some("probe_samples_v1"))
+}
+
+fn is_oracle_samples_v2(output: &[u8]) -> Result<bool> {
+    oracle_format(output).map(|format| format.as_deref() == Some("oracle_samples_v2"))
+}
+
+fn oracle_format(output: &[u8]) -> Result<Option<String>> {
     let Some(first_line) = output.split(|byte| *byte == b'\n').next() else {
-        return Ok(false);
+        return Ok(None);
     };
     if first_line.is_empty() {
-        return Ok(false);
+        return Ok(None);
     }
     let marker = serde_json::from_slice::<serde_json::Value>(first_line)
         .context("解析 Java oracle 格式标记失败")?;
-    Ok(marker.get("format").and_then(serde_json::Value::as_str) == Some("probe_samples_v1"))
+    Ok(marker
+        .get("format")
+        .and_then(serde_json::Value::as_str)
+        .map(str::to_owned))
 }
 
 fn compare_probe_samples(rust_trace: &[u8], java_output: &[u8]) -> Result<()> {
@@ -570,6 +589,79 @@ fn compare_probe_samples(rust_trace: &[u8], java_output: &[u8]) -> Result<()> {
         difference + 1,
         rust_samples.get(difference),
         java_samples.get(difference)
+    )
+}
+
+fn compare_oracle_samples_v2(rust_trace: &[u8], java_output: &[u8]) -> Result<()> {
+    let rust_events = rust_trace
+        .split(|byte| *byte == b'\n')
+        .filter(|line| !line.is_empty())
+        .map(|line| serde_json::from_slice::<TraceEvent>(line).context("解析 Rust 轨迹失败"))
+        .collect::<Result<Vec<_>>>()?;
+    let rust_probes = rust_events
+        .iter()
+        .filter_map(|event| match &event.kind {
+            TraceKind::ProbeSample { sample } => Some(OracleProbeSample {
+                tick: event.tick.0,
+                probe: sample.name.clone(),
+                value: probe_value_json(sample.value.clone()),
+            }),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    let rust_neighbors = rust_events
+        .iter()
+        .filter_map(|event| match event.kind {
+            TraceKind::NeighborUpdate { pos, .. } => Some(OracleNeighborSample {
+                tick: event.tick.0,
+                pos,
+            }),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+
+    let mut java_probes = Vec::new();
+    let mut java_neighbors = Vec::new();
+    for line in java_output
+        .split(|byte| *byte == b'\n')
+        .skip(1)
+        .filter(|line| !line.is_empty())
+    {
+        let value = serde_json::from_slice::<serde_json::Value>(line)
+            .context("解析 Java oracle 样本失败")?;
+        match value.get("kind").and_then(serde_json::Value::as_str) {
+            Some("probe") => java_probes.push(
+                serde_json::from_value::<OracleProbeSample>(value)
+                    .context("解析 Java oracle 探针样本失败")?,
+            ),
+            Some("neighbor_update") => java_neighbors.push(
+                serde_json::from_value::<OracleNeighborSample>(value)
+                    .context("解析 Java oracle 邻居更新样本失败")?,
+            ),
+            other => bail!("Java oracle 返回未知样本类型: {other:?}"),
+        }
+    }
+    compare_sample_vectors("探针", &rust_probes, &java_probes)?;
+    compare_sample_vectors("邻居更新", &rust_neighbors, &java_neighbors)
+}
+
+fn compare_sample_vectors<T>(kind: &str, rust: &[T], java: &[T]) -> Result<()>
+where
+    T: std::fmt::Debug + PartialEq,
+{
+    if rust == java {
+        return Ok(());
+    }
+    let difference = rust
+        .iter()
+        .zip(java)
+        .position(|(rust, java)| rust != java)
+        .unwrap_or(rust.len().min(java.len()));
+    bail!(
+        "Rust 与 Java oracle {kind}不一致, 样本 {}, Rust={:?}, Java={:?}",
+        difference + 1,
+        rust.get(difference),
+        java.get(difference)
     )
 }
 

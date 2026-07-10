@@ -41,6 +41,9 @@ cargo run -p redstone-cli -- test scenarios --oracle
 - `raw` 和 `notify` 初始化, 非零 `origin`, 旋转, 镜像和任意场景 seed.
 - 默认和实验性红石模式.
 - `set_block`, `break_block`, `use_block`, `press_button`, `pull_lever`, `hit_target`.
+- `spawn_entity`, `move_entity`, `remove_entity`, `set_entity_field`.
 - `signal`, `block_state`, `property`, `container_count`.
+- `entity_count`, `entity_field`, `entity_container_count`.
+- 原版注册实体及 `generic_collision` 测试别名, 物品实体和容器矿车字段适配.
 
-不在上述范围内的场景会被明确拒绝. ASM 微时序轨迹采集和实体场景差分仍在实现中.
+不在上述范围内的场景会被明确拒绝. ASM 微时序轨迹采集仍在实现中.

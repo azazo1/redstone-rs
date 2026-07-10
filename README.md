@@ -88,7 +88,7 @@ equals = 15
 
 `just oracle-build` 会下载测试专用 TOML 解析依赖并构建 Java `26.1.2` 探针 JAR. `just oracle-scenario-self-test` 会运行真实 structure, 动作和探针场景. `VANILLA_ORACLE_JAR` 可以覆盖默认 JAR. 发布的 Rust 库和 CLI 不需要 Java.
 
-当前 GameTest oracle 支持原版 structure NBT, `raw`/`notify` 初始化, 非零原点, 旋转/镜像, 任意场景 seed, 默认/实验性红石模式, 基础方块动作和方块类探针. ASM 微时序采集和实体场景差分仍待完成.
+当前 GameTest oracle 支持原版 structure NBT, `raw`/`notify` 初始化, 非零原点, 旋转/镜像, 任意场景 seed, 默认/实验性红石模式, 基础方块与实体动作, 方块与实体探针. ASM 微时序采集仍待完成.
 
 `redstone bench` 默认构建 100 万已放置方块和 1 万活跃元件, 运行 100 个空闲刻并输出 P50/P95/P99 与可获取的常驻内存.
 

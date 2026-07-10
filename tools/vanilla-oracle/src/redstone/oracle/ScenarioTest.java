@@ -41,7 +41,9 @@ final class ScenarioTest {
     private final Path output;
     private final List<Scenario.Action> actions;
     private final FrameGeometry frame;
+    private final ScenarioEntityStore entities;
     private BufferedWriter writer;
+    private NeighborTraceRecorder neighborTrace;
     private int actionIndex;
 
     ScenarioTest(Scenario scenario, Path output, FrameGeometry frame) {
@@ -49,6 +51,7 @@ final class ScenarioTest {
         this.output = output;
         this.actions = new ArrayList<>(scenario.actions);
         this.frame = frame;
+        this.entities = new ScenarioEntityStore(scenario, frame);
     }
 
     void run(GameTestHelper helper) {
@@ -64,7 +67,11 @@ final class ScenarioTest {
                 StandardOpenOption.TRUNCATE_EXISTING,
                 StandardOpenOption.WRITE
             );
-            writer.write("{\"format\":\"probe_samples_v1\"}");
+            writer.write(
+                scenario.oracleNeighborTrace
+                    ? "{\"format\":\"oracle_samples_v2\"}"
+                    : "{\"format\":\"probe_samples_v1\"}"
+            );
             writer.newLine();
             writer.flush();
             for (int tick = 0; tick <= scenario.maxTicks; tick++) {
@@ -112,6 +119,10 @@ final class ScenarioTest {
         int tick = Math.toIntExact(helper.getTick());
         try {
             if (tick == 0) {
+                if (scenario.oracleNeighborTrace) {
+                    neighborTrace = new NeighborTraceRecorder(scenario, frame, helper);
+                    neighborTrace.setTick(0);
+                }
                 initialize(helper);
             }
             if (tick > 0) {
@@ -120,6 +131,9 @@ final class ScenarioTest {
                 }
             }
             int nextTick = tick + 1;
+            if (neighborTrace != null) {
+                neighborTrace.setTick(nextTick);
+            }
             if (actionIndex < actions.size() && actions.get(actionIndex).tick() == nextTick) {
                 withNextGameTime(helper, () -> {
                     while (actionIndex < actions.size() && actions.get(actionIndex).tick() == nextTick) {
@@ -128,8 +142,12 @@ final class ScenarioTest {
                     }
                 });
             }
+            if (neighborTrace != null) {
+                neighborTrace.writePending(writer);
+            }
             writer.flush();
             if (tick >= scenario.maxTicks) {
+                closeNeighborTrace();
                 writer.close();
                 writer = null;
                 helper.succeed();
@@ -141,16 +159,24 @@ final class ScenarioTest {
     }
 
     private void applyAction(GameTestHelper helper, Scenario.Action action) {
-        BlockPos pos = blockPos(scenario.source.toFrame(action.pos(), frame));
         switch (action.type()) {
-            case "set_block" -> helper.setBlock(pos, resolveBlockState(helper, action));
-            case "break_block" -> helper.destroyBlock(pos);
-            case "use_block" -> helper.useBlock(pos);
-            case "press_button" -> helper.pressButton(pos);
-            case "pull_lever" -> helper.pullLever(pos);
-            case "hit_target" -> hitTarget(helper, pos, action);
+            case "set_block" -> helper.setBlock(actionPos(action), resolveBlockState(helper, action));
+            case "break_block" -> helper.destroyBlock(actionPos(action));
+            case "use_block" -> helper.useBlock(actionPos(action));
+            case "press_button" -> helper.pressButton(actionPos(action));
+            case "pull_lever" -> helper.pullLever(actionPos(action));
+            case "spawn_entity" -> entities.spawn(helper, action);
+            case "move_entity" -> entities.move(helper, action.entityId(), action.position());
+            case "remove_entity" -> entities.remove(action.entityId());
+            case "set_entity_field" ->
+                entities.setField(action.entityId(), action.field(), action.value());
+            case "hit_target" -> hitTarget(helper, actionPos(action), action);
             default -> throw new IllegalArgumentException("Java oracle 尚不支持动作: " + action.type());
         }
+    }
+
+    private BlockPos actionPos(Scenario.Action action) {
+        return blockPos(scenario.source.toFrame(action.pos(), frame));
     }
 
     private void hitTarget(GameTestHelper helper, BlockPos relativePos, Scenario.Action action) {
@@ -218,11 +244,23 @@ final class ScenarioTest {
         sample.addProperty("tick", tick);
         sample.addProperty("probe", probe.name());
         sample.add("value", readProbe(helper, probe));
+        if (scenario.oracleNeighborTrace) {
+            sample.addProperty("kind", "probe");
+        }
         writer.write(sample.toString());
         writer.newLine();
     }
 
     private JsonElement readProbe(GameTestHelper helper, Scenario.Probe probe) {
+        if (probe.type().equals("entity_count")) {
+            return new JsonPrimitive(entities.entityCount(helper, probe.entityKind()));
+        }
+        if (probe.type().equals("entity_field")) {
+            return entities.readField(probe.entityId(), probe.field());
+        }
+        if (probe.type().equals("entity_container_count")) {
+            return new JsonPrimitive(entities.containerCount(probe.entityId()));
+        }
         BlockPos relative = blockPos(scenario.source.toFrame(probe.pos(), frame));
         BlockPos absolute = helper.absolutePos(relative);
         BlockState state = helper.getBlockState(relative);
@@ -297,6 +335,7 @@ final class ScenarioTest {
     }
 
     private void closeOutput() {
+        closeNeighborTrace();
         if (writer == null) {
             return;
         }
@@ -305,5 +344,13 @@ final class ScenarioTest {
         } catch (IOException ignored) {
         }
         writer = null;
+    }
+
+    private void closeNeighborTrace() {
+        if (neighborTrace == null) {
+            return;
+        }
+        neighborTrace.close();
+        neighborTrace = null;
     }
 }

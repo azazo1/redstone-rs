@@ -40,6 +40,22 @@ fn real_java_oracle_matches_target_scheduled_release() {
     assert_oracle_matches("oracle-target", target_structure(), target_scenario());
 }
 
+#[test]
+#[ignore = "需要先执行 just oracle-build"]
+fn real_java_oracle_matches_entity_actions_and_probes() {
+    assert_oracle_matches("oracle-entities", structure(1, 0), entity_scenario());
+}
+
+#[test]
+#[ignore = "需要先执行 just oracle-build"]
+fn real_java_oracle_matches_neighbor_update_order() {
+    assert_oracle_matches(
+        "oracle-neighbor-order",
+        structure(1, 0),
+        neighbor_order_scenario(),
+    );
+}
+
 fn assert_oracle_matches(name: &str, structure: Vec<u8>, scenario: &str) {
     let directory = TestDirectory::new(name);
     let structure_path = directory.path().join("machine.nbt");
@@ -297,6 +313,150 @@ name = "power"
 type = "property"
 pos = { x = 0, y = 0, z = 0 }
 property = "power"
+"#
+}
+
+fn entity_scenario() -> &'static str {
+    r#"version = "26.1.2"
+mode = "default"
+seed = 11
+max_ticks = 4
+strict = true
+
+[source]
+path = "machine.nbt"
+initialization = "raw"
+
+[[actions]]
+tick = 1
+type = "spawn_entity"
+id = 10
+kind = "minecraft:marker"
+position = [0.5, 2.0, 0.5]
+fields = { label = "initial" }
+
+[[actions]]
+tick = 1
+type = "set_entity_field"
+id = 10
+field = "label"
+value = "updated"
+
+[[actions]]
+tick = 1
+type = "spawn_entity"
+id = 20
+kind = "minecraft:item"
+position = [4.5, 2.0, 0.5]
+fields = { item_id = "minecraft:stone", item_count = 2, age = 5, pickup_delay = 3, no_gravity = true }
+
+[[actions]]
+tick = 1
+type = "spawn_entity"
+id = 30
+kind = "minecraft:hopper_minecart"
+position = [8.5, 2.0, 0.5]
+fields = { enabled = true, no_gravity = true, inventory = [{ slot = 0, item_id = "minecraft:iron_ingot", count = 2 }, { slot = 4, item_id = "minecraft:gold_ingot", count = 1 }] }
+
+[[actions]]
+tick = 2
+type = "move_entity"
+id = 10
+position = [1.5, 2.0, 0.5]
+
+[[actions]]
+tick = 2
+type = "set_entity_field"
+id = 20
+field = "item_count"
+value = 4
+
+[[actions]]
+tick = 2
+type = "set_entity_field"
+id = 30
+field = "enabled"
+value = false
+
+[[actions]]
+tick = 3
+type = "remove_entity"
+id = 10
+
+[[probes]]
+name = "markers"
+type = "entity_count"
+kind = "minecraft:marker"
+
+[[probes]]
+name = "marker_label"
+type = "entity_field"
+id = 10
+field = "label"
+
+[[probes]]
+name = "items"
+type = "entity_count"
+kind = "minecraft:item"
+
+[[probes]]
+name = "item_id"
+type = "entity_field"
+id = 20
+field = "item_id"
+
+[[probes]]
+name = "item_count"
+type = "entity_field"
+id = 20
+field = "item_count"
+
+[[probes]]
+name = "item_age"
+type = "entity_field"
+id = 20
+field = "age"
+
+[[probes]]
+name = "pickup_delay"
+type = "entity_field"
+id = 20
+field = "pickup_delay"
+
+[[probes]]
+name = "minecart_count"
+type = "entity_container_count"
+id = 30
+
+[[probes]]
+name = "minecart_enabled"
+type = "entity_field"
+id = 30
+field = "enabled"
+"#
+}
+
+fn neighbor_order_scenario() -> &'static str {
+    r#"version = "26.1.2"
+mode = "default"
+seed = 0
+max_ticks = 1
+strict = true
+oracle_neighbor_trace = true
+
+[source]
+path = "machine.nbt"
+initialization = "raw"
+
+[[actions]]
+tick = 1
+type = "break_block"
+pos = { x = 0, y = 0, z = 0 }
+
+[[probes]]
+name = "state"
+type = "block_state"
+pos = { x = 0, y = 0, z = 0 }
 "#
 }
 
