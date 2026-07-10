@@ -173,6 +173,44 @@ async fn repeater_waits_for_its_configured_delay_and_outputs_forward() {
 }
 
 #[tokio::test]
+async fn a_side_signal_from_a_non_diode_does_not_lock_a_repeater() {
+    let mut registry = Java26Registry::new();
+    let source = state(&mut registry, "minecraft:redstone_block", &[]);
+    let repeater = state(
+        &mut registry,
+        "minecraft:repeater",
+        &[
+            ("facing", "east"),
+            ("delay", "1"),
+            ("locked", "false"),
+            ("powered", "false"),
+        ],
+    );
+    let mut world = SparseWorld::new(registry.air_state());
+    world.set_block(BlockPos::ZERO, repeater).unwrap();
+    world.set_block(BlockPos::new(1, 0, 0), source).unwrap();
+    world.set_block(BlockPos::new(0, 0, -1), source).unwrap();
+    let rules = Java26Rules::new(registry);
+    let mut simulation = Simulation::load(rules, world, SimulationConfig::default())
+        .await
+        .unwrap();
+
+    simulation.initialize().await.unwrap();
+    simulation.run_until(redstone_core::GameTick(2)).await.unwrap();
+
+    let state_id = simulation.world().get_block(BlockPos::ZERO);
+    assert_eq!(
+        simulation
+            .rules()
+            .registry()
+            .state(state_id)
+            .unwrap()
+            .property("powered"),
+        Some("true")
+    );
+}
+
+#[tokio::test]
 async fn comparator_reads_explicit_block_entity_output_from_a_lectern() {
     let mut registry = Java26Registry::new();
     let comparator = state(

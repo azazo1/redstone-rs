@@ -634,7 +634,17 @@ impl Java26Rules {
         pos: BlockPos,
         state: &StateDefinition,
     ) -> bool {
-        self.side_input(world, pos, state) > 0
+        let facing = state.direction_property("facing").unwrap_or(Direction::North);
+        [facing.clockwise(), facing.counter_clockwise()]
+            .into_iter()
+            .any(|direction| {
+                let source_pos = pos.relative(direction);
+                let Ok(source) = self.state(world.get_block(source_pos)) else {
+                    return false;
+                };
+                matches!(source.behavior, BlockBehavior::Repeater | BlockBehavior::Comparator)
+                    && self.signal(world, source_pos, direction) > 0
+            })
     }
 
     fn comparator_output(
