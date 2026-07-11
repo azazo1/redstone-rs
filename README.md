@@ -132,3 +132,4 @@ equals = 15
 - [cpu-8bit.litematic](assets/schematics/cpu-8bit.litematic): <https://www.planetminecraft.com/project/new-redstone-computer/>
 - [dvdprogram.schem](assets/schematics/dvdprogram.schem): <https://github.com/mattbatwings/BatPU-2>
 - [digital-clock.litematic](assets/schematics/digital-clock.litematic): <https://www.planetminecraft.com/project/digital-clock-v2/>
+- [head.litematic](assets/schematics/head.litematic): <https://www.planetminecraft.com/project/redstone-automaton-5932751/>
