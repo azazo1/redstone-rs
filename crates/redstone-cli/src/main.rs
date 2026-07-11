@@ -421,7 +421,7 @@ fn run(
     println!("ticks: {}", summary.ticks);
     println!("blocks: {}", summary.blocks);
     println!("trace_events: {}", summary.trace_events);
-    println!("tick_ms: {:.3}", summary.tick_elapsed.as_secs_f64() * 1_000.0);
+    println!("ticking_elapsed_ms: {:.3}", summary.tick_elapsed.as_secs_f64() * 1_000.0);
     println!(
         "ticks_per_second: {:.3}",
         summary.ticks as f64 / summary.tick_elapsed.as_secs_f64()
