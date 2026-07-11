@@ -204,14 +204,6 @@ Java 规则的 80 个测试再次全部通过. 普通 release 连续运行 10 �
 
 CPU+DVD 的完整 Java oracle 对比使用临时的 60 tick 场景运行, 共比较 7937630 条微轨迹事件, 结果通过. 这覆盖了当前 CPU 活动阶段的 wire, repeater, comparator 和 neighbor 顺序, 证明最大值早停和任务栈复用没有改变 oracle 可见行为.
 
-## 世界转换并行化
-
-Anvil region 的文件定位, ZIP entry 读取和世界状态合并必须保持顺序. Region 读取器现在每批最多缓冲 32 个 chunk, 顺序取得压缩数据后使用 Rayon 并行解压, 再按原 chunk 顺序解析和合并. 该边界限制了额外内存, 同时保持 palette 注册, 方块实体和实体顺序确定.
-
-Litematic, Sponge 和包含空气的 vanilla writer 会预分配完整状态数组, 再按 16384 个方块一组并行读取 `SparseWorld`. 状态描述增加 `BlockStateId -> palette index` 缓存, 同一状态不再为每个方块重复解析. Palette index 和方块遍历顺序保持确定, NBT 编码, 压缩和原子文件替换仍保持顺序. 现有 HashMap NBT 序列化不承诺跨进程字节完全相同, 因此验证以重新加载后的 region, 方块状态, 方块实体和实体语义为准. 省略空气的 vanilla writer 继续按稀疏方块顺序编码, 避免为大范围空气建立稠密数组.
-
-release 模式使用 8 个可用处理器进行对比. CPU 世界全 region inspect 在 `RAYON_NUM_THREADS=1` 下为 5.57 s, 默认线程池为 5.19 s. 小范围 26 chunk 转换约为 0.19-0.20 s, 并行启动成本与收益接近. 15 MB `cpu-8bit.nbt` 转换约为 6.57-6.85 s, 该案例主要受输入 NBT 解析, 顺序世界构建和压缩限制, 不能从并行状态扫描获得明显收益.
-
 ### 最终验证
 
 当前 release 同时通过 tracing 的 `release_max_level_info` 移除 debug 和 trace 级别 callsite, 因此热路径中的 `debug!` 不进入 release 二进制执行路径.

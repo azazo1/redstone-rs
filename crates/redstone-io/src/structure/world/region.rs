@@ -2,13 +2,11 @@ use std::io::{Cursor, Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
 
 use flate2::read::{GzDecoder, ZlibDecoder};
-use rayon::prelude::*;
 
 use super::source::WorldSource;
 
 const HEADER_BYTES: usize = 8192;
 const SECTOR_BYTES: u64 = 4096;
-const PARALLEL_CHUNK_BATCH: usize = 32;
 
 #[derive(Clone, Debug)]
 pub(super) struct RegionPath {
@@ -70,70 +68,53 @@ pub(super) fn read_chunks(
         chunks.push((sector, sectors, chunk_x, chunk_z));
     }
     let count = chunks.len();
-    for batch in chunks.chunks(PARALLEL_CHUNK_BATCH) {
-        let mut compressed_chunks = Vec::new();
-        compressed_chunks
-            .try_reserve_exact(batch.len())
+    for (sector, sectors, chunk_x, chunk_z) in chunks {
+        let offset = u64::from(sector) * SECTOR_BYTES;
+        file.seek(SeekFrom::Start(offset))
             .map_err(|error| error.to_string())?;
-        for &(sector, sectors, chunk_x, chunk_z) in batch {
-            let offset = u64::from(sector) * SECTOR_BYTES;
-            file.seek(SeekFrom::Start(offset))
-                .map_err(|error| error.to_string())?;
-            let mut chunk_header = [0u8; 5];
-            file.read_exact(&mut chunk_header).map_err(|error| {
-                format!("chunk header 截断 ({chunk_x},{chunk_z}): {error}")
-            })?;
-            let length = u32::from_be_bytes(chunk_header[..4].try_into().unwrap()) as usize;
-            if length == 0 {
-                return Err(format!("chunk ({chunk_x},{chunk_z}) 长度为 0"));
+        let mut chunk_header = [0u8; 5];
+        file.read_exact(&mut chunk_header).map_err(|error| {
+            format!("chunk header 截断 ({chunk_x},{chunk_z}): {error}")
+        })?;
+        let length = u32::from_be_bytes(chunk_header[..4].try_into().unwrap()) as usize;
+        if length == 0 {
+            return Err(format!("chunk ({chunk_x},{chunk_z}) 长度为 0"));
+        }
+        let version = chunk_header[4];
+        let external = version & 0x80 != 0;
+        let compression = version & 0x7f;
+        let compressed = if external {
+            if length != 1 {
+                return Err(format!(
+                    "外部 chunk ({chunk_x},{chunk_z}) 内部长度必须为 1"
+                ));
             }
-            let version = chunk_header[4];
-            let external = version & 0x80 != 0;
-            let compression = version & 0x7f;
-            let compressed = if external {
-                if length != 1 {
-                    return Err(format!(
-                        "外部 chunk ({chunk_x},{chunk_z}) 内部长度必须为 1"
-                    ));
-                }
-                let path = region
-                    .path
-                    .parent()
-                    .unwrap_or_else(|| Path::new("."))
-                    .join(format!("c.{chunk_x}.{chunk_z}.mcc"));
-                source.read(&path)?
-            } else {
-                let compressed_length = length - 1;
-                let maximum = sectors
-                    .checked_mul(SECTOR_BYTES)
-                    .and_then(|value| value.checked_sub(5))
-                    .ok_or_else(|| "chunk sector 长度溢出".to_owned())?;
-                if compressed_length as u64 > maximum {
-                    return Err(format!(
-                        "chunk ({chunk_x},{chunk_z}) 声明长度超过分配 sector"
-                    ));
-                }
-                let mut bytes = vec![0u8; compressed_length];
-                file.read_exact(&mut bytes).map_err(|error| {
-                    format!("chunk 数据截断 ({chunk_x},{chunk_z}): {error}")
-                })?;
-                bytes
-            };
-            compressed_chunks.push((chunk_x, chunk_z, compression, compressed));
-        }
-        let decoded_chunks = compressed_chunks
-            .into_par_iter()
-            .map(|(chunk_x, chunk_z, compression, compressed)| {
-                decompress(compression, compressed)
-                    .map(|decoded| (chunk_x, chunk_z, decoded))
-                    .map_err(|error| {
-                        format!("解压 chunk ({chunk_x},{chunk_z}) 失败: {error}")
-                    })
-            })
-            .collect::<Result<Vec<_>, _>>()?;
-        for (chunk_x, chunk_z, decoded) in decoded_chunks {
-            consume(chunk_x, chunk_z, decoded)?;
-        }
+            let path = region
+                .path
+                .parent()
+                .unwrap_or_else(|| Path::new("."))
+                .join(format!("c.{chunk_x}.{chunk_z}.mcc"));
+            source.read(&path)?
+        } else {
+            let compressed_length = length - 1;
+            let maximum = sectors
+                .checked_mul(SECTOR_BYTES)
+                .and_then(|value| value.checked_sub(5))
+                .ok_or_else(|| "chunk sector 长度溢出".to_owned())?;
+            if compressed_length as u64 > maximum {
+                return Err(format!(
+                    "chunk ({chunk_x},{chunk_z}) 声明长度超过分配 sector"
+                ));
+            }
+            let mut bytes = vec![0u8; compressed_length];
+            file.read_exact(&mut bytes).map_err(|error| {
+                format!("chunk 数据截断 ({chunk_x},{chunk_z}): {error}")
+            })?;
+            bytes
+        };
+        let decoded = decompress(compression, compressed)
+            .map_err(|error| format!("解压 chunk ({chunk_x},{chunk_z}) 失败: {error}"))?;
+        consume(chunk_x, chunk_z, decoded)?;
     }
     Ok(count)
 }

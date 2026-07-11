@@ -9,7 +9,6 @@ authors.workspace = true
 fastnbt.workspace = true
 flate2.workspace = true
 lz4-java-wrc = "0.2.0"
-rayon.workspace = true
 zip.workspace = true
 redstone-core = { path = "../redstone-core" }
 serde.workspace = true
