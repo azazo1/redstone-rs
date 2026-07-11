@@ -17,7 +17,7 @@ if [ ! -f "$client" ]; then
 fi
 if [ ! -d "$libraries" ]; then
   echo "缺少 Minecraft 运行库: $libraries" >&2
-  echo "先运行 just download-runtime 26.1.2" >&2
+  echo "先运行 just download-runtime" >&2
   exit 2
 fi
 if [ ! -d "$oracle_libraries" ]; then

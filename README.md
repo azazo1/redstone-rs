@@ -35,10 +35,13 @@
 ## 构建和测试
 
 ```shell
+just generate-reports
 just build
 just clippy
 just test
 ```
+
+> 注: 如果 build 失败, 请删除 `assets/libraries` 文件夹之后重新执行 `just generate-reports && just build`.
 
 也可以直接运行 Cargo 命令:
 

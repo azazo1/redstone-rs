@@ -1,8 +1,16 @@
-VINEFLOWER := "tools/vineflower-1.12.0.jar"
-CLIENT_JAR := "assets/client-26.1.2.jar"
-OUT_DIR := "decompiled/client-26.1.2"
-RUNTIME_DIR := "assets/libraries/26.1.2"
-REPORT_DIR := "crates/redstone-java-26/data/26.1.2"
+MINECRAFT_VERSION := "26.1.2"
+MINECRAFT_VERSION_URL := "https://piston-meta.mojang.com/v1/packages/b0004e16ba0789e3e8ef109a2f3808ca200b3c31/26.1.2.json"
+VINEFLOWER_VERSION := "1.12.0"
+TOMLJ_VERSION := "1.1.1"
+ANTLR_VERSION := "4.11.1"
+CHECKER_QUAL_VERSION := "3.21.2"
+ASM_VERSION := "9.8"
+
+VINEFLOWER := "tools/vineflower-" + VINEFLOWER_VERSION + ".jar"
+CLIENT_JAR := "assets/client-" + MINECRAFT_VERSION + ".jar"
+OUT_DIR := "decompiled/client-" + MINECRAFT_VERSION
+RUNTIME_DIR := "assets/libraries/" + MINECRAFT_VERSION
+REPORT_DIR := "crates/redstone-java-26/data/" + MINECRAFT_VERSION
 ORACLE_DIR := "tools/vanilla-oracle"
 ORACLE_LIB_DIR := "assets/oracle-libraries"
 
@@ -53,55 +61,40 @@ prepare-tools:
     if [ -f "{{ VINEFLOWER }}" ]; then
       echo "Vineflower 已存在: {{ VINEFLOWER }}"
     else
-      echo "下载 Vineflower 1.12.0"
-      curl -fL https://repo1.maven.org/maven2/org/vineflower/vineflower/1.12.0/vineflower-1.12.0.jar -o "{{ VINEFLOWER }}"
+      echo "下载 Vineflower {{ VINEFLOWER_VERSION }}"
+      curl -fL "https://repo1.maven.org/maven2/org/vineflower/vineflower/{{ VINEFLOWER_VERSION }}/vineflower-{{ VINEFLOWER_VERSION }}.jar" -o "{{ VINEFLOWER }}"
     fi
 
 # just download-client 26.1.2
 # 下载指定版本的 Minecraft client JAR.
-download-client version="26.1.2":
+download-client:
     #!/usr/bin/env sh
     set -eu
     mkdir -p assets
-    manifest="$(mktemp)"
     version_json="$(mktemp)"
-    trap 'rm -f "$manifest" "$version_json"' EXIT
-    echo "读取 Mojang 版本清单"
-    curl -fsSL https://piston-meta.mojang.com/mc/game/version_manifest_v2.json -o "$manifest"
-    version_url="$(jq -r --arg version "{{ version }}" '.versions[] | select(.id == $version) | .url // empty' "$manifest")"
-    if [ -z "$version_url" ]; then
-      echo "未找到版本: {{ version }}" >&2
-      exit 1
-    fi
-    echo "读取版本信息: {{ version }}"
-    curl -fsSL "$version_url" -o "$version_json"
+    trap 'rm -f "$version_json"' EXIT
+    echo "读取 Minecraft {{ MINECRAFT_VERSION }} 版本信息"
+    curl -fsSL "{{ MINECRAFT_VERSION_URL }}" -o "$version_json"
     client_url="$(jq -r '.downloads.client.url // empty' "$version_json")"
     if [ -z "$client_url" ]; then
-      echo "版本缺少 client 下载地址: {{ version }}" >&2
+      echo "版本缺少 client 下载地址: {{ MINECRAFT_VERSION }}" >&2
       exit 1
     fi
-    echo "下载 client JAR: assets/client-{{ version }}.jar"
-    curl -fL "$client_url" -o "assets/client-{{ version }}.jar"
+    echo "下载 client JAR: {{ CLIENT_JAR }}"
+    curl -fL "$client_url" -o "{{ CLIENT_JAR }}"
 
 # just download-runtime 26.1.2
 # 下载指定 Minecraft 版本的数据生成运行库.
-download-runtime version="26.1.2":
+download-runtime:
     #!/usr/bin/env sh
     set -eu
-    runtime_dir="assets/libraries/{{ version }}"
+    runtime_dir="{{ RUNTIME_DIR }}"
     mkdir -p "$runtime_dir"
     version_json="$(mktemp)"
-    manifest="$(mktemp)"
     libraries="$(mktemp)"
-    trap 'rm -f "$version_json" "$manifest" "$libraries"' EXIT
-    echo "读取 Mojang 版本清单"
-    curl -fsSL https://piston-meta.mojang.com/mc/game/version_manifest_v2.json -o "$manifest"
-    version_url="$(jq -r --arg version "{{ version }}" '.versions[] | select(.id == $version) | .url // empty' "$manifest")"
-    if [ -z "$version_url" ]; then
-      echo "未找到版本: {{ version }}" >&2
-      exit 1
-    fi
-    curl -fsSL "$version_url" -o "$version_json"
+    trap 'rm -f "$version_json" "$libraries"' EXIT
+    echo "读取 Minecraft {{ MINECRAFT_VERSION }} 版本信息"
+    curl -fsSL "{{ MINECRAFT_VERSION_URL }}" -o "$version_json"
     jq -r '.libraries[].downloads.artifact | select(.url != null) | [.path, .url] | @tsv' "$version_json" > "$libraries"
     total="$(wc -l < "$libraries" | tr -d ' ')"
     current=0
@@ -119,7 +112,7 @@ download-runtime version="26.1.2":
 
 # just generate-reports
 # 使用官方数据生成器输出 26.1.2 方块和注册表报告.
-generate-reports: download-runtime
+generate-reports: download-runtime download-client
     #!/usr/bin/env sh
     set -eu
     mkdir -p "{{ REPORT_DIR }}"
@@ -141,10 +134,10 @@ download-oracle-deps:
         curl -fsSL "$url" -o "$target"
       fi
     }
-    download tomlj-1.1.1.jar https://repo1.maven.org/maven2/org/tomlj/tomlj/1.1.1/tomlj-1.1.1.jar
-    download antlr4-runtime-4.11.1.jar https://repo1.maven.org/maven2/org/antlr/antlr4-runtime/4.11.1/antlr4-runtime-4.11.1.jar
-    download checker-qual-3.21.2.jar https://repo1.maven.org/maven2/org/checkerframework/checker-qual/3.21.2/checker-qual-3.21.2.jar
-    download asm-9.8.jar https://repo1.maven.org/maven2/org/ow2/asm/asm/9.8/asm-9.8.jar
+    download "tomlj-{{ TOMLJ_VERSION }}.jar" "https://repo1.maven.org/maven2/org/tomlj/tomlj/{{ TOMLJ_VERSION }}/tomlj-{{ TOMLJ_VERSION }}.jar"
+    download "antlr4-runtime-{{ ANTLR_VERSION }}.jar" "https://repo1.maven.org/maven2/org/antlr/antlr4-runtime/{{ ANTLR_VERSION }}/antlr4-runtime-{{ ANTLR_VERSION }}.jar"
+    download "checker-qual-{{ CHECKER_QUAL_VERSION }}.jar" "https://repo1.maven.org/maven2/org/checkerframework/checker-qual/{{ CHECKER_QUAL_VERSION }}/checker-qual-{{ CHECKER_QUAL_VERSION }}.jar"
+    download "asm-{{ ASM_VERSION }}.jar" "https://repo1.maven.org/maven2/org/ow2/asm/asm/{{ ASM_VERSION }}/asm-{{ ASM_VERSION }}.jar"
 
 # 构建 Java 26.1.2 oracle JAR.
 oracle-build: download-runtime download-oracle-deps
