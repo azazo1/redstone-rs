@@ -12,6 +12,7 @@ const LEVEL_CHUNK_WITH_LIGHT: i32 = 45;
 const BLOCK_ENTITY_DATA: i32 = 6;
 const BLOCK_EVENT: i32 = 7;
 const BLOCK_UPDATE: i32 = 8;
+const PLAYER_POSITION: i32 = 72;
 const PISTON_BLOCK_ENTITY_TYPE: i32 = 11;
 
 #[test]
@@ -82,6 +83,47 @@ fn single_scenario_test_exports_replay() {
     assert_success(&output);
     assert!(replay.is_file());
     assert!(ZipArchive::new(File::open(replay).unwrap()).is_ok());
+}
+
+#[test]
+fn scenario_camera_pose_is_encoded_into_replay() {
+    let directory = TestDirectory::new("replay-camera");
+    let structure_path = directory.path().join("machine.nbt");
+    let scenario_path = directory.path().join("camera.toml");
+    let replay = directory.path().join("camera.mcpr");
+    fs::write(structure_path, structure()).unwrap();
+    fs::write(
+        &scenario_path,
+        r#"version = "26.1.2"
+mode = "default"
+max_ticks = 0
+
+[replay.camera]
+view_distance = 12
+position = [1.25, 20.5, -3.75]
+yaw = -45.0
+pitch = 30.0
+
+[source]
+path = "machine.nbt"
+initialization = "raw"
+"#,
+    )
+    .unwrap();
+
+    let output = run_command("run", &scenario_path, &replay);
+    assert_success(&output);
+    let recording = read_recording(&replay);
+    let packets = parse_packets(&recording);
+    let packet = packets
+        .iter()
+        .find(|packet| packet.id == PLAYER_POSITION)
+        .unwrap();
+    let pose = decode_player_position(packet.payload);
+
+    assert_eq!(pose.position, [1.25, 20.5, -3.75]);
+    assert_eq!(pose.yaw, -45.0);
+    assert_eq!(pose.pitch, 30.0);
 }
 
 #[test]
@@ -571,6 +613,28 @@ fn decode_block_update(timestamp: i32, payload: &[u8]) -> (i32, (i32, i32, i32),
     (timestamp, pos, cursor.var_int() as u32)
 }
 
+struct DecodedCameraPose {
+    position: [f64; 3],
+    yaw: f32,
+    pitch: f32,
+}
+
+fn decode_player_position(payload: &[u8]) -> DecodedCameraPose {
+    let mut cursor = Cursor::new(payload);
+    cursor.var_int();
+    let position = [cursor.f64(), cursor.f64(), cursor.f64()];
+    for _ in 0..3 {
+        cursor.f64();
+    }
+    let yaw = cursor.f32();
+    let pitch = cursor.f32();
+    DecodedCameraPose {
+        position,
+        yaw,
+        pitch,
+    }
+}
+
 struct DecodedBlockEvent {
     pos: (i32, i32, i32),
     param_a: u8,
@@ -642,6 +706,14 @@ impl<'a> Cursor<'a> {
 
     fn i32(&mut self) -> i32 {
         i32::from_be_bytes(self.bytes(4).try_into().unwrap())
+    }
+
+    fn f32(&mut self) -> f32 {
+        f32::from_be_bytes(self.bytes(4).try_into().unwrap())
+    }
+
+    fn f64(&mut self) -> f64 {
+        f64::from_be_bytes(self.bytes(8).try_into().unwrap())
     }
 
     fn u64(&mut self) -> u64 {

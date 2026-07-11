@@ -62,6 +62,18 @@ cargo run --release -p redstone-cli -- bench
 
 `run --replay` 和单场景 `test --replay` 会直接从 Rust 仿真生成 Replay Mod 格式 14 录像. 录像目标版本为 Minecraft `26.1.2`, 每个游戏 tick 对应 50 ms. 初始原理图声明区域覆盖的全部 chunk 会在同一批次加载, 外围保留一圈渲染邻居. 后续方块变化进入新 chunk 时只加载目标 chunk 的局部邻接圈, 可随飞行器移动持续扩展, 不会补齐与原理图之间的无关 chunk. 目录批量测试暂不支持共享录像输出路径. 断言失败时录像仍会完成并保留, 仿真或编码失败时不会替换目标文件.
 
+场景可以设置 Replay 初始摄像头:
+
+```toml
+[replay.camera]
+view_distance = 8
+position = [12.5, 20.0, -6.5]
+yaw = 135.0
+pitch = 35.0
+```
+
+所有字段均可省略. 自动取景使用录像开始时的非空气方块边界, 优先靠近机器, 并在结构明显扁平时沿最薄轴观察. 场景探针, 红石灯和铜灯会用于选择更接近观测结果的一面. `view_distance` 约束自动机位的 Replay 播放视距预算, 不裁剪录像中的远端 chunk 数据. 完整字段和角度约定见 [场景编写手册](docs/scenario-guide.md#replay-初始摄像头).
+
 `--replay-anim` 会在录像中额外保留原版活塞 block event, 由客户端生成伸缩动画和声音. 该开关必须与 `--replay` 同时使用, 默认关闭.
 
 > 注: Replay Mod 版本: replaymod-26.1-2.6.26 fabric

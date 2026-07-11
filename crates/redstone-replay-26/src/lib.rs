@@ -11,12 +11,13 @@ use thiserror::Error;
 use zip::ZipWriter;
 use zip::write::SimpleFileOptions;
 
+use crate::camera::{camera_for_region, floor_to_i32};
 use crate::protocol::PacketState;
 use crate::protocol::block_entity::{BlockEntityEncodeError, block_entity_data};
 use crate::protocol::chunk::{ChunkSnapshot, MAX_BLOCK_STATE_ID, MAX_Y, MIN_Y, encode_chunk};
 use crate::protocol::packets::{
     CONFIG_ENABLED_FEATURES, CONFIG_FINISH, CONFIG_REGISTRY_DATA, CONFIG_SELECT_KNOWN_PACKS,
-    CONFIG_UPDATE_TAGS, Camera, LOGIN_FINISHED, PLAY_BLOCK_ENTITY_DATA, PLAY_BLOCK_EVENT,
+    CONFIG_UPDATE_TAGS, LOGIN_FINISHED, PLAY_BLOCK_ENTITY_DATA, PLAY_BLOCK_EVENT,
     PLAY_BLOCK_UPDATE, PLAY_CHUNK_BATCH_FINISHED, PLAY_CHUNK_BATCH_START,
     PLAY_LEVEL_CHUNK_WITH_LIGHT, PLAY_LOGIN, PLAY_PLAYER_POSITION, PLAY_SET_CHUNK_CACHE_CENTER,
     PLAY_SET_CHUNK_CACHE_RADIUS, PLAY_SET_DEFAULT_SPAWN, PLAY_SET_SIMULATION_DISTANCE,
@@ -25,13 +26,15 @@ use crate::protocol::packets::{
 };
 use crate::protocol::registry::{registry_packets, required_tags_packet};
 
+mod camera;
 mod protocol;
+
+pub use camera::{DEFAULT_VIEW_DISTANCE, ReplayCameraHint, ReplayCameraOptions};
 
 pub const MINECRAFT_VERSION: &str = "26.1.2";
 pub const PROTOCOL_VERSION: i32 = 775;
 pub const FILE_FORMAT_VERSION: i32 = 14;
 const TICK_MILLIS: u64 = 50;
-const MIN_VIEW_DISTANCE: i32 = 8;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct ReplayRegion {
@@ -64,6 +67,8 @@ pub struct ReplayOptions {
     pub recorded_at: SystemTime,
     pub region: ReplayRegion,
     pub piston_animation: bool,
+    pub camera: ReplayCameraOptions,
+    pub camera_hints: Vec<ReplayCameraHint>,
 }
 
 impl ReplayOptions {
@@ -80,11 +85,23 @@ impl ReplayOptions {
             recorded_at: SystemTime::now(),
             region,
             piston_animation: false,
+            camera: ReplayCameraOptions::default(),
+            camera_hints: Vec::new(),
         }
     }
 
     pub fn with_piston_animation(mut self, enabled: bool) -> Self {
         self.piston_animation = enabled;
+        self
+    }
+
+    pub fn with_camera(mut self, camera: ReplayCameraOptions) -> Self {
+        self.camera = camera;
+        self
+    }
+
+    pub fn with_camera_hints(mut self, hints: Vec<ReplayCameraHint>) -> Self {
+        self.camera_hints = hints;
         self
     }
 }
@@ -124,6 +141,8 @@ impl ReplayWriter {
         options: ReplayOptions,
         initial_world: &SparseWorld,
     ) -> Result<Self, ReplayError> {
+        options.camera.validate()?;
+        let initial_chunk_radius = options.camera.view_distance;
         let output_path = output_path.as_ref().to_path_buf();
         let file_name = output_path
             .file_name()
@@ -162,7 +181,7 @@ impl ReplayWriter {
             state: PacketState::Login,
             loaded_chunks: BTreeSet::new(),
             chunk_cache_center: (0, 0),
-            chunk_radius: MIN_VIEW_DISTANCE,
+            chunk_radius: initial_chunk_radius,
             packet_count: 0,
             block_updates: 0,
             last_tick: 0,
@@ -297,8 +316,11 @@ impl ReplayWriter {
 
     fn write_initial_world(&mut self, world: &SparseWorld) -> Result<(), ReplayError> {
         let mut chunks = BTreeMap::<(i32, i32), ChunkSnapshot>::new();
+        let mut content_min = None;
+        let mut content_max = None;
         for (pos, state) in world.iter_blocks() {
             validate_block(pos, state.0)?;
+            extend_bounds(&mut content_min, &mut content_max, pos);
             chunks
                 .entry(chunk_pos(pos))
                 .or_default()
@@ -306,6 +328,7 @@ impl ReplayWriter {
         }
         for (pos, data) in world.block_entities() {
             validate_position(*pos)?;
+            extend_bounds(&mut content_min, &mut content_max, *pos);
             chunks
                 .entry(chunk_pos(*pos))
                 .or_default()
@@ -324,7 +347,15 @@ impl ReplayWriter {
             chunks.entry(chunk).or_default();
         }
 
-        let camera = camera_for_region(region);
+        let camera_region = match (content_min, content_max) {
+            (Some(min), Some(max)) => ReplayRegion::new(min, max),
+            _ => region,
+        };
+        let camera = camera_for_region(
+            camera_region,
+            self.options.camera,
+            &self.options.camera_hints,
+        )?;
         let camera_chunk = (
             floor_to_i32(camera.position[0]).div_euclid(16),
             floor_to_i32(camera.position[2]).div_euclid(16),
@@ -333,8 +364,8 @@ impl ReplayWriter {
             .keys()
             .map(|(x, z)| (x - camera_chunk.0).abs().max((z - camera_chunk.1).abs()))
             .max()
-            .unwrap_or(MIN_VIEW_DISTANCE)
-            .max(MIN_VIEW_DISTANCE);
+            .unwrap_or(self.options.camera.view_distance)
+            .max(self.options.camera.view_distance);
         self.chunk_cache_center = camera_chunk;
         self.chunk_radius = chunk_radius;
 
@@ -448,7 +479,7 @@ impl ReplayWriter {
             })
             .max()
             .unwrap_or(self.chunk_radius)
-            .max(MIN_VIEW_DISTANCE);
+            .max(self.options.camera.view_distance);
         if required_radius > self.chunk_radius {
             self.write_packet(
                 timestamp,
@@ -612,49 +643,21 @@ impl ChunkArea {
     }
 }
 
-fn camera_for_region(region: ReplayRegion) -> Camera {
-    let target = [
-        (f64::from(region.min.x) + f64::from(region.max.x) + 1.0) / 2.0,
-        (f64::from(region.min.y) + f64::from(region.max.y) + 1.0) / 2.0,
-        (f64::from(region.min.z) + f64::from(region.max.z) + 1.0) / 2.0,
-    ];
-    let width = (f64::from(region.max.x) - f64::from(region.min.x) + 1.0).max(1.0);
-    let height = (f64::from(region.max.y) - f64::from(region.min.y) + 1.0).max(1.0);
-    let depth = (f64::from(region.max.z) - f64::from(region.min.z) + 1.0).max(1.0);
-    let distance = width.max(depth).max(height).max(6.0) * 1.35;
-    let horizontal_offset = distance.min(12.0);
-    let source_chunks = ChunkArea::from_region(region);
-    let min_camera_x = f64::from(source_chunks.min_x) * 16.0 + 0.5;
-    let max_camera_x = f64::from(source_chunks.max_x.saturating_add(1)) * 16.0 - 0.5;
-    let min_camera_z = f64::from(source_chunks.min_z) * 16.0 + 0.5;
-    let max_camera_z = f64::from(source_chunks.max_z.saturating_add(1)) * 16.0 - 0.5;
-    let position = [
-        (target[0] + horizontal_offset).clamp(min_camera_x, max_camera_x),
-        (f64::from(region.max.y) + distance * 0.75 + 3.0).min(318.0),
-        (target[2] + horizontal_offset).clamp(min_camera_z, max_camera_z),
-    ];
-    camera_looking_at(position, target)
-}
-
-fn camera_looking_at(position: [f64; 3], target: [f64; 3]) -> Camera {
-    let dx = target[0] - position[0];
-    let dy = target[1] - position[1];
-    let dz = target[2] - position[2];
-    let horizontal = dx.hypot(dz);
-    Camera {
-        position,
-        yaw: (-dx).atan2(dz).to_degrees() as f32,
-        pitch: (-dy.atan2(horizontal)).to_degrees() as f32,
-        target: BlockPos::new(
-            floor_to_i32(target[0]),
-            floor_to_i32(target[1]).clamp(MIN_Y, MAX_Y),
-            floor_to_i32(target[2]),
-        ),
-    }
-}
-
-fn floor_to_i32(value: f64) -> i32 {
-    value.floor().clamp(i32::MIN as f64, i32::MAX as f64) as i32
+fn extend_bounds(min: &mut Option<BlockPos>, max: &mut Option<BlockPos>, pos: BlockPos) {
+    *min = Some(min.map_or(pos, |current| {
+        BlockPos::new(
+            current.x.min(pos.x),
+            current.y.min(pos.y),
+            current.z.min(pos.z),
+        )
+    }));
+    *max = Some(max.map_or(pos, |current| {
+        BlockPos::new(
+            current.x.max(pos.x),
+            current.y.max(pos.y),
+            current.z.max(pos.z),
+        )
+    }));
 }
 
 fn chunk_pos(pos: BlockPos) -> (i32, i32) {
@@ -713,6 +716,16 @@ pub enum ReplayError {
     HeightOutOfRange { pos: BlockPos },
     #[error("方块坐标超出 Minecraft 网络坐标范围: {pos:?}")]
     PositionOutOfRange { pos: BlockPos },
+    #[error("Replay 摄像头视距超出范围: {value}, 允许 {min}..={max}")]
+    CameraViewDistance { value: i32, min: i32, max: i32 },
+    #[error("Replay 摄像头位置包含非有限值: {position:?}")]
+    CameraPositionNotFinite { position: [f64; 3] },
+    #[error("Replay 摄像头 yaw 和 pitch 必须同时设置")]
+    IncompleteCameraAngles,
+    #[error("Replay 摄像头角度包含非有限值: yaw={yaw}, pitch={pitch}")]
+    CameraAnglesNotFinite { yaw: f32, pitch: f32 },
+    #[error("Replay 摄像头 pitch 超出 -90..=90: {pitch}")]
+    CameraPitchOutOfRange { pitch: f32 },
     #[error("方块状态 ID 超出 26.1.2 全局注册表范围: {state}")]
     BlockStateOutOfRange { state: u32 },
     #[error("block event {name} 超出无符号字节范围: {value}")]
@@ -785,6 +798,8 @@ mod tests {
                 recorded_at: UNIX_EPOCH + Duration::from_millis(1234),
                 region: ReplayRegion::new(BlockPos::new(-1, -64, 16), BlockPos::new(-1, -64, 16)),
                 piston_animation: false,
+                camera: ReplayCameraOptions::default(),
+                camera_hints: Vec::new(),
             },
             &world,
         )

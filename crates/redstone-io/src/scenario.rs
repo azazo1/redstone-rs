@@ -23,6 +23,8 @@ pub struct Scenario {
     pub strict: bool,
     #[serde(default)]
     pub oracle_micro_trace: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub replay: Option<ScenarioReplay>,
     pub source: ScenarioSource,
     #[serde(default)]
     pub actions: Vec<ScenarioAction>,
@@ -30,6 +32,35 @@ pub struct Scenario {
     pub probes: Vec<ScenarioProbe>,
     #[serde(default)]
     pub expectations: Vec<ScenarioExpectation>,
+}
+
+#[derive(Clone, Debug, Default, Deserialize, Serialize)]
+pub struct ScenarioReplay {
+    #[serde(default)]
+    pub camera: ScenarioReplayCamera,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Serialize)]
+pub struct ScenarioReplayCamera {
+    #[serde(default = "default_replay_view_distance")]
+    pub view_distance: i32,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub position: Option<[f64; 3]>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub yaw: Option<f32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pitch: Option<f32>,
+}
+
+impl Default for ScenarioReplayCamera {
+    fn default() -> Self {
+        Self {
+            view_distance: default_replay_view_distance(),
+            position: None,
+            yaw: None,
+            pitch: None,
+        }
+    }
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -236,6 +267,10 @@ fn default_strict() -> bool {
     true
 }
 
+fn default_replay_view_distance() -> i32 {
+    8
+}
+
 #[derive(Debug, Error)]
 pub enum ScenarioError {
     #[error(transparent)]
@@ -373,5 +408,31 @@ update = true
         assert!(paste.ignore_air);
         assert!(!paste.paste_entities);
         assert!(paste.update);
+    }
+
+    #[test]
+    fn replay_camera_parses_manual_pose_and_view_distance() {
+        let scenario = toml::from_str::<Scenario>(
+            r#"
+version = "26.1.2"
+mode = "default"
+
+[replay.camera]
+view_distance = 12
+position = [1.25, 2.5, 3.75]
+yaw = -45.0
+pitch = 30.0
+
+[source]
+path = "machine.nbt"
+"#,
+        )
+        .unwrap();
+        let camera = scenario.replay.unwrap().camera;
+
+        assert_eq!(camera.view_distance, 12);
+        assert_eq!(camera.position, Some([1.25, 2.5, 3.75]));
+        assert_eq!(camera.yaw, Some(-45.0));
+        assert_eq!(camera.pitch, Some(30.0));
     }
 }

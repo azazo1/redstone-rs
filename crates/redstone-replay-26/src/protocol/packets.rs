@@ -1,5 +1,6 @@
 use redstone_core::BlockPos;
 
+use crate::camera::Camera;
 use super::buf::PacketBuf;
 
 pub(crate) const LOGIN_FINISHED: i32 = 2;
@@ -23,14 +24,6 @@ pub(crate) const PLAY_SET_SIMULATION_DISTANCE: i32 = 111;
 pub(crate) const PLAY_SET_TIME: i32 = 113;
 
 const OVERWORLD: &str = "minecraft:overworld";
-
-#[derive(Clone, Copy, Debug)]
-pub(crate) struct Camera {
-    pub(crate) position: [f64; 3],
-    pub(crate) yaw: f32,
-    pub(crate) pitch: f32,
-    pub(crate) target: BlockPos,
-}
 
 pub(crate) fn login_finished() -> Vec<u8> {
     let mut output = PacketBuf::new();
@@ -150,6 +143,8 @@ pub(crate) fn block_event(pos: BlockPos, param_a: u8, param_b: u8, block: i32) -
 
 #[cfg(test)]
 mod tests {
+    use redstone_core::BlockPos;
+
     use super::*;
 
     #[test]

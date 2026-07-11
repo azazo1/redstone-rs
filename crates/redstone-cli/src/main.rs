@@ -29,6 +29,7 @@ use tracing_subscriber::util::SubscriberInitExt;
 
 mod inspect;
 mod oracle_prepare;
+mod replay_camera;
 
 #[derive(Debug, Parser)]
 #[command(name = "redstone", version, about = "Java 26.1.2 红石时序仿真器")]
@@ -423,10 +424,12 @@ fn execute_scenario(
             &mut resolver,
         )?;
         reject_newer_data_version(structure.data_version)?;
-        replay_region = union_replay_regions(
-            replay_region,
-            ReplayRegion::new(structure.region_min, structure.region_max),
-        );
+        if paste.tick.is_none() {
+            replay_region = union_replay_regions(
+                replay_region,
+                ReplayRegion::new(structure.region_min, structure.region_max),
+            );
+        }
         pastes.push((paste, structure));
     }
     let mut actions = scenario
@@ -440,6 +443,17 @@ fn execute_scenario(
         })
         .collect::<Result<Vec<_>>>()?;
     actions.sort_by_key(|(tick, _)| *tick);
+
+    let camera_hints = replay_camera::hints(
+        &scenario,
+        std::iter::once(&loaded.world).chain(
+            pastes
+                .iter()
+                .filter(|(paste, _)| paste.tick.is_none())
+                .map(|(_, structure)| &structure.world),
+        ),
+        &resolver.0,
+    );
 
     let rules = Java26Rules::new(resolver.0);
     let mut simulation = Simulation::load(
@@ -486,6 +500,7 @@ fn execute_scenario(
             || scenario_path.display().to_string(),
             |name| name.to_string_lossy().into_owned(),
         );
+        let camera = replay_camera::options(&scenario);
         Some(
             ReplayWriter::new(
                 path,
@@ -495,7 +510,9 @@ fn execute_scenario(
                     scenario.mode == RedstoneMode::Experimental,
                     replay_region,
                 )
-                .with_piston_animation(replay_anim),
+                .with_piston_animation(replay_anim)
+                .with_camera(camera)
+                .with_camera_hints(camera_hints),
                 simulation.world(),
             )
             .with_context(|| format!("初始化 Replay Mod 录像失败: {}", path.display()))?,
