@@ -84,6 +84,7 @@ impl StructureRegion {
 pub struct StructureLoadOptions {
     pub transform: StructureTransform,
     pub region: Option<StructureRegion>,
+    pub skip_old_regions: bool,
 }
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq, serde::Deserialize, serde::Serialize)]
@@ -190,6 +191,7 @@ impl StructureLoader {
                     ..StructureTransform::default()
                 },
                 region: None,
+                skip_old_regions: false,
             },
             resolver,
         )
@@ -205,6 +207,7 @@ impl StructureLoader {
             StructureLoadOptions {
                 transform,
                 region: None,
+                skip_old_regions: false,
             },
             resolver,
         )

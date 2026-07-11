@@ -93,6 +93,42 @@ region = {{ min = {{ x = 0, y = 0, z = 0 }}, max = {{ x = 15, y = 15, z = 15 }} 
     assert_success(&run);
 }
 
+#[test]
+fn inspect_can_warn_and_skip_old_regions() {
+    let directory = TestDirectory::new();
+    let world = directory.path().join("old-world");
+    write_world_with_chunk_version(&world, 3700);
+
+    let rejected = Command::new(env!("CARGO_BIN_EXE_redstone"))
+        .arg("inspect")
+        .arg(&world)
+        .arg("--region")
+        .arg("0,0,0")
+        .arg("15,15,15")
+        .arg("--json")
+        .output()
+        .unwrap();
+    assert!(!rejected.status.success());
+    assert!(String::from_utf8_lossy(&rejected.stderr).contains("DataVersion"));
+
+    let skipped = Command::new(env!("CARGO_BIN_EXE_redstone"))
+        .arg("inspect")
+        .arg(&world)
+        .arg("--region")
+        .arg("0,0,0")
+        .arg("15,15,15")
+        .arg("--skip-old-regions")
+        .arg("--json")
+        .output()
+        .unwrap();
+    assert_success(&skipped);
+    let stderr = String::from_utf8_lossy(&skipped.stderr);
+    assert!(stderr.contains("WARN"));
+    assert!(stderr.contains("跳过旧版 Minecraft block region"));
+    let report: serde_json::Value = serde_json::from_slice(&skipped.stdout).unwrap();
+    assert_eq!(report["non_air_blocks"], 0);
+}
+
 fn assert_success(output: &std::process::Output) {
     assert!(
         output.status.success(),
@@ -103,6 +139,10 @@ fn assert_success(output: &std::process::Output) {
 }
 
 fn write_world(path: &Path) {
+    write_world_with_chunk_version(path, 4790);
+}
+
+fn write_world_with_chunk_version(path: &Path, chunk_data_version: i32) {
     let settings = HashMap::from([
         ("DataVersion".to_owned(), Value::Int(4790)),
         (
@@ -140,7 +180,10 @@ fn write_world(path: &Path) {
         ),
     ]);
     let chunk = fastnbt::to_bytes(&HashMap::from([
-        ("DataVersion".to_owned(), Value::Int(4790)),
+        (
+            "DataVersion".to_owned(),
+            Value::Int(chunk_data_version),
+        ),
         ("sections".to_owned(), Value::List(vec![Value::Compound(section)])),
         ("block_entities".to_owned(), Value::List(Vec::new())),
     ]))

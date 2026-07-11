@@ -84,6 +84,11 @@ enum Command {
         format: inspect::OutputFormat,
         #[arg(long, conflicts_with = "format", help = "使用 JSON 输出")]
         json: bool,
+        #[arg(
+            long,
+            help = "跳过包含旧版 chunk 的 Minecraft region 并发出警告"
+        )]
+        skip_old_regions: bool,
     },
     Run {
         scenario: PathBuf,
@@ -146,6 +151,11 @@ enum Command {
             help = "使用两个方块坐标限制 Minecraft 世界目录或 ZIP 的读取区域"
         )]
         region: Vec<redstone_core::BlockPos>,
+        #[arg(
+            long,
+            help = "跳过包含旧版 chunk 的 Minecraft region 并发出警告"
+        )]
+        skip_old_regions: bool,
     },
 }
 
@@ -173,9 +183,11 @@ async fn main() -> Result<()> {
             block_types,
             format,
             json,
+            skip_old_regions,
         } => inspect::run(
             &input,
             inspect::region_from_corners(&region),
+            skip_old_regions,
             &blocks,
             all,
             &block_types,
@@ -230,7 +242,13 @@ async fn main() -> Result<()> {
             input,
             output,
             region,
-        } => convert::run(&input, &output, inspect::region_from_corners(&region)),
+            skip_old_regions,
+        } => convert::run(
+            &input,
+            &output,
+            inspect::region_from_corners(&region),
+            skip_old_regions,
+        ),
     }
 }
 

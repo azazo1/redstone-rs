@@ -48,6 +48,7 @@ fn parse_coordinate(value: &str) -> Result<i32, String> {
 pub fn run(
     path: &Path,
     region: Option<StructureRegion>,
+    skip_old_regions: bool,
     requested_blocks: &[BlockPos],
     all: bool,
     requested_types: &[String],
@@ -62,6 +63,7 @@ pub fn run(
         StructureLoadOptions {
             transform: StructureTransform::default(),
             region: load_region,
+            skip_old_regions,
         },
         &mut resolver,
     )?;

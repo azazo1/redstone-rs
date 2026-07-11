@@ -13,23 +13,29 @@ use crate::{RegistryResolver, reject_newer_data_version};
 
 mod scenario;
 
-pub fn run(input: &Path, output: &Path, region: Option<StructureRegion>) -> Result<()> {
+pub fn run(
+    input: &Path,
+    output: &Path,
+    region: Option<StructureRegion>,
+    skip_old_regions: bool,
+) -> Result<()> {
     if input.extension().is_some_and(|extension| extension == "toml") {
         if region.is_some() {
             bail!("场景转换的 region 必须写在 source 或 paste 中");
         }
-        return scenario::convert(input, output);
+        return scenario::convert(input, output, skip_old_regions);
     }
     if output.extension().is_some_and(|extension| extension == "toml") {
         bail!("只有场景 TOML 可以转换为 TOML");
     }
-    convert_structure(input, output, region, true).map(|_| ())
+    convert_structure(input, output, region, skip_old_regions, true).map(|_| ())
 }
 
 pub(super) fn convert_structure(
     input: &Path,
     output: &Path,
     region: Option<StructureRegion>,
+    skip_old_regions: bool,
     include_air: bool,
 ) -> Result<redstone_io::LoadedStructure> {
     let mut resolver = RegistryResolver(Java26Registry::new());
@@ -37,6 +43,7 @@ pub(super) fn convert_structure(
         input,
         StructureLoadOptions {
             region,
+            skip_old_regions,
             ..StructureLoadOptions::default()
         },
         &mut resolver,

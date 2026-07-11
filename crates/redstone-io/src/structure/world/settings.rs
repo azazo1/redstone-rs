@@ -25,7 +25,7 @@ pub(super) fn require_data_version(
     root: &HashMap<String, Value>,
     display: &str,
 ) -> Result<(), String> {
-    let version = root.get("DataVersion").and_then(value_i32);
+    let version = data_version(root);
     if version != Some(DATA_VERSION) {
         let hint = if display.ends_with(".mca")
             && version.is_some_and(|version| version < DATA_VERSION)
@@ -40,6 +40,10 @@ pub(super) fn require_data_version(
         ));
     }
     Ok(())
+}
+
+pub(super) fn data_version(root: &HashMap<String, Value>) -> Option<i32> {
+    root.get("DataVersion").and_then(value_i32)
 }
 
 pub(super) fn is_strict_void(root: &HashMap<String, Value>) -> bool {

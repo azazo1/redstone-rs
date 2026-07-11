@@ -9,7 +9,7 @@ use crate::{RegistryResolver, reject_newer_data_version};
 
 use super::write_structure;
 
-pub(super) fn convert(input: &Path, output: &Path) -> Result<()> {
+pub(super) fn convert(input: &Path, output: &Path, skip_old_regions: bool) -> Result<()> {
     if output.extension().is_none_or(|extension| extension != "toml") {
         bail!("场景转换输出必须使用 .toml 扩展名");
     }
@@ -32,9 +32,11 @@ pub(super) fn convert(input: &Path, output: &Path) -> Result<()> {
     })?;
     let mut resolver = RegistryResolver(Java26Registry::new());
 
+    let mut source_options = scenario.source.load_options();
+    source_options.skip_old_regions = skip_old_regions;
     let source = StructureLoader::load_with_options(
         &scenario.source.path,
-        scenario.source.load_options(),
+        source_options,
         &mut resolver,
     )?;
     reject_newer_data_version(source.data_version)?;
@@ -52,9 +54,11 @@ pub(super) fn convert(input: &Path, output: &Path) -> Result<()> {
     scenario.source.region = None;
 
     for (index, paste) in scenario.source.pastes.iter_mut().enumerate() {
+        let mut paste_options = paste.load_options();
+        paste_options.skip_old_regions = skip_old_regions;
         let structure = StructureLoader::load_with_options(
             &paste.path,
-            paste.load_options(),
+            paste_options,
             &mut resolver,
         )?;
         reject_newer_data_version(structure.data_version)?;

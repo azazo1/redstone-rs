@@ -131,6 +131,7 @@ impl ScenarioSource {
         StructureLoadOptions {
             transform: self.transform(),
             region: self.region,
+            skip_old_regions: false,
         }
     }
 }
@@ -169,6 +170,7 @@ impl ScenarioPaste {
         StructureLoadOptions {
             transform: self.transform(),
             region: self.region,
+            skip_old_regions: false,
         }
     }
 }

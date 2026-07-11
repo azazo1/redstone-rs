@@ -3,7 +3,7 @@ use std::path::Path;
 
 use fastnbt::Value;
 use redstone_core::{BlockPos, SparseWorld};
-use tracing::info;
+use tracing::{info, warn};
 
 use super::{
     LoadedStructure, StructureError, StructureLoadOptions, StructureRegion,
@@ -46,6 +46,7 @@ pub(super) fn load<R: StructureStateResolver>(
         regions = block_regions.len(),
         entity_regions = entity_regions.len(),
         explicit_region = explicit_region.is_some(),
+        skip_old_regions = options.skip_old_regions,
         "开始读取 Minecraft 世界"
     );
     let mut state = LoadState::new(resolver.air_state());
@@ -55,6 +56,25 @@ pub(super) fn load<R: StructureStateResolver>(
             continue;
         }
         let region_display = source.display(&region_path.path);
+        if options.skip_old_regions {
+            let old_version = old_region_data_version(
+                &mut source,
+                region_path,
+                explicit_region,
+            )
+            .map_err(StructureError::MinecraftWorld)?;
+            if let Some(data_version) = old_version {
+                warn!(
+                    path = %region_display,
+                    region_x = region_path.x,
+                    region_z = region_path.z,
+                    data_version,
+                    expected_data_version = settings::DATA_VERSION,
+                    "跳过旧版 Minecraft block region"
+                );
+                continue;
+            }
+        }
         chunks += region::read_chunks(
             &mut source,
             region_path,
@@ -90,6 +110,25 @@ pub(super) fn load<R: StructureStateResolver>(
                 continue;
             }
             let region_display = source.display(&region_path.path);
+            if options.skip_old_regions {
+                let old_version = old_region_data_version(
+                    &mut source,
+                    region_path,
+                    explicit_region,
+                )
+                .map_err(StructureError::MinecraftWorld)?;
+                if let Some(data_version) = old_version {
+                    warn!(
+                        path = %region_display,
+                        region_x = region_path.x,
+                        region_z = region_path.z,
+                        data_version,
+                        expected_data_version = settings::DATA_VERSION,
+                        "跳过旧版 Minecraft entities region"
+                    );
+                    continue;
+                }
+            }
             region::read_chunks(
                 &mut source,
                 region_path,
@@ -134,6 +173,36 @@ pub(super) fn load<R: StructureStateResolver>(
         block_counts: state.block_counts,
         block_entity_nbt: state.block_entity_nbt,
     })
+}
+
+fn old_region_data_version(
+    source: &mut source::WorldSource,
+    region_path: &region::RegionPath,
+    explicit_region: Option<StructureRegion>,
+) -> Result<Option<i32>, String> {
+    let region_display = source.display(&region_path.path);
+    let mut old_version = None;
+    let result = region::read_chunks(
+        source,
+        region_path,
+        |chunk_x, chunk_z| chunk_intersects(chunk_x, chunk_z, explicit_region),
+        |_chunk_x, _chunk_z, bytes| {
+            let root = fastnbt::from_bytes::<HashMap<String, Value>>(&bytes)
+                .map_err(|error| error.to_string())?;
+            if let Some(data_version) = settings::data_version(&root)
+                && data_version < settings::DATA_VERSION
+            {
+                old_version = Some(data_version);
+                return Err("停止预检旧版 region".to_owned());
+            }
+            settings::require_data_version(&root, &region_display)
+        },
+    );
+    if old_version.is_some() {
+        Ok(old_version)
+    } else {
+        result.map(|_| None)
+    }
 }
 
 struct LoadState {

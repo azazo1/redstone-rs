@@ -129,6 +129,8 @@ region = { min = { x = -128, y = -64, z = -128 }, max = { x = 127, y = 319, z = 
 
 `region` 使用包含首尾坐标的闭区间. 它在 `origin`, rotation 和 mirror 之前应用于存档绝对坐标. 世界导入保留方块状态, 方块实体 NBT 和普通实体, 但不导入 scheduled ticks, POI, biome, lighting, 玩家数据或世界规则.
 
+旧版 chunk 应先在 Minecraft Java 26.1.2 的世界编辑界面执行 `优化世界`, 等待全部 region 处理完成. 仅在使用 `redstone convert` 准备场景且允许丢失旧版 region 时, 才使用 `--skip-old-regions`; 命令会为每个跳过的 `.mca` 输出 `WARN`.
+
 ### 粘贴附加结构
 
 主结构加载完成后, 可以按顺序粘贴 ROM 或其他附加结构:

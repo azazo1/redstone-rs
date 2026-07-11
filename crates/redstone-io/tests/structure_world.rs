@@ -62,6 +62,53 @@ fn normal_world_without_region_is_rejected() {
 }
 
 #[test]
+fn old_region_requires_explicit_skip_option() {
+    let directory = TestDirectory::new();
+    write_world_settings(directory.path(), false);
+    let region_path = directory
+        .path()
+        .join("dimensions/minecraft/overworld/region/r.0.0.mca");
+    write_region_chunks(
+        &region_path,
+        &[
+            (0, block_chunk_with_data_version(4790)),
+            (1, block_chunk_with_data_version(3700)),
+        ],
+    );
+    let region = Some(StructureRegion::new(
+        BlockPos::new(0, 0, 0),
+        BlockPos::new(31, 15, 15),
+    ));
+
+    let mut resolver = TestResolver::default();
+    let error = StructureLoader::load_with_options(
+        directory.path(),
+        StructureLoadOptions {
+            region,
+            ..StructureLoadOptions::default()
+        },
+        &mut resolver,
+    )
+    .unwrap_err();
+    assert!(error.to_string().contains("DataVersion"));
+
+    let mut resolver = TestResolver::default();
+    let loaded = StructureLoader::load_with_options(
+        directory.path(),
+        StructureLoadOptions {
+            region,
+            skip_old_regions: true,
+            ..StructureLoadOptions::default()
+        },
+        &mut resolver,
+    )
+    .unwrap();
+    assert_eq!(loaded.world.non_air_blocks(), 0);
+    assert_eq!(loaded.region_min, BlockPos::ZERO);
+    assert_eq!(loaded.region_max, BlockPos::new(31, 15, 15));
+}
+
+#[test]
 fn empty_strict_void_world_uses_one_block_origin_region() {
     let directory = TestDirectory::new();
     write_world_settings(directory.path(), true);
@@ -113,6 +160,10 @@ fn zip_world_supports_root_files_and_one_top_level_directory() {
 }
 
 fn block_chunk() -> Vec<u8> {
+    block_chunk_with_data_version(4790)
+}
+
+fn block_chunk_with_data_version(data_version: i32) -> Vec<u8> {
     let section = HashMap::from([
         ("Y".to_owned(), Value::Byte(0)),
         (
@@ -124,7 +175,7 @@ fn block_chunk() -> Vec<u8> {
         ),
     ]);
     fastnbt::to_bytes(&HashMap::from([
-        ("DataVersion".to_owned(), Value::Int(4790)),
+        ("DataVersion".to_owned(), Value::Int(data_version)),
         ("sections".to_owned(), Value::List(vec![Value::Compound(section)])),
         (
             "block_entities".to_owned(),
@@ -224,14 +275,27 @@ fn write_world_settings(path: &Path, strict_void: bool) {
 }
 
 fn write_region(path: &Path, index: usize, chunk: Vec<u8>) {
+    write_region_chunks(path, &[(index, chunk)]);
+}
+
+fn write_region_chunks(path: &Path, chunks: &[(usize, Vec<u8>)]) {
     std::fs::create_dir_all(path.parent().unwrap()).unwrap();
-    let mut bytes = vec![0u8; 8192 + 4096];
-    let base = index * 4;
-    bytes[base..base + 4].copy_from_slice(&[0, 0, 2, 1]);
-    let length = (chunk.len() + 1) as u32;
-    bytes[8192..8196].copy_from_slice(&length.to_be_bytes());
-    bytes[8196] = 3;
-    bytes[8197..8197 + chunk.len()].copy_from_slice(&chunk);
+    let mut bytes = vec![0u8; 8192 + chunks.len() * 4096];
+    for (sector_offset, (index, chunk)) in chunks.iter().enumerate() {
+        let sector = 2 + sector_offset;
+        let base = index * 4;
+        bytes[base..base + 4].copy_from_slice(&[
+            ((sector >> 16) & 0xff) as u8,
+            ((sector >> 8) & 0xff) as u8,
+            (sector & 0xff) as u8,
+            1,
+        ]);
+        let offset = sector * 4096;
+        let length = (chunk.len() + 1) as u32;
+        bytes[offset..offset + 4].copy_from_slice(&length.to_be_bytes());
+        bytes[offset + 4] = 3;
+        bytes[offset + 5..offset + 5 + chunk.len()].copy_from_slice(chunk);
+    }
     std::fs::write(path, bytes).unwrap();
 }
 
