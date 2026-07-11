@@ -1,8 +1,9 @@
-use std::collections::{BTreeMap, BTreeSet, VecDeque};
+use std::collections::{BTreeMap, BTreeSet, HashMap, VecDeque};
+use std::hash::{BuildHasherDefault, Hasher};
 
 use indexmap::IndexSet;
 use redstone_core::{
-    Action, BlockEvent, BlockKindId, BlockPos, BlockRules, BlockStateId, DeferredRuleTask,
+    Action, BlockEntityData, BlockEvent, BlockKindId, BlockPos, BlockRules, BlockStateId, DeferredRuleTask,
     Direction, EntityId, EventContext, NeighborUpdate, Probe, ProbeValue, RedstoneMode, RulesError,
     ScheduledTick, SparseWorld, TickPriority,
 };
@@ -25,6 +26,7 @@ use inventory::block_entity_i64;
 pub struct Java26Rules {
     registry: Java26Registry,
     comparator_outputs: BTreeMap<BlockPos, u8>,
+    block_signal_cache: HashMap<BlockPos, u8, BuildHasherDefault<BlockPosHasher>>,
     torch_toggles: VecDeque<(u64, BlockPos)>,
     event_counts: BTreeMap<String, i64>,
 }
@@ -34,6 +36,7 @@ impl Java26Rules {
         Self {
             registry,
             comparator_outputs: BTreeMap::new(),
+            block_signal_cache: HashMap::default(),
             torch_toggles: VecDeque::new(),
             event_counts: BTreeMap::new(),
         }
@@ -60,6 +63,29 @@ impl Java26Rules {
             .map_err(|error| RulesError::Message(error.to_string()))
     }
 
+    fn set_block(
+        &mut self,
+        ctx: &mut EventContext<'_>,
+        pos: BlockPos,
+        state: BlockStateId,
+        cause: &str,
+    ) -> Result<BlockStateId, RulesError> {
+        let old = ctx.world.get_block(pos);
+        let changed = old != state;
+        let wire_to_wire = changed
+            && self
+                .state(old)
+                .is_ok_and(|state| matches!(state.behavior, BlockBehavior::Wire))
+            && self
+                .state(state)
+                .is_ok_and(|state| matches!(state.behavior, BlockBehavior::Wire));
+        let old = ctx.set_block(pos, state, cause)?;
+        if changed && !wire_to_wire {
+            self.block_signal_cache.clear();
+        }
+        Ok(old)
+    }
+
     fn set_state_and_notify(
         &mut self,
         ctx: &mut EventContext<'_>,
@@ -69,7 +95,7 @@ impl Java26Rules {
         orientation: Option<u8>,
     ) -> Result<bool, RulesError> {
         let requested_state = state;
-        let old = ctx.set_block(pos, requested_state, cause)?;
+        let old = self.set_block(ctx, pos, requested_state, cause)?;
         if old == requested_state {
             return Ok(false);
         }
@@ -197,7 +223,7 @@ impl Java26Rules {
         state: BlockStateId,
         cause: &str,
     ) -> Result<bool, RulesError> {
-        let old = ctx.set_block(pos, state, cause)?;
+        let old = self.set_block(ctx, pos, state, cause)?;
         if old == state {
             return Ok(false);
         }
@@ -215,7 +241,7 @@ impl Java26Rules {
         state: BlockStateId,
         cause: &str,
     ) -> Result<bool, RulesError> {
-        let old = ctx.set_block(pos, state, cause)?;
+        let old = self.set_block(ctx, pos, state, cause)?;
         if old == state {
             return Ok(false);
         }
@@ -274,7 +300,7 @@ impl Java26Rules {
         match &state.behavior {
             BlockBehavior::RedstoneBlock => 15,
             BlockBehavior::Wire => {
-                let power = state.int_property("power").unwrap_or(0).clamp(0, 15) as u8;
+                let power = state.power;
                 match direction {
                     Direction::Down => 0,
                     Direction::Up => power,
@@ -430,12 +456,25 @@ impl Java26Rules {
             .max(own_signal)
     }
 
-    fn wire_target_power(&self, world: &SparseWorld, pos: BlockPos) -> u8 {
-        let mut block_power = 0u8;
-        for direction in Direction::UPDATE_ORDER {
-            let neighbor = pos.relative(direction);
-            block_power =
-                block_power.max(self.signal_without_wire_feedback(world, neighbor, direction));
+    fn wire_target_power(&mut self, world: &SparseWorld, pos: BlockPos) -> u8 {
+        let block_power = if let Some(power) = self.block_signal_cache.get(&pos) {
+            *power
+        } else {
+            let mut power = 0u8;
+            for direction in Direction::UPDATE_ORDER {
+                let neighbor = pos.relative(direction);
+                power = power.max(
+                    self.signal_without_wire_feedback(world, neighbor, direction),
+                );
+                if power == 15 {
+                    break;
+                }
+            }
+            self.block_signal_cache.insert(pos, power);
+            power
+        };
+        if block_power == 15 {
+            return 15;
         }
 
         let above_open = self
@@ -476,14 +515,14 @@ impl Java26Rules {
                 if !matches!(state.behavior, BlockBehavior::Wire) {
                     return Ok(());
                 }
-                let old_power = state.int_property("power").unwrap_or(0).clamp(0, 15) as u8;
+                let old_power = state.power;
                 let new_power = self.wire_target_power(ctx.world, initial_pos);
                 if old_power == new_power {
                     return Ok(());
                 }
                 let new_state = self.changed_state(state_id, "power", new_power.to_string())?;
-                ctx.set_block(initial_pos, new_state, "default_wire")?;
-                self.update_neighbor_shapes(ctx, initial_pos)?;
+                self.set_block(ctx, initial_pos, new_state, "default_wire")?;
+                self.update_observers_after_wire_power_change(ctx, initial_pos)?;
                 for candidate in default_wire_update_positions(initial_pos) {
                     ctx.update_neighbors(candidate, state.kind, None, None);
                 }
@@ -506,7 +545,7 @@ impl Java26Rules {
                     if !matches!(state.behavior, BlockBehavior::Wire) {
                         continue;
                     }
-                    let old = state.int_property("power").unwrap_or(0).clamp(0, 15) as u8;
+                    let old = state.power;
                     let target = self.wire_target_power(ctx.world, pos);
                     let next = if target < old { 0 } else { target };
                     if target > 0 && target < old {
@@ -537,7 +576,7 @@ impl Java26Rules {
                     if !matches!(state.behavior, BlockBehavior::Wire) {
                         continue;
                     }
-                    let old = state.int_property("power").unwrap_or(0).clamp(0, 15) as u8;
+                    let old = state.power;
                     let target = self.wire_target_power(ctx.world, pos);
                     if target > old {
                         let new_state =
@@ -735,14 +774,14 @@ impl Java26Rules {
             if notify_observers {
                 self.set_state_and_update_shapes(ctx, pos, next, "container_trigger")?;
             } else {
-                ctx.set_block(pos, next, "container_trigger")?;
+                self.set_block(ctx, pos, next, "container_trigger")?;
             }
         } else if !powered && triggered {
             let next = self.changed_state(state.id, "triggered", "false")?;
             if notify_observers {
                 self.set_state_and_update_shapes(ctx, pos, next, "container_untrigger")?;
             } else {
-                ctx.set_block(pos, next, "container_untrigger")?;
+                self.set_block(ctx, pos, next, "container_untrigger")?;
             }
         }
         Ok(())
@@ -760,7 +799,7 @@ impl Java26Rules {
             BlockBehavior::Lamp => {
                 if powered && !state.bool_property("lit") {
                     let next = self.changed_state(state_id, "lit", "true")?;
-                    self.set_state_and_notify(ctx, pos, next, "lamp_on", None)?;
+                    self.set_state_and_update_shapes(ctx, pos, next, "lamp_on")?;
                 } else if !powered
                     && state.bool_property("lit")
                     && !ctx.has_scheduled_tick(pos, state.kind)
@@ -880,6 +919,36 @@ impl Java26Rules {
     }
 }
 
+#[derive(Default)]
+struct BlockPosHasher(u64);
+
+impl Hasher for BlockPosHasher {
+    fn finish(&self) -> u64 {
+        let mut value = self.0;
+        value ^= value >> 30;
+        value = value.wrapping_mul(0xbf58_476d_1ce4_e5b9);
+        value ^= value >> 27;
+        value = value.wrapping_mul(0x94d0_49bb_1331_11eb);
+        value ^ (value >> 31)
+    }
+
+    fn write(&mut self, bytes: &[u8]) {
+        for byte in bytes {
+            self.0 = self
+                .0
+                .wrapping_mul(0x100_0000_01b3)
+                .wrapping_add(u64::from(*byte));
+        }
+    }
+
+    fn write_i32(&mut self, value: i32) {
+        self.0 = self
+            .0
+            .rotate_left(21)
+            .wrapping_add(u64::from(value as u32).wrapping_mul(0x9e37_79b9_7f4a_7c15));
+    }
+}
+
 impl BlockRules for Java26Rules {
     fn version(&self) -> &str {
         JAVA_VERSION
@@ -909,7 +978,12 @@ impl BlockRules for Java26Rules {
 
     fn load_world(&mut self, world: &SparseWorld) -> Result<(), RulesError> {
         let _ = world;
+        self.block_signal_cache.clear();
         Ok(())
+    }
+
+    fn begin_tick(&mut self, _tick: redstone_core::GameTick) {
+        self.block_signal_cache.clear();
     }
 
     fn initialize(
@@ -951,6 +1025,7 @@ impl BlockRules for Java26Rules {
         ctx: &mut EventContext<'_>,
         action: &Action,
     ) -> Result<(), RulesError> {
+        self.block_signal_cache.clear();
         match action {
             Action::SetBlock { pos, state } => {
                 self.set_state_and_notify(ctx, *pos, *state, "action_set_block", None)?;
@@ -1026,25 +1101,45 @@ impl BlockRules for Java26Rules {
         ctx: &mut EventContext<'_>,
         update: NeighborUpdate,
     ) -> Result<(), RulesError> {
+        if self.registry.kind_name(update.source_block) != Some("minecraft:redstone_wire") {
+            self.block_signal_cache.clear();
+        }
         let current_state_id = ctx.world.get_block(update.pos);
-        let current_state = self.state(current_state_id)?.clone();
-        let loses_support = shape::is_rail_name(&current_state.name)
-            && self.rail_support_changed(update.pos, &current_state, update.source_pos)
-            && !self.rail_survives(ctx.world, update.pos, &current_state);
+        let current_state = self.state(current_state_id)?;
+        let is_rail = shape::is_rail_name(&current_state.name);
+        let is_piston_head = current_state.name.as_ref() == "minecraft:piston_head";
+        let handles_neighbor_update = matches!(
+            current_state.behavior,
+            BlockBehavior::Wire
+                | BlockBehavior::Torch { .. }
+                | BlockBehavior::Repeater
+                | BlockBehavior::Comparator
+                | BlockBehavior::Dropper
+                | BlockBehavior::Dispenser
+                | BlockBehavior::Crafter
+                | BlockBehavior::Piston { .. }
+                | BlockBehavior::Lamp
+                | BlockBehavior::CopperBulb
+                | BlockBehavior::PoweredConsumer
+                | BlockBehavior::Door
+                | BlockBehavior::PoweredRail
+                | BlockBehavior::NoteBlock
+                | BlockBehavior::Bell
+                | BlockBehavior::Tnt
+        );
+        if !is_rail && !is_piston_head && !handles_neighbor_update {
+            return Ok(());
+        }
+        let loses_support = is_rail
+            && self.rail_support_changed(update.pos, current_state, update.source_pos)
+            && !self.rail_survives(ctx.world, update.pos, current_state);
         if loses_support {
             self.remove_block_after_support_loss(ctx, update.pos, "neighbor_support_loss")?;
             return Ok(());
         }
-        let state_id = if matches!(current_state.behavior, BlockBehavior::Wire) {
-            current_state_id
-        } else {
-            let direction = Direction::UPDATE_ORDER
-                .into_iter()
-                .find(|direction| update.pos.relative(*direction) == update.source_pos);
-            self.repair_shape_after_neighbor_changed(ctx, update.pos, direction)?
-        };
+        let state_id = current_state_id;
         let state = self.state(state_id)?.clone();
-        if state.name.as_ref() == "minecraft:piston_head" {
+        if is_piston_head {
             self.refresh_piston_head(ctx, update.pos, &state, update)?;
         }
         match state.behavior {
@@ -1190,7 +1285,7 @@ impl BlockRules for Java26Rules {
                 if state.bool_property("lit") && !self.is_powered(ctx.world, tick.pos) =>
             {
                 let next = self.changed_state(state_id, "lit", "false")?;
-                self.set_state_and_notify(ctx, tick.pos, next, "lamp_off", None)?;
+                self.set_state_and_update_shapes(ctx, tick.pos, next, "lamp_off")?;
             }
             BlockBehavior::Dropper | BlockBehavior::Dispenser | BlockBehavior::Crafter => {
                 self.execute_container_tick(ctx, tick.pos, &state)?;
@@ -1323,6 +1418,25 @@ impl BlockRules for Java26Rules {
             _ => {}
         }
         Ok(())
+    }
+
+    fn should_tick_block_entity(
+        &self,
+        world: &SparseWorld,
+        pos: BlockPos,
+        data: &BlockEntityData,
+    ) -> bool {
+        if data.kind == "minecraft:moving_piston" {
+            return true;
+        }
+        self.registry.state(world.get_block(pos)).is_some_and(|state| {
+            matches!(
+                state.behavior,
+                BlockBehavior::Hopper
+                    | BlockBehavior::DaylightDetector
+                    | BlockBehavior::TrappedChest
+            )
+        })
     }
 
     fn read_probe(&self, world: &SparseWorld, probe: &Probe) -> ProbeValue {
@@ -1856,7 +1970,7 @@ fn attached_block(pos: BlockPos, state: &StateDefinition) -> BlockPos {
 
 fn wire_power_of(state: &StateDefinition) -> u8 {
     if matches!(state.behavior, BlockBehavior::Wire) {
-        state.int_property("power").unwrap_or(0).clamp(0, 15) as u8
+        state.power
     } else {
         0
     }
@@ -1939,7 +2053,7 @@ fn wire_connects_for_update(state: &StateDefinition, direction: Direction) -> bo
     }
 }
 
-fn default_wire_update_positions(pos: BlockPos) -> Vec<BlockPos> {
+fn default_wire_update_positions(pos: BlockPos) -> [BlockPos; 7] {
     const JAVA_DIRECTION_VALUES: [Direction; 6] = [
         Direction::Down,
         Direction::Up,
@@ -1948,9 +2062,16 @@ fn default_wire_update_positions(pos: BlockPos) -> Vec<BlockPos> {
         Direction::West,
         Direction::East,
     ];
-    let mut positions = Vec::with_capacity(7);
-    positions.push(pos);
-    positions.extend(JAVA_DIRECTION_VALUES.map(|direction| pos.relative(direction)));
+    let neighbors = JAVA_DIRECTION_VALUES.map(|direction| pos.relative(direction));
+    let mut positions = [
+        pos,
+        neighbors[0],
+        neighbors[1],
+        neighbors[2],
+        neighbors[3],
+        neighbors[4],
+        neighbors[5],
+    ];
     positions.sort_by_key(|candidate| java_hash_map_bucket(*candidate));
     positions
 }

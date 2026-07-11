@@ -24,6 +24,9 @@ pub trait BlockRules: Send {
         Ok(())
     }
 
+    fn begin_tick(&mut self, _tick: GameTick) {
+    }
+
     fn initialize(
         &mut self,
         _ctx: &mut EventContext<'_>,
@@ -90,8 +93,19 @@ pub trait BlockRules: Send {
         Ok(())
     }
 
+    fn should_tick_block_entity(
+        &self,
+        _world: &SparseWorld,
+        _pos: BlockPos,
+        _data: &BlockEntityData,
+    ) -> bool {
+        true
+    }
+
     fn read_probe(&self, world: &SparseWorld, probe: &Probe) -> ProbeValue;
 }
+
+pub(crate) type NeighborTasks = Vec<NeighborTask>;
 
 pub struct EventContext<'a> {
     pub world: &'a mut SparseWorld,
@@ -106,8 +120,9 @@ pub struct EventContext<'a> {
     block_events: &'a mut VecDeque<BlockEvent>,
     block_event_keys: &'a mut BTreeSet<BlockEvent>,
     trace: Option<&'a mut Vec<TraceEvent>>,
-    events: &'a mut Vec<WorldEvent>,
-    neighbor_tasks: Vec<NeighborTask>,
+    events: Option<&'a mut Vec<WorldEvent>>,
+    neighbor_tasks: &'a mut NeighborTasks,
+    touched_block_entities: Vec<BlockPos>,
 }
 
 impl<'a> EventContext<'a> {
@@ -125,7 +140,8 @@ impl<'a> EventContext<'a> {
         block_events: &'a mut VecDeque<BlockEvent>,
         block_event_keys: &'a mut BTreeSet<BlockEvent>,
         trace: Option<&'a mut Vec<TraceEvent>>,
-        events: &'a mut Vec<WorldEvent>,
+        events: Option<&'a mut Vec<WorldEvent>>,
+        neighbor_tasks: &'a mut NeighborTasks,
     ) -> Self {
         Self {
             world,
@@ -141,7 +157,8 @@ impl<'a> EventContext<'a> {
             block_event_keys,
             trace,
             events,
-            neighbor_tasks: Vec::new(),
+            neighbor_tasks,
+            touched_block_entities: Vec::new(),
         }
     }
 
@@ -154,26 +171,30 @@ impl<'a> EventContext<'a> {
         let old_block_entity = self.world.block_entity(pos).cloned();
         let old_state = self.world.set_block(pos, state)?;
         if old_state != state {
-            self.events.push(WorldEvent::Block {
+            self.record_event(WorldEvent::Block {
                 change: crate::BlockChange {
                     pos,
                     old_state,
                     new_state: state,
                 },
             });
-            self.push_trace(TraceKind::BlockChanged {
-                pos,
-                old_state,
-                new_state: state,
-                cause: cause.into(),
-            });
+            if self.trace.is_some() {
+                self.push_trace(TraceKind::BlockChanged {
+                    pos,
+                    old_state,
+                    new_state: state,
+                    cause: cause.into(),
+                });
+            }
+            self.touched_block_entities.push(pos);
         }
         if let Some(data) = old_block_entity
             && self.world.block_entity(pos).is_none()
         {
-            self.events.push(WorldEvent::BlockEntity {
+            self.record_event(WorldEvent::BlockEntity {
                 change: BlockEntityChange::Remove { pos, data },
             });
+            self.touched_block_entities.push(pos);
         }
         Ok(old_state)
     }
@@ -184,6 +205,7 @@ impl<'a> EventContext<'a> {
             return;
         }
         self.world.set_block_entity(pos, data.clone());
+        self.touched_block_entities.push(pos);
         let change = match old_data {
             Some(old_data) => BlockEntityChange::Update {
                 pos,
@@ -192,12 +214,13 @@ impl<'a> EventContext<'a> {
             },
             None => BlockEntityChange::Create { pos, data },
         };
-        self.events.push(WorldEvent::BlockEntity { change });
+        self.record_event(WorldEvent::BlockEntity { change });
     }
 
     pub fn remove_block_entity(&mut self, pos: BlockPos) -> Option<BlockEntityData> {
         let data = self.world.remove_block_entity(pos)?;
-        self.events.push(WorldEvent::BlockEntity {
+        self.touched_block_entities.push(pos);
+        self.record_event(WorldEvent::BlockEntity {
             change: BlockEntityChange::Remove {
                 pos,
                 data: data.clone(),
@@ -222,7 +245,8 @@ impl<'a> EventContext<'a> {
         if old_data == new_data {
             return false;
         }
-        self.events.push(WorldEvent::BlockEntity {
+        self.touched_block_entities.push(pos);
+        self.record_event(WorldEvent::BlockEntity {
             change: BlockEntityChange::Update {
                 pos,
                 old_data,
@@ -399,8 +423,14 @@ impl<'a> EventContext<'a> {
         });
     }
 
-    pub(crate) fn take_neighbor_tasks(&mut self) -> Vec<NeighborTask> {
-        std::mem::take(&mut self.neighbor_tasks)
+    pub(crate) fn take_touched_block_entities(&mut self) -> Vec<BlockPos> {
+        std::mem::take(&mut self.touched_block_entities)
+    }
+
+    fn record_event(&mut self, event: WorldEvent) {
+        if let Some(events) = self.events.as_mut() {
+            events.push(event);
+        }
     }
 }
 

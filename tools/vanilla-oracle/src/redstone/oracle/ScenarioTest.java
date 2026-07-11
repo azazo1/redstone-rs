@@ -34,6 +34,8 @@ import net.minecraft.world.level.block.entity.ContainerOpenersCounter;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.block.state.properties.Property;
 import net.minecraft.world.level.levelgen.structure.templatesystem.StructurePlaceSettings;
+import net.minecraft.world.level.levelgen.structure.templatesystem.BlockIgnoreProcessor;
+import net.minecraft.world.level.levelgen.structure.templatesystem.StructureTemplate;
 import net.minecraft.world.level.storage.ServerLevelData;
 import net.minecraft.world.flag.FeatureFlags;
 import net.minecraft.world.level.Level;
@@ -64,6 +66,7 @@ final class ScenarioTest {
     private BufferedWriter writer;
     private OracleTraceRecorder microTrace;
     private int actionIndex;
+    private long tickStartedNanos;
 
     ScenarioTest(Scenario scenario, Path output, FrameGeometry frame) {
         this.scenario = scenario;
@@ -156,6 +159,8 @@ final class ScenarioTest {
                 if (microTrace != null) {
                     microTrace.enableBlockChanges();
                 }
+                applyPastes(helper, null);
+                tickStartedNanos = System.nanoTime();
             }
             if (tick > 0) {
                 for (Scenario.Probe probe : scenario.probes) {
@@ -166,8 +171,10 @@ final class ScenarioTest {
             if (microTrace != null) {
                 microTrace.setTick(nextTick);
             }
-            if (actionIndex < actions.size() && actions.get(actionIndex).tick() == nextTick) {
+            if (hasPasteAt(nextTick)
+                || actionIndex < actions.size() && actions.get(actionIndex).tick() == nextTick) {
                 withNextGameTime(helper, () -> {
+                    applyPastes(helper, nextTick);
                     while (actionIndex < actions.size() && actions.get(actionIndex).tick() == nextTick) {
                         applyAction(helper, actions.get(actionIndex));
                         actionIndex++;
@@ -179,6 +186,14 @@ final class ScenarioTest {
             }
             writer.flush();
             if (tick >= scenario.maxTicks) {
+                long elapsedNanos = System.nanoTime() - tickStartedNanos;
+                double ticksPerSecond = scenario.maxTicks * 1_000_000_000.0 / elapsedNanos;
+                System.out.printf(
+                    "GAMETEST_TICKS ticks=%d elapsed_ms=%.3f ticks_per_second=%.3f%n",
+                    scenario.maxTicks,
+                    elapsedNanos / 1_000_000.0,
+                    ticksPerSecond
+                );
                 closeNeighborTrace();
                 writer.close();
                 writer = null;
@@ -187,6 +202,78 @@ final class ScenarioTest {
         } catch (Exception error) {
             closeOutput();
             throw new IllegalStateException("oracle 场景 tick " + tick + " 执行失败", error);
+        }
+    }
+
+    private boolean hasPasteAt(int tick) {
+        return scenario.source.pastes().stream().anyMatch(paste -> paste.tick() != null && paste.tick() == tick);
+    }
+
+    private void applyPastes(GameTestHelper helper, Integer tick) {
+        for (int index = 0; index < scenario.source.pastes().size(); index++) {
+            int pasteIndex = index;
+            Scenario.Paste paste = scenario.source.pastes().get(index);
+            if (!java.util.Objects.equals(paste.tick(), tick)) {
+                continue;
+            }
+            var template = helper.getLevel()
+                .getStructureManager()
+                .get(Identifier.parse("redstone:paste_" + index))
+                .orElseThrow(() -> new IllegalStateException("缺少 paste structure: " + pasteIndex));
+            StructurePlaceSettings settings = new StructurePlaceSettings()
+                .setIgnoreEntities(!paste.pasteEntities())
+                .setKnownShape(true)
+                .setMirror(paste.mirrorValue())
+                .setRotation(paste.rotationValue());
+            if (paste.ignoreAir()) {
+                settings.addProcessor(BlockIgnoreProcessor.STRUCTURE_AND_AIR);
+            }
+            BlockPos origin = helper.absolutePos(blockPos(scenario.source.toFrame(paste.origin(), frame)));
+            boolean placed = template.placeInWorld(
+                helper.getLevel(),
+                origin,
+                origin,
+                settings,
+                helper.getLevel().getRandom(),
+                818
+            );
+            if (!placed && !paste.ignoreAir()) {
+                throw new IllegalStateException("放置 paste structure 失败: " + index);
+            }
+            if (paste.update()) {
+                updatePasteRegion(helper, template, origin, settings);
+            }
+        }
+    }
+
+    private static void updatePasteRegion(
+        GameTestHelper helper,
+        StructureTemplate template,
+        BlockPos origin,
+        StructurePlaceSettings settings
+    ) {
+        var size = template.getSize();
+        for (int y = 0; y < size.getY(); y++) {
+            for (int z = 0; z < size.getZ(); z++) {
+                for (int x = 0; x < size.getX(); x++) {
+                    BlockPos pos = StructureTemplate.transform(
+                        new BlockPos(x, y, z),
+                        settings.getMirror(),
+                        settings.getRotation(),
+                        BlockPos.ZERO
+                    ).offset(origin);
+                    BlockState state = helper.getLevel().getBlockState(pos);
+                    BlockState repaired = Block.updateFromNeighbourShapes(
+                        state,
+                        helper.getLevel(),
+                        pos
+                    );
+                    if (state != repaired) {
+                        helper.getLevel().setBlock(pos, repaired, 18);
+                    }
+                    helper.getLevel().updateNeighborsAt(pos, repaired.getBlock());
+                }
+            }
         }
     }
 

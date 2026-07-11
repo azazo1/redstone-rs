@@ -18,7 +18,7 @@ impl Java26Rules {
         }
         let old_state = self.state(old_state_id)?.clone();
         let air = self.registry.air_state();
-        ctx.set_block(pos, air, cause)?;
+        self.set_block(ctx, pos, air, cause)?;
         let state = self.apply_observer_lifecycle(ctx, pos, old_state_id, air, true, true)?;
         self.affect_neighbors_after_removal(ctx, pos, &old_state, false)?;
         self.update_indirect_neighbor_shapes(ctx, pos, &old_state)?;

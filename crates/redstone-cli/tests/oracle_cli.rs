@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use fastnbt::Value;
+use fastnbt::{ByteArray, Value};
 
 #[test]
 #[ignore = "需要先执行 just oracle-build"]
@@ -166,6 +166,35 @@ fn real_java_oracle_matches_piston_quasi_connectivity_and_bud() {
     );
 }
 
+#[test]
+#[ignore = "需要先执行 just oracle-build"]
+fn real_java_oracle_matches_initial_source_paste() {
+    let directory = TestDirectory::new("oracle-source-paste");
+    let structure_path = directory.path().join("machine.nbt");
+    let paste_path = directory.path().join("rom.schem");
+    let scenario_path = directory.path().join("scenario.toml");
+    fs::write(&structure_path, paste_target_structure()).unwrap();
+    fs::write(&paste_path, paste_source_schematic()).unwrap();
+    fs::write(&scenario_path, paste_scenario()).unwrap();
+
+    let workspace = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let oracle = workspace.join("tools/vanilla-oracle/run.sh");
+    let output = Command::new(env!("CARGO_BIN_EXE_redstone"))
+        .current_dir(&workspace)
+        .env("REDSTONE_ORACLE", &oracle)
+        .arg("test")
+        .arg(&scenario_path)
+        .arg("--oracle")
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
 fn assert_oracle_matches(name: &str, structure: Vec<u8>, scenario: &str) {
     let directory = TestDirectory::new(name);
     let structure_path = directory.path().join("machine.nbt");
@@ -220,6 +249,88 @@ fn structure(size_x: i32, block_x: i32) -> Vec<u8> {
         ("entities".to_owned(), Value::List(Vec::new())),
     ]);
     fastnbt::to_bytes(&root).unwrap()
+}
+
+fn paste_target_structure() -> Vec<u8> {
+    let root = HashMap::from([
+        ("DataVersion".to_owned(), Value::Int(4790)),
+        (
+            "size".to_owned(),
+            Value::List(vec![Value::Int(2), Value::Int(1), Value::Int(1)]),
+        ),
+        (
+            "palette".to_owned(),
+            Value::List(vec![Value::Compound(HashMap::from([
+                (
+                    "Name".to_owned(),
+                    Value::String("minecraft:redstone_lamp".to_owned()),
+                ),
+                (
+                    "Properties".to_owned(),
+                    Value::Compound(HashMap::from([(
+                        "lit".to_owned(),
+                        Value::String("false".to_owned()),
+                    )])),
+                ),
+            ]))]),
+        ),
+        (
+            "blocks".to_owned(),
+            Value::List(vec![structure_block(1, 0, 0, 0)]),
+        ),
+        ("entities".to_owned(), Value::List(Vec::new())),
+    ]);
+    fastnbt::to_bytes(&root).unwrap()
+}
+
+fn paste_source_schematic() -> Vec<u8> {
+    let root = HashMap::from([
+        ("Version".to_owned(), Value::Int(2)),
+        ("DataVersion".to_owned(), Value::Int(4790)),
+        ("Width".to_owned(), Value::Short(2)),
+        ("Height".to_owned(), Value::Short(1)),
+        ("Length".to_owned(), Value::Short(1)),
+        ("PaletteMax".to_owned(), Value::Int(2)),
+        (
+            "Palette".to_owned(),
+            Value::Compound(HashMap::from([
+                ("minecraft:redstone_block".to_owned(), Value::Int(0)),
+                ("minecraft:air".to_owned(), Value::Int(1)),
+            ])),
+        ),
+        (
+            "BlockData".to_owned(),
+            Value::ByteArray(ByteArray::new(vec![0, 1])),
+        ),
+    ]);
+    fastnbt::to_bytes(&root).unwrap()
+}
+
+fn paste_scenario() -> &'static str {
+    r#"version = "26.1.2"
+mode = "default"
+seed = 0
+max_ticks = 1
+strict = true
+oracle_micro_trace = true
+
+[source]
+path = "machine.nbt"
+initialization = "raw"
+
+[[source.pastes]]
+path = "rom.schem"
+origin = { x = 0, y = 0, z = 0 }
+ignore_air = true
+paste_entities = false
+update = true
+
+[[probes]]
+name = "lamp"
+type = "property"
+pos = { x = 1, y = 0, z = 0 }
+property = "lit"
+"#
 }
 
 fn powered_wire_structure() -> Vec<u8> {

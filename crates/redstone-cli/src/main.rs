@@ -28,6 +28,7 @@ use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::util::SubscriberInitExt;
 
 mod inspect;
+mod oracle_prepare;
 
 #[derive(Debug, Parser)]
 #[command(name = "redstone", version, about = "Java 26.1.2 红石时序仿真器")]
@@ -120,6 +121,11 @@ enum Command {
         #[arg(long, default_value_t = 100)]
         ticks: usize,
     },
+    #[command(hide = true)]
+    OraclePrepare {
+        scenario: PathBuf,
+        output: PathBuf,
+    },
 }
 
 #[tokio::main]
@@ -197,6 +203,7 @@ async fn main() -> Result<()> {
             active,
             ticks,
         } => bench(blocks, active, ticks),
+        Command::OraclePrepare { scenario, output } => oracle_prepare::run(&scenario, &output),
     }
 }
 
@@ -332,6 +339,7 @@ struct RunSummary {
     ticks: u64,
     blocks: usize,
     trace_events: usize,
+    tick_elapsed: Duration,
 }
 
 const TICK_PROGRESS_UPDATE_INTERVAL: u64 = 10;
@@ -368,6 +376,11 @@ fn run(
     println!("ticks: {}", summary.ticks);
     println!("blocks: {}", summary.blocks);
     println!("trace_events: {}", summary.trace_events);
+    println!("tick_ms: {:.3}", summary.tick_elapsed.as_secs_f64() * 1_000.0);
+    println!(
+        "ticks_per_second: {:.3}",
+        summary.ticks as f64 / summary.tick_elapsed.as_secs_f64()
+    );
     println!("expectations: passed");
     Ok(())
 }
@@ -437,6 +450,7 @@ fn execute_scenario(
             seed: scenario.seed,
             strict: scenario.strict && !allow_static_fallback,
             trace: trace_path.is_some() || vcd_path.is_some(),
+            record_events: replay_path.is_some(),
             ..SimulationConfig::default()
         },
     )?;
@@ -503,6 +517,7 @@ fn execute_scenario(
             .to_string_lossy()
     ));
     progress.pb_start();
+    let tick_started = Instant::now();
     while simulation.current_tick().0 < scenario.max_ticks {
         let next_tick = GameTick(simulation.current_tick().0 + 1);
         let current_pastes = pastes
@@ -556,6 +571,7 @@ fn execute_scenario(
             progress.pb_set_position(completed_tick);
         }
     }
+    let tick_elapsed = tick_started.elapsed();
     drop(progress);
 
     let mut failures = Vec::new();
@@ -594,6 +610,7 @@ fn execute_scenario(
         ticks: simulation.current_tick().0,
         blocks: simulation.world().non_air_blocks(),
         trace_events: simulation.trace().events().len(),
+        tick_elapsed,
     })
 }
 
@@ -780,6 +797,10 @@ async fn compare_with_oracle(scenario: &Path, rust_trace: &Path) -> Result<()> {
         command
             .arg(scenario)
             .arg(&oracle_trace)
+            .env(
+                "REDSTONE_ORACLE_CONVERTER",
+                oracle_prepare::converter_executable()?,
+            )
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .kill_on_drop(true);

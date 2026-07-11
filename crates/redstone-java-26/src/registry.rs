@@ -78,6 +78,7 @@ pub struct StateDefinition {
     pub push_reaction: PushReaction,
     pub has_block_entity: bool,
     pub supported: bool,
+    pub power: u8,
 }
 
 impl StateDefinition {
@@ -262,6 +263,11 @@ impl StateResolver for Java26Registry {
         let has_block_entity = self.catalog.blocks_with_entities.contains(name);
         let kind = self.intern_kind(name);
         let traits = classify(name, properties);
+        let power = properties
+            .get("power")
+            .and_then(|value| value.parse::<u8>().ok())
+            .unwrap_or(0)
+            .min(15);
         self.states[id.0 as usize] = Some(StateDefinition {
             id,
             kind,
@@ -273,6 +279,7 @@ impl StateResolver for Java26Registry {
             push_reaction: traits.push_reaction,
             has_block_entity,
             supported: traits.supported,
+            power,
         });
         Ok(id)
     }

@@ -7,5 +7,6 @@ pub use scenario::{
 };
 pub use structure::{
     LoadedStructure, Mirror, Rotation, StructureError, StructureFormat, StructureLoader,
-    StructureStateResolver, StructureTransform,
+    StructureStateResolver, StructureTransform, VanillaState, VanillaWriteError,
+    encode_vanilla_structure,
 };

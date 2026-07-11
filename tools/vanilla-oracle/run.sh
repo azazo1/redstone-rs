@@ -18,5 +18,14 @@ if [ ! -f "$oracle_jar" ]; then
   exit 2
 fi
 
+work="$(mktemp -d)"
+trap 'rm -rf "$work"' EXIT
+prepared="$work/scenario.toml"
+if [ -n "${REDSTONE_ORACLE_CONVERTER:-}" ]; then
+  "$REDSTONE_ORACLE_CONVERTER" oracle-prepare "$1" "$prepared"
+else
+  cargo run --quiet -p redstone-cli -- oracle-prepare "$1" "$prepared"
+fi
+
 classpath="$oracle_jar:$client:$(find "$libraries" "$oracle_libraries" -name '*.jar' -type f | sort | paste -sd ':' -)"
-exec java -Xmx4g -cp "$classpath" redstone.oracle.Main "$1" "$2"
+java -Xmx4g -cp "$classpath" redstone.oracle.Main "$prepared" "$2"

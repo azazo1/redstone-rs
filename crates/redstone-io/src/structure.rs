@@ -12,6 +12,9 @@ use tracing::info;
 mod litematic;
 mod sponge;
 mod vanilla;
+mod vanilla_writer;
+
+pub use vanilla_writer::{VanillaState, VanillaWriteError, encode_vanilla_structure};
 
 pub trait StructureStateResolver {
     type Error: std::error::Error + Send + Sync + 'static;
@@ -40,7 +43,7 @@ pub enum StructureFormat {
     VanillaStructure,
 }
 
-#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, serde::Deserialize)]
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, serde::Deserialize, serde::Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Rotation {
     #[default]
@@ -50,7 +53,7 @@ pub enum Rotation {
     Counterclockwise90,
 }
 
-#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, serde::Deserialize)]
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, serde::Deserialize, serde::Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Mirror {
     #[default]

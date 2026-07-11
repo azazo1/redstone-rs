@@ -539,7 +539,7 @@ impl Java26Rules {
             .and_then(|value| serde_json::from_value::<BlockEntityData>(value.clone()).ok());
         self.update_moved_observer_from_neighbor_shapes(ctx, pos, final_state)?;
         ctx.remove_block_entity(pos);
-        let old = ctx.set_block(pos, final_state, "piston_movement_settle")?;
+        let old = self.set_block(ctx, pos, final_state, "piston_movement_settle")?;
         let final_state = self.apply_observer_lifecycle(ctx, pos, old, final_state, true, true)?;
         ctx.update_neighbors(pos, self.state(old)?.kind, None, None);
         self.queue_neighbor_shape_updates(ctx, pos);
@@ -573,7 +573,7 @@ impl Java26Rules {
         update_shapes: bool,
         moved_by_piston: bool,
     ) -> Result<bool, RulesError> {
-        let old = ctx.set_block(pos, state, cause)?;
+        let old = self.set_block(ctx, pos, state, cause)?;
         if old == state {
             return Ok(false);
         }

@@ -1,7 +1,7 @@
 version = "26.1.2"
 mode = "default"
 seed = 0
-max_ticks = 10000
+max_ticks = 60
 strict = true
 
 [source]

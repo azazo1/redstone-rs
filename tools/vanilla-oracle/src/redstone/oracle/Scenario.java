@@ -74,17 +74,33 @@ final class Scenario {
         }
 
         TomlTable sourceTable = requiredTable(document, "source");
-        Path sourcePath = Path.of(requiredString(sourceTable, "path"));
-        if (!sourcePath.isAbsolute()) {
-            Path parent = normalized.getParent();
-            sourcePath = (parent == null ? sourcePath : parent.resolve(sourcePath)).normalize();
+        Path sourcePath = resolvePath(normalized, requiredString(sourceTable, "path"));
+        List<Paste> pastes = new ArrayList<>();
+        TomlArray pasteArray = sourceTable.getArray("pastes");
+        if (pasteArray != null) {
+            for (int index = 0; index < pasteArray.size(); index++) {
+                TomlTable paste = pasteArray.getTable(index);
+                Long tickValue = paste.getLong("tick");
+                Integer tick = tickValue == null ? null : Math.toIntExact(tickValue);
+                pastes.add(new Paste(
+                    resolvePath(normalized, requiredString(paste, "path")),
+                    tick,
+                    optionalPos(paste, "origin", Pos.ZERO),
+                    optionalString(paste, "rotation", "none"),
+                    optionalString(paste, "mirror", "none"),
+                    optionalBoolean(paste, "ignore_air", false),
+                    optionalBoolean(paste, "paste_entities", false),
+                    optionalBoolean(paste, "update", false)
+                ));
+            }
         }
         Source source = new Source(
             sourcePath,
             optionalPos(sourceTable, "origin", Pos.ZERO),
             optionalString(sourceTable, "initialization", "notify"),
             optionalString(sourceTable, "rotation", "none"),
-            optionalString(sourceTable, "mirror", "none")
+            optionalString(sourceTable, "mirror", "none"),
+            List.copyOf(pastes)
         );
 
         List<Action> actions = new ArrayList<>();
@@ -269,6 +285,20 @@ final class Scenario {
         if (!source.initialization.equals("raw") && !source.initialization.equals("notify")) {
             throw new IllegalArgumentException("不支持的初始化策略: " + source.initialization);
         }
+        for (Paste paste : source.pastes) {
+            if (!Files.isRegularFile(paste.path)) {
+                throw new IllegalArgumentException("附加结构文件不存在: " + paste.path);
+            }
+            String pasteName = paste.path.getFileName().toString();
+            if (!pasteName.endsWith(".nbt") && !pasteName.endsWith(".structure")) {
+                throw new IllegalArgumentException("Java oracle 附加结构需要转换为 vanilla NBT: " + paste.path);
+            }
+            if (paste.tick != null && (paste.tick <= 0 || paste.tick > maxTicks)) {
+                throw new IllegalArgumentException("附加结构 tick 必须在 1..=" + maxTicks + ": " + paste.tick);
+            }
+            paste.rotationValue();
+            paste.mirrorValue();
+        }
         for (Action action : actions) {
             if (action.tick > maxTicks) {
                 throw new IllegalArgumentException("动作 tick 超过 max_ticks: " + action.tick);
@@ -329,6 +359,15 @@ final class Scenario {
     private static boolean optionalBoolean(TomlTable table, String key, boolean defaultValue) {
         Boolean value = table.getBoolean(key);
         return value == null ? defaultValue : value;
+    }
+
+    private static Path resolvePath(Path scenario, String value) {
+        Path path = Path.of(value);
+        if (path.isAbsolute()) {
+            return path.normalize();
+        }
+        Path parent = scenario.getParent();
+        return (parent == null ? path : parent.resolve(path)).normalize();
     }
 
     private static double[] requiredDoubleArray(TomlTable table, String key) {
@@ -421,7 +460,14 @@ final class Scenario {
         throw new IllegalArgumentException("不支持的 TOML 字段类型: " + path);
     }
 
-    record Source(Path path, Pos origin, String initialization, String rotation, String mirror) {
+    record Source(
+        Path path,
+        Pos origin,
+        String initialization,
+        String rotation,
+        String mirror,
+        List<Paste> pastes
+    ) {
         Rotation rotationValue() {
             return switch (rotation) {
                 case "none" -> Rotation.NONE;
@@ -457,6 +503,36 @@ final class Scenario {
             };
         }
 
+    }
+
+    record Paste(
+        Path path,
+        Integer tick,
+        Pos origin,
+        String rotation,
+        String mirror,
+        boolean ignoreAir,
+        boolean pasteEntities,
+        boolean update
+    ) {
+        Rotation rotationValue() {
+            return switch (rotation) {
+                case "none" -> Rotation.NONE;
+                case "clockwise90" -> Rotation.CLOCKWISE_90;
+                case "clockwise180" -> Rotation.CLOCKWISE_180;
+                case "counterclockwise90" -> Rotation.COUNTERCLOCKWISE_90;
+                default -> throw new IllegalArgumentException("不支持的 rotation: " + rotation);
+            };
+        }
+
+        Mirror mirrorValue() {
+            return switch (mirror) {
+                case "none" -> Mirror.NONE;
+                case "left_right" -> Mirror.LEFT_RIGHT;
+                case "front_back" -> Mirror.FRONT_BACK;
+                default -> throw new IllegalArgumentException("不支持的 mirror: " + mirror);
+            };
+        }
     }
 
     record Action(

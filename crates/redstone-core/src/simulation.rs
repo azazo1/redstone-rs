@@ -1,6 +1,6 @@
 use std::collections::{BTreeSet, VecDeque};
 
-use indexmap::IndexMap;
+use indexmap::{IndexMap, IndexSet};
 use thiserror::Error;
 use tokio::sync::broadcast;
 use tracing::{debug, warn};
@@ -12,6 +12,7 @@ use crate::{
     RedstoneMode, RulesError, ScheduledTick, SimulationPhase, SparseWorld, TraceEvent, TraceKind,
     TraceLog, WorldDelta, WorldEvent,
 };
+use crate::rules::NeighborTasks;
 
 const DEFAULT_MAX_SCHEDULED_TICKS_PER_TICK: usize = 65_536;
 const DEFAULT_MAX_CHAINED_NEIGHBOR_UPDATES: usize = 1_000_000;
@@ -31,6 +32,7 @@ pub struct SimulationConfig {
     pub seed: u64,
     pub strict: bool,
     pub trace: bool,
+    pub record_events: bool,
     pub max_scheduled_ticks_per_tick: usize,
     pub max_chained_neighbor_updates: usize,
 }
@@ -42,6 +44,7 @@ impl Default for SimulationConfig {
             seed: 0,
             strict: true,
             trace: false,
+            record_events: true,
             max_scheduled_ticks_per_tick: DEFAULT_MAX_SCHEDULED_TICKS_PER_TICK,
             max_chained_neighbor_updates: DEFAULT_MAX_CHAINED_NEIGHBOR_UPDATES,
         }
@@ -78,18 +81,20 @@ pub struct Simulation<R: BlockRules> {
     block_event_keys: BTreeSet<BlockEvent>,
     trace: Vec<TraceEvent>,
     probes: IndexMap<String, Probe>,
+    tickable_block_entities: IndexSet<BlockPos>,
     delta_tx: broadcast::Sender<WorldDelta>,
 }
 
 impl<R: BlockRules> Simulation<R> {
     pub fn load(
         mut rules: R,
-        world: SparseWorld,
+        mut world: SparseWorld,
         config: SimulationConfig,
     ) -> Result<Self, SimulationError> {
         if world.air() != rules.air_state() {
             return Err(SimulationError::AirStateMismatch);
         }
+        world.optimize_section_access();
         if config.strict {
             let unsupported = world
                 .iter_blocks()
@@ -101,6 +106,11 @@ impl<R: BlockRules> Simulation<R> {
             }
         }
         rules.load_world(&world)?;
+        let tickable_block_entities = world
+            .block_entities()
+            .filter(|(pos, data)| rules.should_tick_block_entity(&world, **pos, data))
+            .map(|(pos, _)| *pos)
+            .collect();
         let (delta_tx, _) = broadcast::channel(256);
         let random_state = (config.seed ^ 0x5deece66d) & ((1 << 48) - 1);
         Ok(Self {
@@ -117,6 +127,7 @@ impl<R: BlockRules> Simulation<R> {
             block_event_keys: BTreeSet::new(),
             trace: Vec::new(),
             probes: IndexMap::new(),
+            tickable_block_entities,
             delta_tx,
         })
     }
@@ -316,6 +327,7 @@ impl<R: BlockRules> Simulation<R> {
     ) -> Result<WorldDelta, SimulationError> {
         self.tick.0 += 1;
         self.micro_step = MicroStep(0);
+        self.rules.begin_tick(self.tick);
         let mut changes = Vec::new();
 
         for paste in pastes {
@@ -490,9 +502,9 @@ impl<R: BlockRules> Simulation<R> {
 
     fn run_block_entities(&mut self, changes: &mut Vec<WorldEvent>) -> Result<(), SimulationError> {
         let positions = self
-            .world
-            .block_entities()
-            .map(|(pos, _)| *pos)
+            .tickable_block_entities
+            .iter()
+            .copied()
             .collect::<Vec<_>>();
         for pos in positions {
             if self.world.block_entity(pos).is_none() {
@@ -514,7 +526,7 @@ impl<R: BlockRules> Simulation<R> {
 
     fn process_neighbor_tasks(
         &mut self,
-        tasks: Vec<NeighborTask>,
+        tasks: NeighborTasks,
         phase: SimulationPhase,
     ) -> Result<(), SimulationError> {
         self.process_neighbor_tasks_with_changes(tasks, phase, &mut Vec::new())
@@ -522,14 +534,12 @@ impl<R: BlockRules> Simulation<R> {
 
     fn process_neighbor_tasks_with_changes(
         &mut self,
-        tasks: Vec<NeighborTask>,
+        mut tasks: NeighborTasks,
         phase: SimulationPhase,
         changes: &mut Vec<WorldEvent>,
     ) -> Result<(), SimulationError> {
-        let mut stack = Vec::new();
-        for task in tasks.into_iter().rev() {
-            stack.push(task);
-        }
+        tasks.reverse();
+        let mut stack = tasks;
         let mut count = 0usize;
         while let Some(task) = stack.pop() {
             let task = match task {
@@ -539,13 +549,15 @@ impl<R: BlockRules> Simulation<R> {
                     delay,
                     priority,
                 } => {
-                    let nested = self.with_context_and_changes(phase, changes, |_rules, ctx| {
-                        ctx.schedule_tick(pos, block, delay, priority);
-                        Ok(())
-                    })?;
-                    for task in nested.into_iter().rev() {
-                        stack.push(task);
-                    }
+                    self.append_context_tasks(
+                        phase,
+                        changes,
+                        &mut stack,
+                        |_rules, ctx| {
+                            ctx.schedule_tick(pos, block, delay, priority);
+                            Ok(())
+                        },
+                    )?;
                     continue;
                 }
                 NeighborTask::SetBlockAndUpdateNeighborsAfterNeighbors {
@@ -554,52 +566,56 @@ impl<R: BlockRules> Simulation<R> {
                     cause,
                     source_block,
                 } => {
-                    let nested = self.with_context_and_changes(phase, changes, |_rules, ctx| {
-                        let old = ctx.set_block(pos, state, cause)?;
-                        if old != state {
-                            ctx.update_neighbors(pos, source_block, None, None);
-                        }
-                        Ok(())
-                    })?;
-                    for task in nested.into_iter().rev() {
-                        stack.push(task);
-                    }
+                    self.append_context_tasks(
+                        phase,
+                        changes,
+                        &mut stack,
+                        |_rules, ctx| {
+                            let old = ctx.set_block(pos, state, cause)?;
+                            if old != state {
+                                ctx.update_neighbors(pos, source_block, None, None);
+                            }
+                            Ok(())
+                        },
+                    )?;
                     continue;
                 }
                 NeighborTask::ApplyBlockChangesAfterNeighbors {
                     changes: deferred_changes,
                     follow_up,
                 } => {
-                    let nested = self.with_context_and_changes(phase, changes, |_rules, ctx| {
-                        for change in deferred_changes {
-                            ctx.set_block(change.pos, change.state, change.cause)?;
-                            match change.block_entity {
-                                DeferredBlockEntityUpdate::Keep => {}
-                                DeferredBlockEntityUpdate::Remove => {
-                                    ctx.remove_block_entity(change.pos);
-                                }
-                                DeferredBlockEntityUpdate::Set(data) => {
-                                    ctx.set_block_entity(change.pos, data);
-                                }
-                            }
-                        }
-                        Ok(())
-                    })?;
                     for task in follow_up.into_iter().rev() {
                         stack.push(task);
                     }
-                    for task in nested.into_iter().rev() {
-                        stack.push(task);
-                    }
+                    self.append_context_tasks(
+                        phase,
+                        changes,
+                        &mut stack,
+                        |_rules, ctx| {
+                            for change in deferred_changes {
+                                ctx.set_block(change.pos, change.state, change.cause)?;
+                                match change.block_entity {
+                                    DeferredBlockEntityUpdate::Keep => {}
+                                    DeferredBlockEntityUpdate::Remove => {
+                                        ctx.remove_block_entity(change.pos);
+                                    }
+                                    DeferredBlockEntityUpdate::Set(data) => {
+                                        ctx.set_block_entity(change.pos, data);
+                                    }
+                                }
+                            }
+                            Ok(())
+                        },
+                    )?;
                     continue;
                 }
                 NeighborTask::RunRuleTaskAfterNeighbors(task) => {
-                    let nested = self.with_context_and_changes(phase, changes, |rules, ctx| {
-                        rules.on_deferred_task(ctx, task)
-                    })?;
-                    for task in nested.into_iter().rev() {
-                        stack.push(task);
-                    }
+                    self.append_context_tasks(
+                        phase,
+                        changes,
+                        &mut stack,
+                        |rules, ctx| rules.on_deferred_task(ctx, task),
+                    )?;
                     continue;
                 }
                 task => task,
@@ -657,25 +673,27 @@ impl<R: BlockRules> Simulation<R> {
                 NeighborTask::RunRuleTaskAfterNeighbors(_) => unreachable!(),
             };
 
-            self.push_trace(
-                phase,
-                TraceKind::NeighborUpdate {
-                    pos: update.pos,
-                    source_pos: update.source_pos,
-                    source_block: update.source_block,
-                    moved_by_piston: update.moved_by_piston,
-                    orientation: update.orientation,
-                },
-            );
-            let nested = self.with_context_and_changes(phase, changes, |rules, ctx| {
-                rules.on_neighbor_update(ctx, update)
-            })?;
+            if self.config.trace {
+                self.push_trace(
+                    phase,
+                    TraceKind::NeighborUpdate {
+                        pos: update.pos,
+                        source_pos: update.source_pos,
+                        source_block: update.source_block,
+                        moved_by_piston: update.moved_by_piston,
+                        orientation: update.orientation,
+                    },
+                );
+            }
             if let Some(continuation) = continuation {
                 stack.push(continuation);
             }
-            for task in nested.into_iter().rev() {
-                stack.push(task);
-            }
+            self.append_context_tasks(
+                phase,
+                changes,
+                &mut stack,
+                |rules, ctx| rules.on_neighbor_update(ctx, update),
+            )?;
         }
         debug!(tick = self.tick.0, count, "完成邻居更新链");
         Ok(())
@@ -706,7 +724,7 @@ impl<R: BlockRules> Simulation<R> {
         &mut self,
         phase: SimulationPhase,
         callback: impl FnOnce(&mut R, &mut EventContext<'_>) -> Result<T, RulesError>,
-    ) -> Result<Vec<NeighborTask>, SimulationError> {
+    ) -> Result<NeighborTasks, SimulationError> {
         self.with_context_and_changes(phase, &mut Vec::new(), callback)
     }
 
@@ -715,8 +733,34 @@ impl<R: BlockRules> Simulation<R> {
         phase: SimulationPhase,
         changes: &mut Vec<WorldEvent>,
         callback: impl FnOnce(&mut R, &mut EventContext<'_>) -> Result<T, RulesError>,
-    ) -> Result<Vec<NeighborTask>, SimulationError> {
+    ) -> Result<NeighborTasks, SimulationError> {
+        let mut tasks = NeighborTasks::new();
+        self.with_context_and_changes_into_tasks(phase, changes, &mut tasks, callback)?;
+        Ok(tasks)
+    }
+
+    fn append_context_tasks<T>(
+        &mut self,
+        phase: SimulationPhase,
+        changes: &mut Vec<WorldEvent>,
+        tasks: &mut NeighborTasks,
+        callback: impl FnOnce(&mut R, &mut EventContext<'_>) -> Result<T, RulesError>,
+    ) -> Result<(), SimulationError> {
+        let start = tasks.len();
+        self.with_context_and_changes_into_tasks(phase, changes, tasks, callback)?;
+        tasks[start..].reverse();
+        Ok(())
+    }
+
+    fn with_context_and_changes_into_tasks<T>(
+        &mut self,
+        phase: SimulationPhase,
+        changes: &mut Vec<WorldEvent>,
+        tasks: &mut NeighborTasks,
+        callback: impl FnOnce(&mut R, &mut EventContext<'_>) -> Result<T, RulesError>,
+    ) -> Result<(), SimulationError> {
         let trace = self.config.trace.then_some(&mut self.trace);
+        let events = self.config.record_events.then_some(changes);
         let mut ctx = EventContext::new(
             &mut self.world,
             self.config.mode,
@@ -730,10 +774,24 @@ impl<R: BlockRules> Simulation<R> {
             &mut self.block_events,
             &mut self.block_event_keys,
             trace,
-            changes,
+            events,
+            tasks,
         );
         callback(&mut self.rules, &mut ctx)?;
-        Ok(ctx.take_neighbor_tasks())
+        let affected = ctx.take_touched_block_entities();
+        drop(ctx);
+        for pos in affected {
+            let tickable = self.world.block_entity(pos).is_some_and(|data| {
+                self.rules
+                    .should_tick_block_entity(&self.world, pos, data)
+            });
+            if tickable {
+                self.tickable_block_entities.insert(pos);
+            } else {
+                self.tickable_block_entities.shift_remove(&pos);
+            }
+        }
+        Ok(())
     }
 
     fn push_trace(&mut self, phase: SimulationPhase, kind: TraceKind) {

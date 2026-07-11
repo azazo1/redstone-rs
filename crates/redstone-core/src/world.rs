@@ -19,16 +19,16 @@ pub struct SectionPos {
 impl SectionPos {
     pub fn from_block(pos: BlockPos) -> Self {
         Self {
-            x: pos.x.div_euclid(SECTION_EDGE),
-            y: pos.y.div_euclid(SECTION_EDGE),
-            z: pos.z.div_euclid(SECTION_EDGE),
+            x: pos.x >> 4,
+            y: pos.y >> 4,
+            z: pos.z >> 4,
         }
     }
 
     pub fn local_index(pos: BlockPos) -> usize {
-        let x = pos.x.rem_euclid(SECTION_EDGE) as usize;
-        let y = pos.y.rem_euclid(SECTION_EDGE) as usize;
-        let z = pos.z.rem_euclid(SECTION_EDGE) as usize;
+        let x = (pos.x & 15) as usize;
+        let y = (pos.y & 15) as usize;
+        let z = (pos.z & 15) as usize;
         (y * 16 + z) * 16 + x
     }
 }
@@ -101,6 +101,7 @@ impl PaletteSection {
 pub struct SparseWorld {
     air: BlockStateId,
     sections: BTreeMap<SectionPos, PaletteSection>,
+    dense_sections: Option<DenseSections>,
     block_entities: BTreeMap<BlockPos, BlockEntityData>,
     block_entity_order: IndexSet<BlockPos>,
     entities: BTreeMap<EntityId, EntityData>,
@@ -114,6 +115,7 @@ impl SparseWorld {
         Self {
             air,
             sections: BTreeMap::new(),
+            dense_sections: None,
             block_entities: BTreeMap::new(),
             block_entity_order: IndexSet::new(),
             entities: BTreeMap::new(),
@@ -128,7 +130,7 @@ impl SparseWorld {
 
     pub fn get_block(&self, pos: BlockPos) -> BlockStateId {
         let section_pos = SectionPos::from_block(pos);
-        self.sections.get(&section_pos).map_or(self.air, |section| {
+        self.section(section_pos).map_or(self.air, |section| {
             section.get(SectionPos::local_index(pos))
         })
     }
@@ -139,17 +141,32 @@ impl SparseWorld {
         state: BlockStateId,
     ) -> Result<BlockStateId, WorldError> {
         let section_pos = SectionPos::from_block(pos);
-        if state == self.air && !self.sections.contains_key(&section_pos) {
+        if state == self.air && self.section(section_pos).is_none() {
             return Ok(self.air);
         }
-
-        let section = self
-            .sections
-            .entry(section_pos)
-            .or_insert_with(|| PaletteSection::new(self.air));
+        let air = self.air;
+        let section = if let Some(dense) = self
+            .dense_sections
+            .as_mut()
+            .and_then(|dense| dense.slot_mut(section_pos))
+        {
+            dense.get_or_insert_with(|| PaletteSection::new(air))
+        } else {
+            self.sections
+                .entry(section_pos)
+                .or_insert_with(|| PaletteSection::new(air))
+        };
         let old = section.set(SectionPos::local_index(pos), state, self.air)?;
         if section.is_empty() {
-            self.sections.remove(&section_pos);
+            if let Some(slot) = self
+                .dense_sections
+                .as_mut()
+                .and_then(|dense| dense.slot_mut(section_pos))
+            {
+                *slot = None;
+            } else {
+                self.sections.remove(&section_pos);
+            }
         }
         if state == self.air {
             self.block_entities.remove(&pos);
@@ -298,21 +315,71 @@ impl SparseWorld {
         ids
     }
 
-    pub fn sections(&self) -> impl Iterator<Item = (&SectionPos, &PaletteSection)> {
-        self.sections.iter()
+    pub fn optimize_section_access(&mut self) {
+        if self.dense_sections.is_some() || self.sections.is_empty() {
+            return;
+        }
+        let mut positions = self.sections.keys().copied();
+        let first = positions.next().expect("sections 非空");
+        let (min, max) = positions.fold((first, first), |(min, max), pos| {
+            (
+                SectionPos {
+                    x: min.x.min(pos.x),
+                    y: min.y.min(pos.y),
+                    z: min.z.min(pos.z),
+                },
+                SectionPos {
+                    x: max.x.max(pos.x),
+                    y: max.y.max(pos.y),
+                    z: max.z.max(pos.z),
+                },
+            )
+        });
+        let Some(volume) = DenseSections::volume(min, max) else {
+            return;
+        };
+        let density_limit = self.sections.len().saturating_mul(8).max(64);
+        if volume > density_limit || volume > 1_000_000 {
+            return;
+        }
+        let mut dense = DenseSections::new(min, max, volume);
+        for (pos, section) in std::mem::take(&mut self.sections) {
+            *dense
+                .slot_mut(pos)
+                .expect("section bounds were used to size dense storage") = Some(section);
+        }
+        self.dense_sections = Some(dense);
+    }
+
+    pub fn sections(&self) -> impl Iterator<Item = (SectionPos, &PaletteSection)> {
+        let mut sections = self
+            .sections
+            .iter()
+            .map(|(pos, section)| (*pos, section))
+            .chain(
+                self.dense_sections
+                    .iter()
+                    .flat_map(DenseSections::iter),
+            )
+            .collect::<Vec<_>>();
+        sections.sort_unstable_by_key(|(pos, _)| *pos);
+        sections.into_iter()
     }
 
     pub fn section_count(&self) -> usize {
         self.sections.len()
+            + self
+                .dense_sections
+                .as_ref()
+                .map_or(0, DenseSections::section_count)
     }
 
     pub fn non_air_blocks(&self) -> usize {
-        self.sections.values().map(|section| section.non_air).sum()
+        self.sections().map(|(_, section)| section.non_air).sum()
     }
 
     pub fn iter_blocks(&self) -> impl Iterator<Item = (BlockPos, BlockStateId)> + '_ {
-        self.sections
-            .iter()
+        self.sections()
             .flat_map(move |(section_pos, section)| {
                 (0..SECTION_VOLUME).filter_map(move |index| {
                     let state = section.get(index);
@@ -332,6 +399,94 @@ impl SparseWorld {
                     ))
                 })
             })
+    }
+
+    fn section(&self, pos: SectionPos) -> Option<&PaletteSection> {
+        if let Some(slot) = self
+            .dense_sections
+            .as_ref()
+            .and_then(|dense| dense.slot(pos))
+        {
+            return slot.as_ref();
+        }
+        self.sections.get(&pos)
+    }
+}
+
+#[derive(Clone, Debug, Serialize)]
+struct DenseSections {
+    min: SectionPos,
+    size_x: usize,
+    size_y: usize,
+    size_z: usize,
+    sections: Vec<Option<PaletteSection>>,
+}
+
+impl DenseSections {
+    fn volume(min: SectionPos, max: SectionPos) -> Option<usize> {
+        let size_x = usize::try_from(max.x.checked_sub(min.x)?.checked_add(1)?).ok()?;
+        let size_y = usize::try_from(max.y.checked_sub(min.y)?.checked_add(1)?).ok()?;
+        let size_z = usize::try_from(max.z.checked_sub(min.z)?.checked_add(1)?).ok()?;
+        size_x.checked_mul(size_y)?.checked_mul(size_z)
+    }
+
+    fn new(min: SectionPos, max: SectionPos, volume: usize) -> Self {
+        Self {
+            min,
+            size_x: (max.x - min.x + 1) as usize,
+            size_y: (max.y - min.y + 1) as usize,
+            size_z: (max.z - min.z + 1) as usize,
+            sections: vec![None; volume],
+        }
+    }
+
+    fn index(&self, pos: SectionPos) -> Option<usize> {
+        let x = i64::from(pos.x) - i64::from(self.min.x);
+        let y = i64::from(pos.y) - i64::from(self.min.y);
+        let z = i64::from(pos.z) - i64::from(self.min.z);
+        if x < 0
+            || y < 0
+            || z < 0
+            || x >= self.size_x as i64
+            || y >= self.size_y as i64
+            || z >= self.size_z as i64
+        {
+            return None;
+        }
+        Some((y as usize * self.size_z + z as usize) * self.size_x + x as usize)
+    }
+
+    fn slot(&self, pos: SectionPos) -> Option<&Option<PaletteSection>> {
+        self.sections.get(self.index(pos)?)
+    }
+
+    fn slot_mut(&mut self, pos: SectionPos) -> Option<&mut Option<PaletteSection>> {
+        let index = self.index(pos)?;
+        self.sections.get_mut(index)
+    }
+
+    fn iter(&self) -> impl Iterator<Item = (SectionPos, &PaletteSection)> {
+        self.sections
+            .iter()
+            .enumerate()
+            .filter_map(|(index, section)| {
+                let section = section.as_ref()?;
+                let x = index % self.size_x;
+                let z = index / self.size_x % self.size_z;
+                let y = index / self.size_x / self.size_z;
+                Some((
+                    SectionPos {
+                        x: self.min.x + x as i32,
+                        y: self.min.y + y as i32,
+                        z: self.min.z + z as i32,
+                    },
+                    section,
+                ))
+            })
+    }
+
+    fn section_count(&self) -> usize {
+        self.sections.iter().filter(|section| section.is_some()).count()
     }
 }
 
@@ -400,6 +555,29 @@ mod tests {
         assert_eq!(world.section_count(), 1);
         world.set_block(BlockPos::ZERO, air).unwrap();
         assert_eq!(world.section_count(), 0);
+    }
+
+    #[test]
+    fn dense_section_access_preserves_blocks_and_accepts_fallback_sections() {
+        let air = BlockStateId(0);
+        let solid = BlockStateId(1);
+        let mut world = SparseWorld::new(air);
+        let inside = BlockPos::new(-17, 20, 33);
+        let edge = BlockPos::new(31, 47, 63);
+        world.set_block(inside, solid).unwrap();
+        world.set_block(edge, solid).unwrap();
+        world.optimize_section_access();
+
+        assert_eq!(world.get_block(inside), solid);
+        assert_eq!(world.get_block(edge), solid);
+        assert_eq!(world.non_air_blocks(), 2);
+
+        let outside = BlockPos::new(1_000, -1_000, 2_000);
+        world.set_block(outside, solid).unwrap();
+        assert_eq!(world.get_block(outside), solid);
+        world.set_block(inside, air).unwrap();
+        assert_eq!(world.get_block(inside), air);
+        assert_eq!(world.non_air_blocks(), 2);
     }
 
     #[test]

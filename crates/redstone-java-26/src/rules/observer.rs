@@ -53,7 +53,7 @@ impl Java26Rules {
             && !ctx.has_scheduled_tick(pos, new.kind)
         {
             let reset = self.changed_state(new_state, "powered", "false")?;
-            ctx.set_block(pos, reset, "observer_place_reset")?;
+            self.set_block(ctx, pos, reset, "observer_place_reset")?;
             let reset_state = self.state(reset)?.clone();
             self.update_diode_output_neighbors(ctx, pos, &reset_state);
             return Ok(reset);
@@ -68,7 +68,7 @@ impl Java26Rules {
         state_id: BlockStateId,
         source_pos: BlockPos,
     ) -> Result<(), RulesError> {
-        let state = self.state(state_id)?.clone();
+        let state = self.state(state_id)?;
         if !matches!(state.behavior, BlockBehavior::Observer) {
             return Ok(());
         }
@@ -76,6 +76,7 @@ impl Java26Rules {
             .direction_property("facing")
             .unwrap_or(Direction::South);
         if pos.relative(facing) == source_pos {
+            let state = state.clone();
             self.start_observer_signal(ctx, pos, &state)?;
         }
         Ok(())

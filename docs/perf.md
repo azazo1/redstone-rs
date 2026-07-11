@@ -151,3 +151,37 @@ trace 开启后运行 `flying-roof` 的 user CPU 为 0.41 秒, 相对 2.29 秒�
 ```shell
 cargo samply --profile samply -p redstone-java-26 --test suite --samply-args="--rate 4000 --save-only --output profile.json.gz" -- --test-threads=1
 ```
+
+## CPU+DVD 场景专项
+
+`assets/scenarios/cpu-8bit-dvd.toml` 使用用户生成的 `assets/schematics/cpu-8bit.nbt`. 为缩短优化循环, 当前工作区把 `max_ticks` 从 staged 的 300 临时降为 60. 普通 release 连续运行 5 次的优化前结果为 137.8, 143.8, 143.7, 146.9 和 147.1 tick/s. 中位数为 143.8 tick/s.
+
+等价 Java GameTest 在 300 tick 下用时 1153.942 ms, 即 259.978 tick/s. Rust 最初版本约为 30-33 tick/s, 因而当前版本相对最初值已经约有 4.5x 加速, 也达到原游戏 20 tick/s 的约 7.2x, 但尚未达到 200 tick/s 目标.
+
+带调试符号的 samply profile 获得 9339 个样本. 主要包含热点如下. 表中路径互相包含, 不能直接相加.
+
+| 热点 | 包含占比 |
+| --- | ---: |
+| `Simulation::process_neighbor_tasks_with_changes` | 64.15% |
+| `Java26Rules::on_neighbor_update` | 49.08% |
+| `Java26Rules::update_wire` | 32.17% |
+| `Java26Rules::wire_target_power` | 25.57% |
+| `SparseWorld::section` | 8.94% |
+| 坐标缓存的 SipHash | 11.18% |
+
+本轮先处理 4 个不改变规则顺序的固定成本.
+
+1. 稠密 section 的空槽不再回退查询稀疏 `BTreeMap`.
+2. trace 关闭时不再构造 `NeighborUpdate` trace 值.
+3. wire power 变化检查相邻 observer 时, 只在目标确实是 observer 时克隆状态.
+4. wire 输入缓存改用针对 `BlockPos` 的轻量哈希器.
+
+普通 release 连续运行 7 次得到 150.9, 146.8, 148.0, 147.4, 148.5, 148.9 和 149.9 tick/s. 中位数为 148.5 tick/s, 相对本轮 143.8 tick/s 基线改善约 3.3%. 结果说明剩余成本主要来自实际 neighbor 链和 wire 功率计算, 仅清理外围固定开销不足以达到 200 tick/s.
+
+### Neighbor 任务栈复用
+
+`process_neighbor_tasks_with_changes` 原先为每次规则回调创建一个临时 `Vec<NeighborTask>`, 回调结束后再倒序搬到主处理栈. wire 功率变化会生成多组 neighbor update, 因而在热路径中持续分配, 释放和复制任务枚举.
+
+`EventContext` 现在直接借用当前任务栈. 每次回调记录追加前的长度, 回调结束后只反转新增切片, 从而保持 nested task 先于 multi continuation 的原有顺序. Core 中验证 nested neighbor, deferred tick 和 deferred block change 顺序的 17 个测试全部通过.
+
+普通 release 连续运行 7 次得到 142.5, 162.7, 162.6, 163.9, 164.0, 159.6 和 163.6 tick/s. 首次运行存在冷启动抖动, 全部结果中位数为 162.7 tick/s. 相对上一轮 148.5 tick/s 中位数改善约 9.6%.

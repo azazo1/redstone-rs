@@ -108,6 +108,17 @@ impl Java26Rules {
         Ok(())
     }
 
+    pub(super) fn update_observers_after_wire_power_change(
+        &mut self,
+        ctx: &mut EventContext<'_>,
+        source_pos: BlockPos,
+    ) -> Result<(), RulesError> {
+        for direction in UPDATE_SHAPE_ORDER {
+            self.update_observer_shape(ctx, source_pos.relative(direction), source_pos)?;
+        }
+        Ok(())
+    }
+
     pub(super) fn repair_shape(
         &mut self,
         ctx: &mut EventContext<'_>,
@@ -124,16 +135,7 @@ impl Java26Rules {
         notify: bool,
         direction_to_neighbor: Option<Direction>,
     ) -> Result<BlockStateId, RulesError> {
-        self.repair_shape_inner(ctx, pos, notify, direction_to_neighbor, true)
-    }
-
-    pub(super) fn repair_shape_after_neighbor_changed(
-        &mut self,
-        ctx: &mut EventContext<'_>,
-        pos: BlockPos,
-        direction_to_neighbor: Option<Direction>,
-    ) -> Result<BlockStateId, RulesError> {
-        self.repair_shape_inner(ctx, pos, true, direction_to_neighbor, false)
+        self.repair_shape_inner(ctx, pos, notify, direction_to_neighbor)
     }
 
     fn repair_shape_inner(
@@ -142,18 +144,15 @@ impl Java26Rules {
         pos: BlockPos,
         notify: bool,
         direction_to_neighbor: Option<Direction>,
-        check_support: bool,
     ) -> Result<BlockStateId, RulesError> {
         let state_id = ctx.world.get_block(pos);
         let state = self.state(state_id)?.clone();
-        if check_support
-            && self.loses_support_from_shape(ctx.world, pos, &state, direction_to_neighbor)
-        {
+        if self.loses_support_from_shape(ctx.world, pos, &state, direction_to_neighbor) {
             if notify {
                 return self.remove_block_after_support_loss(ctx, pos, "shape_support_loss");
             }
             let air = self.registry.air_state();
-            ctx.set_block(pos, air, "shape_support_initialize")?;
+            self.set_block(ctx, pos, air, "shape_support_initialize")?;
             return Ok(air);
         }
         let Some(family) = shape_family(&state.name) else {
@@ -184,7 +183,7 @@ impl Java26Rules {
             } else {
                 "shape_initialize"
             };
-            let old = ctx.set_block(pos, repaired, cause)?;
+            let old = self.set_block(ctx, pos, repaired, cause)?;
             if notify && old != repaired {
                 self.update_neighbor_shapes(ctx, pos)?;
             }
@@ -337,7 +336,7 @@ impl Java26Rules {
         if notify {
             self.set_state_and_notify(ctx, pos, state, cause, None)?;
         } else {
-            ctx.set_block(pos, state, cause)?;
+            self.set_block(ctx, pos, state, cause)?;
         }
         Ok(())
     }

@@ -6,12 +6,12 @@ use redstone_core::{
     BlockEntityData, BlockPos, BlockStateId, EntityData, EntityId, Expectation, GameTick, Probe,
     ProbeValue, RedstoneMode,
 };
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 use crate::{Mirror, Rotation, StructureTransform};
 
-#[derive(Clone, Debug, Deserialize)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct Scenario {
     pub version: String,
     pub mode: RedstoneMode,
@@ -21,6 +21,8 @@ pub struct Scenario {
     pub max_ticks: u64,
     #[serde(default = "default_strict")]
     pub strict: bool,
+    #[serde(default)]
+    pub oracle_micro_trace: bool,
     pub source: ScenarioSource,
     #[serde(default)]
     pub actions: Vec<ScenarioAction>,
@@ -30,7 +32,7 @@ pub struct Scenario {
     pub expectations: Vec<ScenarioExpectation>,
 }
 
-#[derive(Clone, Debug, Deserialize)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct ScenarioSource {
     pub path: PathBuf,
     #[serde(default)]
@@ -55,7 +57,7 @@ impl ScenarioSource {
     }
 }
 
-#[derive(Clone, Debug, Deserialize)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct ScenarioPaste {
     pub path: PathBuf,
     #[serde(default)]
@@ -84,7 +86,7 @@ impl ScenarioPaste {
     }
 }
 
-#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum InitializationMode {
     Raw,
@@ -92,14 +94,14 @@ pub enum InitializationMode {
     Notify,
 }
 
-#[derive(Clone, Debug, Deserialize)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct ScenarioAction {
     pub tick: GameTick,
     #[serde(flatten)]
     pub action: ScenarioActionKind,
 }
 
-#[derive(Clone, Debug, Deserialize)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum ScenarioActionKind {
     SetBlock {
@@ -167,21 +169,21 @@ impl ScenarioActionKind {
     }
 }
 
-#[derive(Clone, Debug, Deserialize)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct ScenarioProbe {
     pub name: String,
     #[serde(flatten)]
     pub probe: Probe,
 }
 
-#[derive(Clone, Debug, Deserialize)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct ScenarioExpectation {
     pub tick: GameTick,
     pub probe: String,
     pub equals: ScenarioExpectationValue,
 }
 
-#[derive(Clone, Debug, Deserialize)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(untagged)]
 pub enum ScenarioExpectationValue {
     State { state: BlockStateId },

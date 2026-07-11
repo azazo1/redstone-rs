@@ -3,8 +3,10 @@ package redstone.oracle;
 import com.google.gson.JsonObject;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Comparator;
+import java.util.List;
 import net.minecraft.SharedConstants;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.gametest.framework.GameTestMainUtil;
@@ -106,6 +108,10 @@ public final class Main {
             if (!Files.isRegularFile(output)) {
                 throw new IllegalStateException("GameTestServer 未生成 oracle 输出: " + output);
             }
+            Files.readAllLines(serverLog)
+                .stream()
+                .filter(line -> line.contains("GAMETEST_TICKS"))
+                .forEach(System.out::println);
             System.out.println("Java GameTest 场景执行完成");
         } finally {
             deleteTree(work);
@@ -116,9 +122,13 @@ public final class Main {
         Path work = Files.createTempDirectory("redstone-oracle-self-test-");
         try {
             Path structure = work.resolve("machine.nbt");
+            Path pasteOn = work.resolve("paste-on.nbt");
+            Path pasteOff = work.resolve("paste-off.nbt");
             Path scenario = work.resolve("scenario.toml");
             Path output = work.resolve("oracle.jsonl");
-            writeScenarioSelfTestStructure(structure);
+            writeScenarioSelfTestStructure(structure, "minecraft:stone", 1, 2);
+            writeScenarioSelfTestStructure(pasteOn, "minecraft:redstone_block", 0, 1);
+            writeScenarioSelfTestStructure(pasteOff, "minecraft:air", 0, 1);
             Files.writeString(
                 scenario,
                 "version = \"26.1.2\"\n"
@@ -128,10 +138,17 @@ public final class Main {
                     + "[source]\n"
                     + "path = \"machine.nbt\"\n"
                     + "initialization = \"raw\"\n\n"
-                    + "[[actions]]\n"
+                    + "[[source.pastes]]\n"
+                    + "path = \"paste-on.nbt\"\n"
+                    + "origin = { x = 0, y = 0, z = 0 }\n"
+                    + "ignore_air = true\n"
+                    + "update = true\n\n"
+                    + "[[source.pastes]]\n"
+                    + "path = \"paste-off.nbt\"\n"
                     + "tick = 2\n"
-                    + "type = \"break_block\"\n"
-                    + "pos = { x = 0, y = 0, z = 0 }\n\n"
+                    + "origin = { x = 0, y = 0, z = 0 }\n"
+                    + "ignore_air = false\n"
+                    + "update = true\n\n"
                     + "[[probes]]\n"
                     + "name = \"state\"\n"
                     + "type = \"block_state\"\n"
@@ -151,24 +168,29 @@ public final class Main {
         }
     }
 
-    private static void writeScenarioSelfTestStructure(Path output) throws Exception {
+    private static void writeScenarioSelfTestStructure(
+        Path output,
+        String blockName,
+        int blockX,
+        int sizeX
+    ) throws Exception {
         CompoundTag root = new CompoundTag();
         root.putInt("DataVersion", EXPECTED_DATA_VERSION);
         ListTag size = new ListTag();
-        size.add(IntTag.valueOf(1));
+        size.add(IntTag.valueOf(sizeX));
         size.add(IntTag.valueOf(1));
         size.add(IntTag.valueOf(1));
         root.put("size", size);
 
         CompoundTag state = new CompoundTag();
-        state.putString("Name", "minecraft:redstone_block");
+        state.putString("Name", blockName);
         ListTag palette = new ListTag();
         palette.add(state);
         root.put("palette", palette);
 
         CompoundTag block = new CompoundTag();
         ListTag pos = new ListTag();
-        pos.add(IntTag.valueOf(0));
+        pos.add(IntTag.valueOf(blockX));
         pos.add(IntTag.valueOf(0));
         pos.add(IntTag.valueOf(0));
         block.put("pos", pos);
@@ -215,13 +237,19 @@ public final class Main {
         Files.writeString(testInstance, instance.toString());
 
         CompoundTag root = readStructure(scenario.source.path());
-        int dataVersion = root.getIntOr("DataVersion", 0);
-        if (dataVersion > EXPECTED_DATA_VERSION) {
-            throw new IllegalArgumentException(
-                "结构 DataVersion " + dataVersion + " 高于 Java " + EXPECTED_DATA_VERSION
+        validateDataVersion(root, scenario.source.path());
+        List<CompoundTag> pasteStructures = new ArrayList<>();
+        for (int index = 0; index < scenario.source.pastes().size(); index++) {
+            Scenario.Paste paste = scenario.source.pastes().get(index);
+            CompoundTag pasteRoot = readStructure(paste.path());
+            validateDataVersion(pasteRoot, paste.path());
+            pasteStructures.add(pasteRoot);
+            NbtIo.writeCompressed(
+                pasteRoot,
+                structure.getParent().resolve("paste_" + index + ".nbt")
             );
         }
-        FrameGeometry frame = FrameGeometry.from(root, scenario);
+        FrameGeometry frame = FrameGeometry.from(root, pasteStructures, scenario);
         NbtIo.writeCompressed(root, structure);
         CompoundTag frameRoot = root.copy();
         frameRoot.put("palette", airPalette());
@@ -230,6 +258,15 @@ public final class Main {
         frameRoot.put("size", integerList(frame.size().x(), frame.size().y(), frame.size().z()));
         NbtIo.writeCompressed(frameRoot, framePath);
         return frame;
+    }
+
+    private static void validateDataVersion(CompoundTag root, Path path) {
+        int dataVersion = root.getIntOr("DataVersion", 0);
+        if (dataVersion > EXPECTED_DATA_VERSION) {
+            throw new IllegalArgumentException(
+                "结构 " + path + " 的 DataVersion " + dataVersion + " 高于 Java " + EXPECTED_DATA_VERSION
+            );
+        }
     }
 
     private static ListTag airPalette() {
