@@ -22,7 +22,7 @@ default:
 
 # 编译整个 workspace.
 build:
-    cargo build --workspace
+    cargo build --release --workspace
 
 # 对整个 workspace 执行 clippy.
 clippy:
@@ -30,7 +30,7 @@ clippy:
 
 # 运行整个 workspace 的测试.
 test:
-    cargo test --workspace
+    cargo test --release --workspace
 
 # just run path/to/scenario.toml
 # 运行一个红石时序场景.
