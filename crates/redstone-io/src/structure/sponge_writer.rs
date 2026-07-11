@@ -23,19 +23,22 @@ pub(super) fn encode(
         .try_fold(1usize, |volume, value| volume.checked_mul(*value as usize))
         .ok_or_else(|| StructureWriteError::Sponge("区域体积溢出".to_owned()))?;
     let mut palette = BTreeMap::<StructureState, usize>::new();
+    let mut state_indices = HashMap::<BlockStateId, usize>::new();
     let mut data = Vec::<i8>::new();
     data.try_reserve_exact(volume)
         .map_err(|error| StructureWriteError::Sponge(error.to_string()))?;
-    for y in 0..dimensions[1] {
-        for z in 0..dimensions[2] {
-            for x in 0..dimensions[0] {
-                let state = structure.world.get_block(min.offset(x, y, z));
-                let description = describe_state(state).map_err(StructureWriteError::Sponge)?;
-                let next = palette.len();
-                encode_varint(*palette.entry(description).or_insert(next) as u32, &mut data);
-                progress.advance_encoding();
-            }
-        }
+    let states = progress.collect_dense_states(structure, dimensions)?;
+    for state in states {
+        let palette_index = if let Some(index) = state_indices.get(&state) {
+            *index
+        } else {
+            let description = describe_state(state).map_err(StructureWriteError::Sponge)?;
+            let next = palette.len();
+            let index = *palette.entry(description).or_insert(next);
+            state_indices.insert(state, index);
+            index
+        };
+        encode_varint(palette_index as u32, &mut data);
     }
     let encoded_palette = palette
         .into_iter()

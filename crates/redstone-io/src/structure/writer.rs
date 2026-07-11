@@ -1,8 +1,10 @@
 use std::collections::BTreeMap;
 use std::io::Write;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 
-use redstone_core::BlockStateId;
+use rayon::prelude::*;
+use redstone_core::{BlockPos, BlockStateId};
 use thiserror::Error;
 use tracing::{Span, info_span};
 use tracing_indicatif::{span_ext::IndicatifSpanExt, style::ProgressStyle};
@@ -72,6 +74,53 @@ impl WriteProgress {
         {
             self.span.pb_set_position(self.position);
         }
+    }
+
+    pub(super) fn collect_dense_states(
+        &mut self,
+        structure: &LoadedStructure,
+        dimensions: [i32; 3],
+    ) -> Result<Vec<BlockStateId>, StructureWriteError> {
+        let width = usize::try_from(dimensions[0])
+            .map_err(|_| StructureWriteError::InvalidRegionBounds)?;
+        let height = usize::try_from(dimensions[1])
+            .map_err(|_| StructureWriteError::InvalidRegionBounds)?;
+        let length = usize::try_from(dimensions[2])
+            .map_err(|_| StructureWriteError::InvalidRegionBounds)?;
+        let layer = width
+            .checked_mul(length)
+            .ok_or(StructureWriteError::VolumeOverflow)?;
+        let volume = layer
+            .checked_mul(height)
+            .ok_or(StructureWriteError::VolumeOverflow)?;
+        let mut states = Vec::new();
+        states
+            .try_reserve_exact(volume)
+            .map_err(|error| StructureWriteError::Allocation(error.to_string()))?;
+        states.resize(volume, structure.world.air());
+        let completed = AtomicU64::new(0);
+        let base_position = self.position;
+        let span = &self.span;
+        let min = structure.region_min;
+        states
+            .par_chunks_mut(WRITE_PROGRESS_INTERVAL as usize)
+            .enumerate()
+            .for_each(|(chunk_index, states)| {
+                let start = chunk_index * WRITE_PROGRESS_INTERVAL as usize;
+                for (offset, state) in states.iter_mut().enumerate() {
+                    let pos = dense_position(min, width, length, layer, start + offset);
+                    *state = structure.world.get_block(pos);
+                }
+                let finished = completed.fetch_add(states.len() as u64, Ordering::Relaxed)
+                    + states.len() as u64;
+                span.pb_set_position(base_position + finished);
+            });
+        self.position = self
+            .position
+            .checked_add(volume as u64)
+            .ok_or(StructureWriteError::VolumeOverflow)?;
+        self.span.pb_set_position(self.position);
+        Ok(states)
     }
 
     fn write_file(&mut self, path: &Path, bytes: &[u8]) -> Result<(), StructureWriteError> {
@@ -165,13 +214,26 @@ fn region_volume(structure: &LoadedStructure) -> Result<u64, StructureWriteError
 }
 
 fn in_region(
-    pos: redstone_core::BlockPos,
-    min: redstone_core::BlockPos,
-    max: redstone_core::BlockPos,
+    pos: BlockPos,
+    min: BlockPos,
+    max: BlockPos,
 ) -> bool {
     (min.x..=max.x).contains(&pos.x)
         && (min.y..=max.y).contains(&pos.y)
         && (min.z..=max.z).contains(&pos.z)
+}
+
+pub(super) fn dense_position(
+    min: BlockPos,
+    width: usize,
+    length: usize,
+    layer: usize,
+    index: usize,
+) -> BlockPos {
+    let x = index % width;
+    let z = (index / width) % length;
+    let y = index / layer;
+    min.offset(x as i32, y as i32, z as i32)
 }
 
 fn output_file_name(path: &Path) -> String {
@@ -234,6 +296,8 @@ pub enum StructureWriteError {
     InvalidRegionBounds,
     #[error("结构 region 体积溢出")]
     VolumeOverflow,
+    #[error("结构输出内存分配失败: {0}")]
+    Allocation(String),
     #[error(transparent)]
     Io(#[from] std::io::Error),
 }

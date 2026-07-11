@@ -6,7 +6,7 @@ use thiserror::Error;
 
 use super::{
     LoadedStructure,
-    writer::{StructureState, WriteProgress},
+    writer::{StructureState, StructureWriteError, WriteProgress, dense_position},
 };
 
 pub(super) fn encode_vanilla_structure(
@@ -15,7 +15,7 @@ pub(super) fn encode_vanilla_structure(
     data_version: i32,
     progress: &mut WriteProgress,
     mut describe_state: impl FnMut(BlockStateId) -> Result<StructureState, String>,
-) -> Result<Vec<u8>, VanillaWriteError> {
+) -> Result<Vec<u8>, StructureWriteError> {
     let min = structure.region_min;
     let max = structure.region_max;
     let size = [
@@ -23,40 +23,45 @@ pub(super) fn encode_vanilla_structure(
         dimension(min.y, max.y)?,
         dimension(min.z, max.z)?,
     ];
-    let mut palette = BTreeMap::<StructureState, usize>::new();
-    let mut blocks = Vec::new();
+    let mut output = BlockOutput::default();
     if include_air {
-        for y in min.y..=max.y {
-            for z in min.z..=max.z {
-                for x in min.x..=max.x {
-                    push_block(
-                        structure,
-                        BlockPos::new(x, y, z),
-                        min,
-                        &mut palette,
-                        &mut blocks,
-                        &mut describe_state,
-                    )?;
-                    progress.advance_encoding();
-                }
-            }
+        let states = progress.collect_dense_states(structure, size)?;
+        let width = size[0] as usize;
+        let length = size[2] as usize;
+        let layer = width
+            .checked_mul(length)
+            .ok_or(StructureWriteError::VolumeOverflow)?;
+        for (index, state) in states.into_iter().enumerate() {
+            push_block(
+                structure,
+                dense_position(min, width, length, layer, index),
+                state,
+                min,
+                &mut output,
+                &mut describe_state,
+            )?;
         }
     } else {
-        for (pos, _) in structure.world.iter_blocks() {
+        for (pos, state) in structure.world.iter_blocks() {
             if !in_region(pos, min, max) {
                 continue;
             }
             push_block(
                 structure,
                 pos,
+                state,
                 min,
-                &mut palette,
-                &mut blocks,
+                &mut output,
                 &mut describe_state,
             )?;
             progress.advance_encoding();
         }
     }
+    let BlockOutput {
+        palette,
+        blocks,
+        ..
+    } = output;
     let mut ordered_palette = vec![Value::Compound(HashMap::new()); palette.len()];
     for (state, index) in palette {
         let mut encoded = HashMap::from([("Name".to_owned(), Value::String(state.name))]);
@@ -117,21 +122,33 @@ pub(super) fn encode_vanilla_structure(
         ("blocks".to_owned(), Value::List(blocks)),
         ("entities".to_owned(), Value::List(entities)),
     ]);
-    fastnbt::to_bytes(&root).map_err(VanillaWriteError::Nbt)
+    Ok(fastnbt::to_bytes(&root).map_err(VanillaWriteError::Nbt)?)
+}
+
+#[derive(Default)]
+struct BlockOutput {
+    palette: BTreeMap<StructureState, usize>,
+    state_indices: HashMap<BlockStateId, usize>,
+    blocks: Vec<Value>,
 }
 
 fn push_block(
     structure: &LoadedStructure,
     pos: BlockPos,
+    state: BlockStateId,
     origin: BlockPos,
-    palette: &mut BTreeMap<StructureState, usize>,
-    blocks: &mut Vec<Value>,
+    output: &mut BlockOutput,
     describe_state: &mut impl FnMut(BlockStateId) -> Result<StructureState, String>,
 ) -> Result<(), VanillaWriteError> {
-    let state = structure.world.get_block(pos);
-    let description = describe_state(state).map_err(VanillaWriteError::State)?;
-    let next_index = palette.len();
-    let state_index = *palette.entry(description).or_insert(next_index);
+    let state_index = if let Some(index) = output.state_indices.get(&state) {
+        *index
+    } else {
+        let description = describe_state(state).map_err(VanillaWriteError::State)?;
+        let next_index = output.palette.len();
+        let index = *output.palette.entry(description).or_insert(next_index);
+        output.state_indices.insert(state, index);
+        index
+    };
     let mut block = HashMap::from([
         (
             "pos".to_owned(),
@@ -165,7 +182,7 @@ fn push_block(
         nbt.remove("z");
         block.insert("nbt".to_owned(), Value::Compound(nbt));
     }
-    blocks.push(Value::Compound(block));
+    output.blocks.push(Value::Compound(block));
     Ok(())
 }
 
