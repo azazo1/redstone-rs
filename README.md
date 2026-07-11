@@ -13,24 +13,13 @@
 - `redstone-cli`: `inspect`, `run`, `test` 和 `trace` 命令.
 - `tools/vanilla-oracle`: 外部 Java 参考探针的调用协议.
 
-## 已实现
+## 文档
 
-- 16x16x16 稀疏调色板区段, 纯空气区段不分配.
-- 计划方块刻优先级, 去重, 快照执行和 `sub_tick_order`.
-- Java 式嵌套邻居更新和固定方向顺序.
-- 默认及实验性红石线, 48 种 `Orientation` 和 Java 兼容随机源.
-- 火把, 中继器, 比较器, 观察者, BUD/QC 基础行为.
-- 活塞, 黏性活塞, 12 方块限制, 黏液/蜂蜜分支, 取消, 零刻和移动方块实体.
-- 灯, 铜灯, 门, 动力铁轨, 音符盒, 钟, 目标方块和 TNT 触发轨迹.
-- 漏斗, 投掷器, 发射器投射物/矿车/TNT 显式行为和合成器最小模型.
-- 熔炉和酿造台侧面槽规则, 合成器禁用槽和潜影盒嵌套限制.
-- 压力板, 绊线, 探测铁轨, 讲台, 阳光探测器和陷阱箱最小模型.
-- 物品实体寿命, 通用碰撞实体, 物品展示框和容器/漏斗矿车最小模型.
-- 红石线, 铁轨, 绊线, 栅栏, 玻璃板, 栏杆和墙的结构形状修复.
-- gzip/非 gzip NBT, Litematic 多区域, 负尺寸区域, 旋转和镜像.
-- JSONL 微时序轨迹, VCD 波形和场景级并行测试.
-- Rust 仿真初始世界和逐 tick 方块变化的 Replay Mod `.mcpr` 导出.
-- TOML 实体生成, 移动, 删除, 字段修改和目标方块命中动作.
+- [已实现功能](docs/impl.md): 仿真内核, Java 规则, IO, CLI, Replay 和 oracle 的实际覆盖范围.
+- [场景编写手册](docs/scenario-guide.md): TOML 场景, 动作, 探针, 断言, Replay 和运行方式.
+- [实现状态](docs/todo.md): 已完成能力, 稳定前任务和暂不支持范围.
+- [性能优化记录](docs/perf.md): 基准, profile 证据和优化结果.
+- [Java oracle 协议](tools/vanilla-oracle/README.md): 参考探针的构建, 输出协议和支持范围.
 
 ## 构建和测试
 
@@ -43,7 +32,7 @@ just test
 
 > 注: 如果 build 失败, 请删除 `assets/libraries` 文件夹之后重新执行 `just generate-reports && just build`.
 
-也可以直接运行 Cargo 命令:
+常用结构检查和转换命令:
 
 ```shell
 cargo run -p redstone-cli -- inspect machine.litematic
@@ -56,12 +45,6 @@ cargo run -p redstone-cli -- inspect path/to/world --region 0,-64,0 255,319,255 
 cargo run -p redstone-cli -- convert machine.litematic machine.schem
 cargo run -p redstone-cli -- convert path/to/world machine.litematic --region 0,-64,0 255,319,255
 cargo run -p redstone-cli -- convert scenario.toml prepared/scenario.toml
-cargo run -p redstone-cli -- run scenario.toml --trace trace.jsonl --vcd signals.vcd
-cargo run -p redstone-cli -- run scenario.toml --replay scenario.mcpr
-cargo run -p redstone-cli -- run scenario.toml --replay scenario.mcpr --replay-anim
-cargo run -p redstone-cli -- test scenario.toml --replay scenario.mcpr
-cargo run -p redstone-cli -- test scenarios
-cargo run --release -p redstone-cli -- bench
 ```
 
 `inspect` 默认输出结构汇总. `--block X,Y,Z` 只查询单个坐标并可重复使用. `--region FROM TO` 使用两个方块坐标查询闭合区域内的非空气方块, 两个端点不要求按大小排序, 并可叠加 `--type BLOCK_ID` 按方块类型筛选. 对世界目录或 ZIP, `--region` 同时限制需要读取的 chunk. `--all` 输出全部非空气方块. 明细包含状态 ID, properties, 支持状态和完整方块实体 NBT, 包括嵌套的 `components`. `--format json` 与 `--json` 均可输出 JSON.
@@ -79,93 +62,6 @@ cargo run --release -p redstone-cli -- bench
 5. 优化完成后退出游戏, 再将该世界目录交给 `redstone inspect` 或 `redstone convert`. 需要 ZIP 时可以重新压缩世界目录.
 
 仅打开并保存世界不会升级全部已保存 chunk. `优化世界` 会遍历已有 region 并通过游戏的数据修复器写入当前 DataVersion, 因此是完整升级存档的推荐方式.
-
-`run --replay` 和单场景 `test --replay` 会直接从 Rust 仿真生成 Replay Mod 格式 14 录像. 录像目标版本为 Minecraft `26.1.2`, 底层 packet 时间轴始终按每个游戏 tick 50 ms 完整记录. `[replay]` 可以额外生成 Replay Mod 剪辑界面的 Time Path, 将指定源 tick 区间映射到第二时间轴的播放时长, 不改写 `recording.tmcpr` 的 packet 时间. 初始原理图声明区域覆盖的全部 chunk 会在同一批次加载, 外围保留一圈渲染邻居. 后续方块变化进入新 chunk 时只加载目标 chunk 的局部邻接圈, 可随飞行器移动持续扩展, 不会补齐与原理图之间的无关 chunk. 目录批量测试暂不支持共享录像输出路径. 断言失败时录像仍会完成并保留, 仿真或编码失败时不会替换目标文件.
-
-场景可以设置 Replay 导出区间, 目标播放时长和初始摄像头:
-
-```toml
-[replay]
-start_tick = 20
-end_tick = 80
-duration_ms = 1500
-
-[replay.camera]
-view_distance = 8
-position = [12.5, 20.0, -6.5]
-yaw = 135.0
-pitch = 35.0
-```
-
-所有字段均可省略. `start_tick..=end_tick` 是 Time Path 引用的源录像闭区间, 默认使用 `0..=max_ticks`. 第二时间轴从 0 ms 开始, 在 `duration_ms` 结束, 默认保持原速. exporter 还会在 Position Path 的起止时间自动写入初始摄像机位置和角度. 自动取景使用录像开始时的非空气方块边界, 优先靠近机器, 并在结构明显扁平时沿最薄轴观察. 场景探针, 红石灯和铜灯会用于选择更接近观测结果的一面. `view_distance` 约束自动机位的 Replay 播放视距预算, 不裁剪录像中的远端 chunk 数据. 完整字段和角度约定见 [场景编写手册](docs/scenario-guide.md#replay-时间轴).
-
-`--replay-anim` 会在录像中额外保留原版活塞 block event, 由客户端生成伸缩动画和声音. 该开关必须与 `--replay` 同时使用, 默认关闭.
-
-> 注: Replay Mod 版本: replaymod-26.1-2.6.26 fabric
-
-## 场景格式
-
-场景固定指定版本, 红石模式, 随机种子, 结构来源, 初始化方式, 动作, 探针和断言. 动作在目标游戏刻的 `pre_tick` 阶段按声明顺序执行, 断言读取 `post_tick` 探针值.
-
-```toml
-version = "26.1.2"
-mode = "default"
-seed = 42
-max_ticks = 20
-strict = true
-
-[environment]
-game_time = 0
-overworld_time = 0
-advance_time = true
-sky_light = 15
-
-[monitor]
-skip_ticks = 0
-
-[source]
-path = "machine.litematic"
-initialization = "notify"
-rotation = "none"
-mirror = "none"
-
-[[actions]]
-tick = 1
-type = "pull_lever"
-pos = { x = 0, y = 0, z = 0 }
-
-[[probes]]
-name = "output"
-type = "signal"
-pos = { x = 10, y = 0, z = 0 }
-
-[[expectations]]
-tick = 2
-probe = "output"
-equals = 15
-```
-
-环境字段可固定游戏时间, Overworld 时钟和日光探测器位置的原始天空光. tick 1 使用初始时间加 1, 暂停 Overworld 时钟不会暂停 `game_time`. Java oracle 当前只支持 `sky_light = 15`.
-
-`monitor.skip_ticks = N` 会完整执行初始化和前 N 个游戏刻, 但 JSONL trace, VCD, probe, assertions 和 Java oracle 从 tick N+1 才开始监视. 跳过区间内的 assertions 会被忽略并产生 warning. 默认值 `0` 保留包括 tick 0 初始化事件在内的当前行为. Replay 底层录像不受该设置影响, `[replay]` 时间轴字段只控制剪辑路径引用的源区间.
-
-严格模式会拒绝已识别但未实现的主动方块. `--allow-static-fallback` 可以保留其静态状态并继续执行.
-
-## Java oracle
-
-`redstone test --oracle` 通过 `tools/vanilla-oracle/run.sh` 或 `REDSTONE_ORACLE` 指定的程序调用 Java 参考探针. 探针接收场景路径和输出 JSONL 路径. 完整轨迹使用字节级比较, `probe_samples_v1` 输出使用逐 tick 探针比较.
-
-`just oracle-build` 会下载测试专用 TOML 解析依赖并构建 Java `26.1.2` 探针 JAR. `just oracle-scenario-self-test` 会运行真实 structure, 动作和探针场景. `VANILLA_ORACLE_JAR` 可以覆盖默认 JAR. 发布的 Rust 库和 CLI 不需要 Java.
-
-当前 GameTest oracle 支持原版 structure NBT, `raw`/`notify` 初始化, 非零原点, 旋转/镜像, 任意场景 seed, 默认/实验性红石模式, 基础方块与实体动作, 方块与实体探针. 测试场景可启用 ASM 邻居更新, 计划方块刻, 方块事件及状态写入采样. CLI 会差分探针和全局微轨迹, 包括同步嵌套顺序, `Orientation`, `moved_by_piston`, 计划刻优先级, `sub_tick_order`, 方块事件参数和官方全局 state ID. 当前 18 个真实 Java 场景达到零状态差异和零事件顺序差异. 形状更新的完整 ASM 微轨迹仍待完成.
-
-包含服务端后台随机流差异的场景可以设置 `skip_oracle = true`. `redstone test --oracle` 仍会执行 Rust 仿真和全部断言, 但会记录 tracing 日志并跳过该场景的 Java 对照.
-
-`redstone bench` 默认构建 100 万已放置方块和 1 万活跃元件, 运行 100 个空闲刻并输出 P50/P95/P99 与可获取的常驻内存.
-
-## 当前限制
-
-目前仍处于行为覆盖和 oracle 差分阶段. 多方块活塞分支及破坏反应顺序, 铁轨支撑破坏和矿车物理, 墙的精确碰撞判定, 发射器剩余物品行为, 全量物品标签和完整合成配方尚未达到稳定标准. TNT 引信和爆炸触发会进入轨迹, 但爆炸, 火传播和流体不修改世界.
 
 ## 部分原理图来源
 

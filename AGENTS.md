@@ -4,3 +4,5 @@
 
 性能优化的时候请逐步编写 [perf.md](docs/perf.md).
 samply 使用: `cargo samply run assets/scenarios/cpu-8bit-dvd.toml` 之类的命令, 否则可能生成没有调试符号的结果.
+
+新功能, 补充原版特性支持实现需要补充在 [impl.md](docs/impl.md) 当中.
