@@ -1,6 +1,6 @@
 use std::collections::BTreeMap;
 
-use redstone_core::{BlockPos, BlockStateId, Simulation, SimulationConfig, SparseWorld};
+use redstone_core::{Action, BlockPos, BlockStateId, Simulation, SimulationConfig, SparseWorld};
 use redstone_java_26::{Java26Registry, Java26Rules, StateResolver};
 
 fn state(registry: &mut Java26Registry, name: &str, properties: &[(&str, &str)]) -> BlockStateId {
@@ -32,6 +32,14 @@ fn powered_rail(registry: &mut Java26Registry) -> BlockStateId {
             ("shape", "north_south"),
             ("waterlogged", "false"),
         ],
+    )
+}
+
+fn slab(registry: &mut Java26Registry, slab_type: &str) -> BlockStateId {
+    state(
+        registry,
+        "minecraft:stone_slab",
+        &[("type", slab_type), ("waterlogged", "false")],
     )
 }
 
@@ -98,6 +106,34 @@ fn lower_rail_ascends_toward_an_upper_neighbor() {
 
     assert_eq!(shape(&simulation, BlockPos::ZERO), "ascending_east");
     assert_eq!(shape(&simulation, BlockPos::new(1, 1, 0)), "east_west");
+}
+
+#[test]
+fn rail_survives_on_a_top_slab_but_not_a_bottom_slab() {
+    for (slab_type, survives) in [("top", true), ("bottom", false)] {
+        let mut registry = Java26Registry::new();
+        let rail = rail(&mut registry);
+        let stone = state(&mut registry, "minecraft:stone", &[]);
+        let slab = slab(&mut registry, slab_type);
+        let air = registry.air_state();
+        let support_pos = BlockPos::ZERO;
+        let rail_pos = BlockPos::new(0, 1, 0);
+        let mut world = SparseWorld::new(air);
+        world.set_block(support_pos, stone).unwrap();
+        world.set_block(rail_pos, rail).unwrap();
+        let rules = Java26Rules::new(registry);
+        let mut simulation = Simulation::load(rules, world, SimulationConfig::default()).unwrap();
+        simulation.initialize().unwrap();
+
+        simulation
+            .apply(Action::SetBlock {
+                pos: support_pos,
+                state: slab,
+            })
+            .unwrap();
+
+        assert_eq!(simulation.world().get_block(rail_pos) != air, survives, "{slab_type}");
+    }
 }
 
 #[test]

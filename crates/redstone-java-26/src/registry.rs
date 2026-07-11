@@ -5,6 +5,10 @@ use redstone_core::{BlockKindId, BlockStateId, Direction};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
+const BLOCK_TRAIT_WIDTH: usize = 4;
+const OFFICIAL_BLOCK_TRAITS: &[u8] =
+    include_bytes!(concat!(env!("OUT_DIR"), "/block_traits.bin"));
+
 pub trait StateResolver {
     fn resolve_state(
         &mut self,
@@ -19,6 +23,42 @@ pub enum PushReaction {
     Block,
     Destroy,
     PushOnly,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub enum SupportType {
+    Full,
+    Center,
+    Rigid,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct SupportFaces {
+    full: u8,
+    center: u8,
+    rigid: u8,
+}
+
+impl SupportFaces {
+    pub const fn from_masks(full: u8, center: u8, rigid: u8) -> Self {
+        Self {
+            full,
+            center,
+            rigid,
+        }
+    }
+
+    pub const fn mask(self, support_type: SupportType) -> u8 {
+        match support_type {
+            SupportType::Full => self.full,
+            SupportType::Center => self.center,
+            SupportType::Rigid => self.rigid,
+        }
+    }
+
+    pub const fn supports(self, direction: Direction, support_type: SupportType) -> bool {
+        self.mask(support_type) & direction_bit(direction) != 0
+    }
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -74,7 +114,7 @@ pub struct StateDefinition {
     pub properties: Arc<BTreeMap<String, String>>,
     pub behavior: BlockBehavior,
     pub redstone_conductor: bool,
-    pub sturdy_faces: [bool; 6],
+    pub support_faces: SupportFaces,
     pub push_reaction: PushReaction,
     pub has_block_entity: bool,
     pub supported: bool,
@@ -109,15 +149,19 @@ impl StateDefinition {
         }
     }
 
-    pub fn sturdy(&self, direction: Direction) -> bool {
-        self.sturdy_faces[match direction {
-            Direction::West => 0,
-            Direction::East => 1,
-            Direction::Down => 2,
-            Direction::Up => 3,
-            Direction::North => 4,
-            Direction::South => 5,
-        }]
+    pub const fn supports(&self, direction: Direction, support_type: SupportType) -> bool {
+        self.support_faces.supports(direction, support_type)
+    }
+}
+
+const fn direction_bit(direction: Direction) -> u8 {
+    1 << match direction {
+        Direction::West => 0,
+        Direction::East => 1,
+        Direction::Down => 2,
+        Direction::Up => 3,
+        Direction::North => 4,
+        Direction::South => 5,
     }
 }
 
@@ -266,6 +310,7 @@ impl StateResolver for Java26Registry {
         let has_block_entity = self.catalog.blocks_with_entities.contains(name);
         let kind = self.intern_kind(name);
         let traits = classify(name, properties);
+        let official_traits = official_block_traits(id);
         let power = properties
             .get("power")
             .and_then(|value| value.parse::<u8>().ok())
@@ -299,8 +344,8 @@ impl StateResolver for Java26Registry {
             name: Arc::from(name),
             properties: Arc::new(properties.clone()),
             behavior: traits.behavior,
-            redstone_conductor: traits.redstone_conductor,
-            sturdy_faces: traits.sturdy_faces,
+            redstone_conductor: official_traits.redstone_conductor,
+            support_faces: official_traits.support_faces,
             push_reaction: traits.push_reaction,
             has_block_entity,
             supported: traits.supported,
@@ -460,10 +505,25 @@ fn state_key(name: &str, properties: &BTreeMap<String, String>) -> String {
 
 struct BlockTraits {
     behavior: BlockBehavior,
-    redstone_conductor: bool,
-    sturdy_faces: [bool; 6],
     push_reaction: PushReaction,
     supported: bool,
+}
+
+#[derive(Clone, Copy)]
+struct OfficialBlockTraits {
+    redstone_conductor: bool,
+    support_faces: SupportFaces,
+}
+
+fn official_block_traits(id: BlockStateId) -> OfficialBlockTraits {
+    let offset = id.0 as usize * BLOCK_TRAIT_WIDTH;
+    let bytes = OFFICIAL_BLOCK_TRAITS
+        .get(offset..offset + BLOCK_TRAIT_WIDTH)
+        .unwrap_or_else(|| panic!("官方方块特征缺少状态 ID: {}", id.0));
+    OfficialBlockTraits {
+        redstone_conductor: bytes[0] != 0,
+        support_faces: SupportFaces::from_masks(bytes[1], bytes[2], bytes[3]),
+    }
 }
 
 fn classify(name: &str, properties: &BTreeMap<String, String>) -> BlockTraits {
@@ -522,86 +582,15 @@ fn classify(name: &str, properties: &BTreeMap<String, String>) -> BlockTraits {
         _ => BlockBehavior::Static,
     };
 
-    let full_slab = path.ends_with("_slab")
-        && properties
-            .get("type")
-            .is_some_and(|slab_type| slab_type == "double");
-    let non_solid = matches!(
-        behavior,
-        BlockBehavior::Air
-            | BlockBehavior::Wire
-            | BlockBehavior::Lever
-            | BlockBehavior::Button { .. }
-            | BlockBehavior::Torch { .. }
-            | BlockBehavior::Repeater
-            | BlockBehavior::Comparator
-            | BlockBehavior::Observer
-            | BlockBehavior::PoweredConsumer
-            | BlockBehavior::Door
-            | BlockBehavior::PoweredRail
-            | BlockBehavior::NoteBlock
-            | BlockBehavior::Bell
-            | BlockBehavior::PressurePlate { .. }
-            | BlockBehavior::Tripwire
-            | BlockBehavior::TripwireHook
-            | BlockBehavior::DetectorRail
-            | BlockBehavior::DaylightDetector
-            | BlockBehavior::Lectern
-            | BlockBehavior::TrappedChest
-            | BlockBehavior::UnsupportedActive
-    ) || path.contains("glass")
-        || (path.ends_with("_slab") && !full_slab)
-        || path.ends_with("_stairs")
-        || path.ends_with("_fence")
-        || path.ends_with("_wall")
-        || path.ends_with("_carpet")
-        || path.ends_with("_rail")
-        || path.ends_with("_sign");
-
-    let redstone_conductor = !non_solid
-        && !matches!(
-            path,
-            "redstone_block"
-                | "honey_block"
-                | "piston"
-                | "sticky_piston"
-                | "moving_piston"
-                | "piston_head"
-                | "hopper"
-        )
-        && !path.ends_with("_grate")
-        && !path.ends_with("_bulb");
-    let sturdy = (!non_solid
-        || path == "hopper"
-        || matches!(behavior, BlockBehavior::Observer | BlockBehavior::NoteBlock))
-        && !matches!(path, "moving_piston" | "piston_head");
     let extended_piston = matches!(path, "piston" | "sticky_piston")
         && properties
             .get("extended")
             .is_some_and(|value| value == "true");
-    let sturdy_faces = if extended_piston {
-        let mut faces = [false; 6];
-        let back_face = match properties.get("facing").map(String::as_str) {
-            Some("west") => 1,
-            Some("east") => 0,
-            Some("down") => 3,
-            Some("up") => 2,
-            Some("north") => 5,
-            Some("south") => 4,
-            _ => 1,
-        };
-        faces[back_face] = true;
-        faces
-    } else {
-        [sturdy; 6]
-    };
     let push_reaction = piston_push_reaction(path, extended_piston);
     let supported = !matches!(behavior, BlockBehavior::UnsupportedActive);
 
     BlockTraits {
         behavior,
-        redstone_conductor,
-        sturdy_faces,
         push_reaction,
         supported,
     }
@@ -721,9 +710,8 @@ mod tests {
     }
 
     #[test]
-    fn copper_grates_do_not_conduct_redstone() {
-        let properties = BTreeMap::new();
-
+    fn official_conductor_and_support_traits_cover_representative_blocks() {
+        let mut registry = Java26Registry::new();
         for name in [
             "minecraft:copper_grate",
             "minecraft:exposed_copper_grate",
@@ -734,23 +722,10 @@ mod tests {
             "minecraft:waxed_weathered_copper_grate",
             "minecraft:waxed_oxidized_copper_grate",
         ] {
-            let traits = classify(name, &properties);
-            assert!(!traits.redstone_conductor, "{name}");
-            assert!(traits.sturdy_faces.into_iter().all(|sturdy| sturdy), "{name}");
+            let state = default_state(&mut registry, name);
+            assert!(!state.redstone_conductor, "{name}");
+            assert_eq!(state.support_faces.mask(SupportType::Full), 0b11_1111, "{name}");
         }
-
-        assert!(
-            classify("minecraft:waxed_copper_block", &properties).redstone_conductor
-        );
-    }
-
-    #[test]
-    fn copper_bulbs_do_not_conduct_redstone() {
-        let properties = BTreeMap::from([
-            ("lit".to_owned(), "false".to_owned()),
-            ("powered".to_owned(), "false".to_owned()),
-        ]);
-
         for name in [
             "minecraft:copper_bulb",
             "minecraft:exposed_copper_bulb",
@@ -761,10 +736,126 @@ mod tests {
             "minecraft:waxed_weathered_copper_bulb",
             "minecraft:waxed_oxidized_copper_bulb",
         ] {
-            let traits = classify(name, &properties);
-            assert!(!traits.redstone_conductor, "{name}");
-            assert!(traits.sturdy_faces.into_iter().all(|sturdy| sturdy), "{name}");
+            let state = default_state(&mut registry, name);
+            assert!(!state.redstone_conductor, "{name}");
+            assert_eq!(state.support_faces.mask(SupportType::Full), 0b11_1111, "{name}");
         }
+        assert!(default_state(&mut registry, "minecraft:note_block").redstone_conductor);
+        assert!(!default_state(&mut registry, "minecraft:oak_leaves").redstone_conductor);
+        assert!(!default_state(&mut registry, "minecraft:glass").redstone_conductor);
+        assert!(default_state(&mut registry, "minecraft:waxed_copper_block").redstone_conductor);
+
+        let stairs = default_state(&mut registry, "minecraft:oak_stairs");
+        assert!(!stairs.redstone_conductor);
+        assert_ne!(stairs.support_faces.mask(SupportType::Full), 0);
+
+        let fence = default_state(&mut registry, "minecraft:oak_fence");
+        assert!(!fence.redstone_conductor);
+        assert!(!fence.supports(Direction::Up, SupportType::Full));
+        assert!(fence.supports(Direction::Up, SupportType::Center));
+
+        let pressure_plate = default_state(&mut registry, "minecraft:stone_pressure_plate");
+        assert!(!pressure_plate.redstone_conductor);
+        assert_eq!(pressure_plate.support_faces.mask(SupportType::Full), 0);
+    }
+
+    #[test]
+    fn all_official_slabs_use_vanilla_conductor_and_support_traits() {
+        let report = serde_json::from_str::<BTreeMap<String, BlockReportEntry>>(include_str!(
+            "../data/26.1.2/reports/blocks.json"
+        ))
+        .unwrap();
+        let mut registry = Java26Registry::new();
+        let mut slab_blocks = 0;
+        let mut slab_states = 0;
+
+        for (name, entry) in report {
+            if !name.ends_with("_slab") {
+                continue;
+            }
+            slab_blocks += 1;
+            for state in entry.states {
+                slab_states += 1;
+                let id = registry.resolve_state(&name, &state.properties).unwrap();
+                let definition = registry.state(id).unwrap();
+                let (conductor, support_mask) = match definition.property("type").unwrap() {
+                    "top" => (false, direction_bit(Direction::Up)),
+                    "bottom" => (false, direction_bit(Direction::Down)),
+                    "double" => (true, 0b11_1111),
+                    slab_type => panic!("未知半砖类型: {slab_type}"),
+                };
+                assert_eq!(definition.redstone_conductor, conductor, "{name}");
+                for support_type in [
+                    SupportType::Full,
+                    SupportType::Center,
+                    SupportType::Rigid,
+                ] {
+                    assert_eq!(
+                        definition.support_faces.mask(support_type),
+                        support_mask,
+                        "{name} {:?} {support_type:?}",
+                        definition.properties
+                    );
+                }
+            }
+        }
+
+        assert_eq!(slab_blocks, 62);
+        assert_eq!(slab_states, 372);
+    }
+
+    #[test]
+    fn packed_traits_match_the_report_for_every_official_state() {
+        let blocks = serde_json::from_str::<BTreeMap<String, BlockReportEntry>>(include_str!(
+            "../data/26.1.2/reports/blocks.json"
+        ))
+        .unwrap();
+        let traits = serde_json::from_str::<serde_json::Value>(include_str!(
+            "../data/26.1.2/reports/block-traits.json"
+        ))
+        .unwrap();
+        let trait_states = traits["states"].as_array().unwrap();
+        let mut registry = Java26Registry::new();
+        let mut checked = 0;
+
+        for (name, entry) in blocks {
+            for state in entry.states {
+                let id = registry.resolve_state(&name, &state.properties).unwrap();
+                let definition = registry.state(id).unwrap();
+                let expected = &trait_states[id.0 as usize];
+                assert_eq!(expected["id"].as_u64(), Some(id.0 as u64), "{name}");
+                assert_eq!(
+                    definition.redstone_conductor,
+                    expected["redstone_conductor"].as_bool().unwrap(),
+                    "{name} {:?}",
+                    state.properties
+                );
+                for (support_type, field) in [
+                    (SupportType::Full, "full_support"),
+                    (SupportType::Center, "center_support"),
+                    (SupportType::Rigid, "rigid_support"),
+                ] {
+                    assert_eq!(
+                        definition.support_faces.mask(support_type),
+                        expected[field].as_u64().unwrap() as u8,
+                        "{name} {:?} {support_type:?}",
+                        state.properties
+                    );
+                }
+                checked += 1;
+            }
+        }
+
+        assert_eq!(checked, 29_873);
+        assert_eq!(trait_states.len(), checked);
+    }
+
+    fn default_state(registry: &mut Java26Registry, name: &str) -> StateDefinition {
+        let properties = registry
+            .complete_state_properties(name, &BTreeMap::new())
+            .unwrap();
+        let id = registry.resolve_state(name, &properties).unwrap();
+        registry.state(id).unwrap().clone()
     }
 }
 

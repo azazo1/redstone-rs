@@ -29,6 +29,14 @@ fn wire(registry: &mut Java26Registry) -> BlockStateId {
     )
 }
 
+fn slab(registry: &mut Java26Registry, slab_type: &str) -> BlockStateId {
+    state(
+        registry,
+        "minecraft:stone_slab",
+        &[("type", slab_type), ("waterlogged", "false")],
+    )
+}
+
 #[test]
 fn isolated_pair_of_wires_becomes_an_east_west_line() {
     let mut registry = Java26Registry::new();
@@ -77,6 +85,34 @@ fn wire_climbs_a_sturdy_block_to_reach_an_upper_wire() {
         .unwrap();
     assert_eq!(state.property("east"), Some("up"));
     assert_eq!(state.property("west"), Some("side"));
+}
+
+#[test]
+fn wire_survives_on_a_top_slab_but_not_a_bottom_slab() {
+    for (slab_type, survives) in [("top", true), ("bottom", false)] {
+        let mut registry = Java26Registry::new();
+        let wire = wire(&mut registry);
+        let stone = state(&mut registry, "minecraft:stone", &[]);
+        let slab = slab(&mut registry, slab_type);
+        let air = registry.air_state();
+        let support_pos = BlockPos::ZERO;
+        let wire_pos = BlockPos::new(0, 1, 0);
+        let mut world = SparseWorld::new(air);
+        world.set_block(support_pos, stone).unwrap();
+        world.set_block(wire_pos, wire).unwrap();
+        let rules = Java26Rules::new(registry);
+        let mut simulation = Simulation::load(rules, world, SimulationConfig::default()).unwrap();
+        simulation.initialize().unwrap();
+
+        simulation
+            .apply(Action::SetBlock {
+                pos: support_pos,
+                state: slab,
+            })
+            .unwrap();
+
+        assert_eq!(simulation.world().get_block(wire_pos) != air, survives, "{slab_type}");
+    }
 }
 
 #[test]

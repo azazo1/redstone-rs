@@ -2,6 +2,8 @@ use redstone_core::{
     BlockPos, BlockStateId, DeferredRuleTask, Direction, EventContext, RulesError, SparseWorld,
 };
 
+use crate::SupportType;
+
 use super::{BlockBehavior, Java26Rules, StateDefinition, attached_direction};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -16,7 +18,7 @@ enum ShapeFamily {
 }
 
 #[derive(Clone, Copy)]
-enum SupportType {
+enum SupportRequirement {
     Full,
     Center,
     Rigid,
@@ -41,7 +43,7 @@ fn supports_face(
     pos: BlockPos,
     state: &StateDefinition,
     face: Direction,
-    support_type: SupportType,
+    support_type: SupportRequirement,
 ) -> bool {
     let moving_source_face = (state.name.as_ref() == "minecraft:moving_piston")
         .then(|| world.block_entity(pos))
@@ -54,19 +56,19 @@ fn supports_face(
         })
         .and_then(parse_direction)
         .is_some_and(|direction| face == direction.opposite());
-    let full = state.sturdy(face) || moving_source_face;
+    if moving_source_face {
+        return true;
+    }
     let path = state.name.strip_prefix("minecraft:").unwrap_or(&state.name);
-    let center = full
-        || face == Direction::Up && (path.ends_with("_fence") || path.ends_with("_wall"))
-        || matches!(path, "piston" | "sticky_piston")
-            && state.bool_property("extended")
-            && state.direction_property("facing") != Some(face);
     match support_type {
-        SupportType::Full => full,
-        SupportType::Center => center,
-        SupportType::Rigid => full,
-        SupportType::PressurePlate => full || center,
-        SupportType::Wire => full || path == "hopper",
+        SupportRequirement::Full => state.supports(face, SupportType::Full),
+        SupportRequirement::Center => state.supports(face, SupportType::Center),
+        SupportRequirement::Rigid => state.supports(face, SupportType::Rigid),
+        SupportRequirement::PressurePlate => {
+            state.supports(face, SupportType::Rigid)
+                || state.supports(face, SupportType::Center)
+        }
+        SupportRequirement::Wire => state.supports(face, SupportType::Full) || path == "hopper",
     }
 }
 
@@ -202,31 +204,35 @@ impl Java26Rules {
             return false;
         };
         let (support_direction, support_face, support_type) = match state.behavior {
-            BlockBehavior::Wire => (Direction::Down, Direction::Up, SupportType::Wire),
+            BlockBehavior::Wire => (Direction::Down, Direction::Up, SupportRequirement::Wire),
             BlockBehavior::Torch { wall: false } => {
-                (Direction::Down, Direction::Up, SupportType::Center)
+                (Direction::Down, Direction::Up, SupportRequirement::Center)
             }
             BlockBehavior::Torch { wall: true } => {
                 let facing = state
                     .direction_property("facing")
                     .unwrap_or(Direction::North);
-                (facing.opposite(), facing, SupportType::Center)
+                (facing.opposite(), facing, SupportRequirement::Center)
             }
             BlockBehavior::Lever | BlockBehavior::Button { .. } => {
                 let facing = attached_direction(state);
-                (facing.opposite(), facing, SupportType::Full)
+                (facing.opposite(), facing, SupportRequirement::Full)
             }
             BlockBehavior::PressurePlate { .. } => {
-                (Direction::Down, Direction::Up, SupportType::PressurePlate)
+                (
+                    Direction::Down,
+                    Direction::Up,
+                    SupportRequirement::PressurePlate,
+                )
             }
             BlockBehavior::Repeater | BlockBehavior::Comparator => {
-                (Direction::Down, Direction::Up, SupportType::Rigid)
+                (Direction::Down, Direction::Up, SupportRequirement::Rigid)
             }
             BlockBehavior::TripwireHook => {
                 let facing = state
                     .direction_property("facing")
                     .unwrap_or(Direction::North);
-                (facing.opposite(), facing, SupportType::Full)
+                (facing.opposite(), facing, SupportRequirement::Full)
             }
             _ => return false,
         };
@@ -251,7 +257,7 @@ impl Java26Rules {
     ) -> bool {
         if !self
             .state_or_air(world, pos.relative(Direction::Down))
-            .sturdy(Direction::Up)
+            .supports(Direction::Up, SupportType::Rigid)
         {
             return false;
         }
@@ -265,7 +271,7 @@ impl Java26Rules {
             };
         support_direction.is_none_or(|direction| {
             self.state_or_air(world, pos.relative(direction))
-                .sturdy(Direction::Up)
+                .supports(Direction::Up, SupportType::Rigid)
         })
     }
 
@@ -582,11 +588,11 @@ impl Java26Rules {
             .redstone_conductor;
         if above_open
             && (side_state.name.ends_with("_trapdoor")
-                || side_state.sturdy(Direction::Up)
+                || side_state.supports(Direction::Up, SupportType::Full)
                 || matches!(side_state.behavior, BlockBehavior::Hopper))
             && self.wire_connects_to(self.state_or_air(world, side.relative(Direction::Up)), None)
         {
-            return if side_state.sturdy(direction.opposite()) {
+            return if side_state.supports(direction.opposite(), SupportType::Full) {
                 "up"
             } else {
                 "side"
@@ -721,7 +727,7 @@ impl Java26Rules {
             && direction == Direction::Down
             && !self
                 .state_or_air(world, pos.relative(Direction::Down))
-                .sturdy(Direction::Up)
+                .supports(Direction::Up, SupportType::Full)
         {
             return Ok(self.registry.air_state());
         }
@@ -926,7 +932,9 @@ fn fence_connects(state: &StateDefinition, direction: Direction, wooden: bool) -
         && state
             .direction_property("facing")
             .is_some_and(|facing| facing_axis(facing) != facing_axis(direction));
-    same_fence || gate || state.sturdy(direction) && !connection_exception(path)
+    same_fence
+        || gate
+        || state.supports(direction, SupportType::Full) && !connection_exception(path)
 }
 
 fn pane_connects(state: &StateDefinition, direction: Direction) -> bool {
@@ -934,7 +942,7 @@ fn pane_connects(state: &StateDefinition, direction: Direction) -> bool {
     path.contains("glass_pane")
         || path.ends_with("_bars")
         || path.ends_with("_wall")
-        || state.sturdy(direction) && !connection_exception(path)
+        || state.supports(direction, SupportType::Full) && !connection_exception(path)
 }
 
 fn wall_connects(state: &StateDefinition, direction: Direction) -> bool {
@@ -946,7 +954,7 @@ fn wall_connects(state: &StateDefinition, direction: Direction) -> bool {
             && state
                 .direction_property("facing")
                 .is_some_and(|facing| facing_axis(facing) != facing_axis(direction))
-        || state.sturdy(direction) && !connection_exception(path)
+        || state.supports(direction, SupportType::Full) && !connection_exception(path)
 }
 
 fn connection_exception(path: &str) -> bool {

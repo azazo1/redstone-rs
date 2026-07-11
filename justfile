@@ -111,14 +111,17 @@ download-runtime:
     done < "$libraries"
 
 # just generate-reports
-# 使用官方数据生成器输出 26.1.2 方块和注册表报告.
-generate-reports: download-runtime download-client
+# 使用官方数据生成器和 Java oracle 输出 26.1.2 报告.
+generate-reports: download-client oracle-build
     #!/usr/bin/env sh
     set -eu
     mkdir -p "{{ REPORT_DIR }}"
     classpath="{{ CLIENT_JAR }}:$(find "{{ RUNTIME_DIR }}" -name '*.jar' -type f | sort | paste -sd ':' -)"
     echo "生成 Minecraft 26.1.2 数据报告"
     java -Xmx4g -cp "$classpath" net.minecraft.data.Main --reports --output "{{ REPORT_DIR }}"
+    oracle_classpath="{{ ORACLE_DIR }}/build/vanilla-oracle.jar:$classpath:$(find "{{ ORACLE_LIB_DIR }}" -name '*.jar' -type f | sort | paste -sd ':' -)"
+    echo "生成 Minecraft 26.1.2 方块特征报告"
+    java -Xmx2g -cp "$oracle_classpath" redstone.oracle.Main --block-traits-report "{{ REPORT_DIR }}/reports/block-traits.json"
 
 # 下载 Java oracle 的 TOML 解析运行库.
 download-oracle-deps:

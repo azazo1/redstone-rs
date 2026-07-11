@@ -5,6 +5,7 @@ mod rules;
 
 pub use registry::{
     BlockBehavior, Java26Registry, PushReaction, StateDefinition, StateResolveError, StateResolver,
+    SupportFaces, SupportType,
 };
 pub use rules::Java26Rules;
 
