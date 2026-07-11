@@ -3,14 +3,17 @@ use std::collections::{BTreeMap, HashMap};
 use fastnbt::Value;
 use redstone_core::{BlockPos, BlockStateId};
 use thiserror::Error;
-use tracing::info;
 
-use super::{LoadedStructure, writer::StructureState};
+use super::{
+    LoadedStructure,
+    writer::{StructureState, WriteProgress},
+};
 
 pub(super) fn encode_vanilla_structure(
     structure: &LoadedStructure,
     include_air: bool,
     data_version: i32,
+    progress: &mut WriteProgress,
     mut describe_state: impl FnMut(BlockStateId) -> Result<StructureState, String>,
 ) -> Result<Vec<u8>, VanillaWriteError> {
     let min = structure.region_min;
@@ -22,11 +25,6 @@ pub(super) fn encode_vanilla_structure(
     ];
     let mut palette = BTreeMap::<StructureState, usize>::new();
     let mut blocks = Vec::new();
-    let total = size
-        .iter()
-        .try_fold(1usize, |volume, dimension| volume.checked_mul(*dimension as usize))
-        .ok_or(VanillaWriteError::VolumeOverflow)?;
-    let mut processed = 0usize;
     if include_air {
         for y in min.y..=max.y {
             for z in min.z..=max.z {
@@ -39,10 +37,7 @@ pub(super) fn encode_vanilla_structure(
                         &mut blocks,
                         &mut describe_state,
                     )?;
-                    processed += 1;
-                    if processed.is_multiple_of(1_000_000) {
-                        info!(processed, total, "转换 vanilla structure 方块");
-                    }
+                    progress.advance_encoding();
                 }
             }
         }
@@ -59,10 +54,7 @@ pub(super) fn encode_vanilla_structure(
                 &mut blocks,
                 &mut describe_state,
             )?;
-            processed += 1;
-            if processed.is_multiple_of(250_000) {
-                info!(processed, "转换 vanilla structure 非空气方块");
-            }
+            progress.advance_encoding();
         }
     }
     let mut ordered_palette = vec![Value::Compound(HashMap::new()); palette.len()];
@@ -125,12 +117,6 @@ pub(super) fn encode_vanilla_structure(
         ("blocks".to_owned(), Value::List(blocks)),
         ("entities".to_owned(), Value::List(entities)),
     ]);
-    info!(
-        blocks = processed,
-        states = ordered_palette_len(&root),
-        include_air,
-        "完成 vanilla structure 转换"
-    );
     fastnbt::to_bytes(&root).map_err(VanillaWriteError::Nbt)
 }
 
@@ -224,21 +210,10 @@ fn floor_to_i32(value: f64) -> Option<i32> {
     (value >= i32::MIN as f64 && value <= i32::MAX as f64).then_some(value as i32)
 }
 
-fn ordered_palette_len(root: &HashMap<String, Value>) -> usize {
-    root.get("palette")
-        .and_then(|value| match value {
-            Value::List(values) => Some(values.len()),
-            _ => None,
-        })
-        .unwrap_or(0)
-}
-
 #[derive(Debug, Error)]
 pub enum VanillaWriteError {
     #[error("结构区域边界无效")]
     InvalidBounds,
-    #[error("结构区域体积溢出")]
-    VolumeOverflow,
     #[error("无法导出方块状态: {0}")]
     State(String),
     #[error("NBT 编码失败: {0}")]

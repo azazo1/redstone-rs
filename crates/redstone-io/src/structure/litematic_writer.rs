@@ -7,12 +7,13 @@ use redstone_core::{BlockPos, BlockStateId};
 
 use super::{
     LoadedStructure,
-    writer::{StructureState, StructureWriteError},
+    writer::{StructureState, StructureWriteError, WriteProgress},
 };
 
 pub(super) fn encode(
     structure: &LoadedStructure,
     data_version: i32,
+    progress: &mut WriteProgress,
     mut describe_state: impl FnMut(BlockStateId) -> Result<StructureState, String>,
 ) -> Result<Vec<u8>, StructureWriteError> {
     let min = structure.region_min;
@@ -33,6 +34,7 @@ pub(super) fn encode(
                 let description = describe_state(state).map_err(StructureWriteError::Litematic)?;
                 let next = palette.len();
                 indices.push(*palette.entry(description).or_insert(next));
+                progress.advance_encoding();
             }
         }
     }
