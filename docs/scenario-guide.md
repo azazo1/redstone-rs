@@ -61,7 +61,7 @@ rotation = "clockwise90"
 mirror = "none"
 ```
 
-支持 `.litematic`, `.nbt` 和 `.structure` 文件.
+支持 `.litematic`, `.schem`, `.nbt` 和 `.structure` 文件.
 
 | 字段 | 可选值 | 默认值 | 说明 |
 | --- | --- | --- | --- |

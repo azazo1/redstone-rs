@@ -207,6 +207,27 @@ impl Java26Registry {
         self.resolve_state(name, &properties)
     }
 
+    pub fn complete_state_properties(
+        &self,
+        name: &str,
+        properties: &BTreeMap<String, String>,
+    ) -> Result<BTreeMap<String, String>, StateResolveError> {
+        if !name.contains(':') {
+            return Err(StateResolveError::InvalidName(name.to_owned()));
+        }
+        let mut completed = self
+            .catalog
+            .default_properties_by_name
+            .get(name)
+            .cloned()
+            .ok_or_else(|| StateResolveError::UnknownCombination {
+                name: name.to_owned(),
+                properties: properties.clone(),
+            })?;
+        completed.extend(properties.clone());
+        Ok(completed)
+    }
+
     fn intern_kind(&mut self, name: &str) -> BlockKindId {
         if let Some(kind) = self.kinds_by_name.get(name) {
             return *kind;
@@ -260,6 +281,7 @@ impl StateResolver for Java26Registry {
 #[derive(Debug)]
 struct OfficialStateCatalog {
     states_by_key: HashMap<String, BlockStateId>,
+    default_properties_by_name: HashMap<String, BTreeMap<String, String>>,
     blocks_with_entities: HashSet<String>,
     max_state_id: u32,
 }
@@ -278,6 +300,8 @@ struct BlockReportDefinition {
 
 #[derive(Deserialize)]
 struct BlockReportState {
+    #[serde(default, rename = "default")]
+    is_default: bool,
     id: u32,
     #[serde(default)]
     properties: BTreeMap<String, String>,
@@ -292,6 +316,7 @@ fn official_catalog() -> Arc<OfficialStateCatalog> {
             ))
             .expect("官方 26.1.2 blocks.json 必须可解析");
             let mut states_by_key = HashMap::new();
+            let mut default_properties_by_name = HashMap::new();
             let mut blocks_with_entities = HashSet::new();
             let mut max_state_id = 0;
             for (name, entry) in report {
@@ -300,6 +325,11 @@ fn official_catalog() -> Arc<OfficialStateCatalog> {
                 }
                 for state in entry.states {
                     max_state_id = max_state_id.max(state.id);
+                    if state.is_default {
+                        let old = default_properties_by_name
+                            .insert(name.clone(), state.properties.clone());
+                        assert!(old.is_none(), "官方方块存在多个默认状态: {name}");
+                    }
                     let old = states_by_key
                         .insert(state_key(&name, &state.properties), BlockStateId(state.id));
                     assert!(old.is_none(), "官方方块状态键重复: {name}");
@@ -307,6 +337,7 @@ fn official_catalog() -> Arc<OfficialStateCatalog> {
             }
             Arc::new(OfficialStateCatalog {
                 states_by_key,
+                default_properties_by_name,
                 blocks_with_entities,
                 max_state_id,
             })
@@ -591,6 +622,23 @@ fn piston_push_reaction(path: &str, extended_piston: bool) -> PushReaction {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn partial_state_properties_override_the_official_default_state() {
+        let mut registry = Java26Registry::new();
+        let partial = BTreeMap::from([("facing".to_owned(), "east".to_owned())]);
+        let completed = registry
+            .complete_state_properties("minecraft:repeater", &partial)
+            .unwrap();
+
+        assert_eq!(completed["delay"], "1");
+        assert_eq!(completed["facing"], "east");
+        assert_eq!(completed["locked"], "false");
+        assert_eq!(completed["powered"], "false");
+        registry
+            .resolve_state("minecraft:repeater", &completed)
+            .unwrap();
+    }
 
     #[test]
     fn piston_push_reactions_match_vanilla_categories() {

@@ -39,7 +39,7 @@ struct Cli {
 #[derive(Debug, Subcommand)]
 enum Command {
     Inspect {
-        #[arg(help = "要检查的 litematic 或 structure NBT 文件")]
+        #[arg(help = "要检查的 litematic, schem 或 structure NBT 文件")]
         structure: PathBuf,
         #[arg(
             long = "block",
@@ -1299,6 +1299,14 @@ impl StructureStateResolver for RegistryResolver {
         properties: &BTreeMap<String, String>,
     ) -> Result<BlockStateId, Self::Error> {
         self.0.resolve_state(name, properties)
+    }
+
+    fn complete_state_properties(
+        &mut self,
+        name: &str,
+        properties: &BTreeMap<String, String>,
+    ) -> Result<BTreeMap<String, String>, Self::Error> {
+        self.0.complete_state_properties(name, properties)
     }
 
     fn air_state(&self) -> BlockStateId {
