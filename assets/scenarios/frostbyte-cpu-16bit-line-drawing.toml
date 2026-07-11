@@ -8,6 +8,9 @@ skip_oracle = true
 [monitor]
 skip_ticks = 224999
 
+[replay]
+duration_ms = 20000
+
 [replay.camera]
 view_distance = 8
 position = [275.79, 86.0, 202.74]

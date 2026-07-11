@@ -89,6 +89,12 @@ impl From<ScenarioEnvironment> for SimulationEnvironment {
 #[derive(Clone, Debug, Default, Deserialize, Serialize)]
 pub struct ScenarioReplay {
     #[serde(default)]
+    pub start_tick: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub end_tick: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub duration_ms: Option<u64>,
+    #[serde(default)]
     pub camera: ScenarioReplayCamera,
 }
 
@@ -629,5 +635,51 @@ path = "machine.nbt"
         assert_eq!(camera.position, Some([1.25, 2.5, 3.75]));
         assert_eq!(camera.yaw, Some(-45.0));
         assert_eq!(camera.pitch, Some(30.0));
+    }
+
+    #[test]
+    fn replay_parses_timeline_fields() {
+        let scenario = toml::from_str::<Scenario>(
+            r#"
+version = "26.1.2"
+mode = "default"
+
+[replay]
+start_tick = 20
+end_tick = 80
+duration_ms = 1500
+
+[source]
+path = "machine.nbt"
+"#,
+        )
+        .unwrap();
+        let replay = scenario.replay.unwrap();
+
+        assert_eq!(replay.start_tick, 20);
+        assert_eq!(replay.end_tick, Some(80));
+        assert_eq!(replay.duration_ms, Some(1500));
+    }
+
+    #[test]
+    fn replay_timeline_fields_are_optional() {
+        let scenario = toml::from_str::<Scenario>(
+            r#"
+version = "26.1.2"
+mode = "default"
+
+[replay.camera]
+view_distance = 12
+
+[source]
+path = "machine.nbt"
+"#,
+        )
+        .unwrap();
+        let replay = scenario.replay.unwrap();
+
+        assert_eq!(replay.start_tick, 0);
+        assert_eq!(replay.end_tick, None);
+        assert_eq!(replay.duration_ms, None);
     }
 }

@@ -80,11 +80,16 @@ cargo run --release -p redstone-cli -- bench
 
 仅打开并保存世界不会升级全部已保存 chunk. `优化世界` 会遍历已有 region 并通过游戏的数据修复器写入当前 DataVersion, 因此是完整升级存档的推荐方式.
 
-`run --replay` 和单场景 `test --replay` 会直接从 Rust 仿真生成 Replay Mod 格式 14 录像. 录像目标版本为 Minecraft `26.1.2`, 每个游戏 tick 对应 50 ms. 初始原理图声明区域覆盖的全部 chunk 会在同一批次加载, 外围保留一圈渲染邻居. 后续方块变化进入新 chunk 时只加载目标 chunk 的局部邻接圈, 可随飞行器移动持续扩展, 不会补齐与原理图之间的无关 chunk. 目录批量测试暂不支持共享录像输出路径. 断言失败时录像仍会完成并保留, 仿真或编码失败时不会替换目标文件.
+`run --replay` 和单场景 `test --replay` 会直接从 Rust 仿真生成 Replay Mod 格式 14 录像. 录像目标版本为 Minecraft `26.1.2`. 默认每个游戏 tick 对应 50 ms, 也可以在 `[replay]` 中剪切源 tick 区间并把它映射到指定播放时长. 初始原理图声明区域覆盖的全部 chunk 会在同一批次加载, 外围保留一圈渲染邻居. 后续方块变化进入新 chunk 时只加载目标 chunk 的局部邻接圈, 可随飞行器移动持续扩展, 不会补齐与原理图之间的无关 chunk. 目录批量测试暂不支持共享录像输出路径. 断言失败时录像仍会完成并保留, 仿真或编码失败时不会替换目标文件.
 
-场景可以设置 Replay 初始摄像头:
+场景可以设置 Replay 导出区间, 目标播放时长和初始摄像头:
 
 ```toml
+[replay]
+start_tick = 20
+end_tick = 80
+duration_ms = 1500
+
 [replay.camera]
 view_distance = 8
 position = [12.5, 20.0, -6.5]
@@ -92,7 +97,7 @@ yaw = 135.0
 pitch = 35.0
 ```
 
-所有字段均可省略. 自动取景使用录像开始时的非空气方块边界, 优先靠近机器, 并在结构明显扁平时沿最薄轴观察. 场景探针, 红石灯和铜灯会用于选择更接近观测结果的一面. `view_distance` 约束自动机位的 Replay 播放视距预算, 不裁剪录像中的远端 chunk 数据. 完整字段和角度约定见 [场景编写手册](docs/scenario-guide.md#replay-初始摄像头).
+所有字段均可省略. `start_tick..=end_tick` 是包含首尾的源区间, 默认导出 `0..=max_ticks`. 剪切后的起点固定映射到播放时间轴 0, 终点映射到 `duration_ms`, 默认保持每个源 tick 50 ms. 自动取景使用录像开始时的非空气方块边界, 优先靠近机器, 并在结构明显扁平时沿最薄轴观察. 场景探针, 红石灯和铜灯会用于选择更接近观测结果的一面. `view_distance` 约束自动机位的 Replay 播放视距预算, 不裁剪录像中的远端 chunk 数据. 完整字段和角度约定见 [场景编写手册](docs/scenario-guide.md#replay-时间轴).
 
 `--replay-anim` 会在录像中额外保留原版活塞 block event, 由客户端生成伸缩动画和声音. 该开关必须与 `--replay` 同时使用, 默认关闭.
 
@@ -142,7 +147,7 @@ equals = 15
 
 环境字段可固定游戏时间, Overworld 时钟和日光探测器位置的原始天空光. tick 1 使用初始时间加 1, 暂停 Overworld 时钟不会暂停 `game_time`. Java oracle 当前只支持 `sky_light = 15`.
 
-`monitor.skip_ticks = N` 会完整执行初始化和前 N 个游戏刻, 但 JSONL trace, VCD, probe, assertions 和 Java oracle 从 tick N+1 才开始监视. 跳过区间内的 assertions 会被忽略并产生 warning. 默认值 `0` 保留包括 tick 0 初始化事件在内的当前行为. Replay 始终记录完整仿真, 不受该设置影响.
+`monitor.skip_ticks = N` 会完整执行初始化和前 N 个游戏刻, 但 JSONL trace, VCD, probe, assertions 和 Java oracle 从 tick N+1 才开始监视. 跳过区间内的 assertions 会被忽略并产生 warning. 默认值 `0` 保留包括 tick 0 初始化事件在内的当前行为. Replay 不受该设置影响, 其导出区间只由 `[replay]` 的时间轴字段控制.
 
 严格模式会拒绝已识别但未实现的主动方块. `--allow-static-fallback` 可以保留其静态状态并继续执行.
 

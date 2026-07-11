@@ -17,7 +17,9 @@ use redstone_io::{
 use redstone_java_26::{
     JAVA_DATA_VERSION, JAVA_VERSION, Java26Registry, Java26Rules, StateResolveError, StateResolver,
 };
-use redstone_replay_26::{ReplayOptions, ReplayRegion, ReplayStats, ReplayWriter};
+use redstone_replay_26::{
+    ReplayOptions, ReplayRegion, ReplayStats, ReplayTimeline, ReplayWriter,
+};
 use tokio::io::{AsyncBufReadExt, AsyncRead, BufReader};
 use tokio::process::Command as ProcessCommand;
 use tokio::sync::Semaphore;
@@ -442,6 +444,9 @@ fn execute_scenario(
     if scenario.version != JAVA_VERSION {
         bail!("场景版本必须是 {JAVA_VERSION}, 收到 {}", scenario.version);
     }
+    let replay_timeline = replay_path
+        .map(|_| resolve_replay_timeline(&scenario))
+        .transpose()?;
     let mut resolver = RegistryResolver(Java26Registry::new());
     let loaded = StructureLoader::load_with_options(
         &scenario.source.path,
@@ -488,17 +493,6 @@ fn execute_scenario(
         .collect::<Result<Vec<_>>>()?;
     actions.sort_by_key(|(tick, _)| *tick);
 
-    let camera_hints = replay_camera::hints(
-        &scenario,
-        std::iter::once(&loaded.world).chain(
-            pastes
-                .iter()
-                .filter(|(paste, _)| paste.tick.is_none())
-                .map(|(_, structure)| &structure.world),
-        ),
-        &resolver.0,
-    );
-
     let rules = Java26Rules::new(resolver.0);
     let mut simulation = Simulation::load(
         rules,
@@ -542,32 +536,20 @@ fn execute_scenario(
         );
     }
 
-    let mut replay = if let Some(path) = replay_path {
-        let name = scenario_path.file_name().map_or_else(
-            || scenario_path.display().to_string(),
-            |name| name.to_string_lossy().into_owned(),
-        );
-        let camera = replay_camera::options(&scenario);
-        Some(
-            ReplayWriter::new(
-                path,
-                ReplayOptions::new(
-                    name,
-                    scenario.seed,
-                    scenario.mode == RedstoneMode::Experimental,
-                    replay_region,
-                )
-                .with_environment(scenario.environment.into())
-                .with_piston_animation(replay_anim)
-                .with_camera(camera)
-                .with_camera_hints(camera_hints),
-                simulation.world(),
-            )
-            .with_context(|| format!("初始化 Replay Mod 录像失败: {}", path.display()))?,
-        )
-    } else {
-        None
-    };
+    let mut replay = None;
+    if let (Some(path), Some(timeline)) = (replay_path, replay_timeline)
+        && timeline.start_tick() == 0
+    {
+        replay = Some(create_replay_writer(
+            path,
+            scenario_path,
+            &scenario,
+            replay_anim,
+            replay_region,
+            timeline,
+            &simulation,
+        )?);
+    }
 
     let mut action_index = 0;
     let mut samples = BTreeMap::<(GameTick, String), ProbeValue>::new();
@@ -645,7 +627,24 @@ fn execute_scenario(
         }
         let delta = simulation.step_with_pastes_and_actions(&current_pastes, &current_actions)?;
         let completed_tick = delta.tick.0;
-        if let Some(replay) = replay.as_mut() {
+        if replay.is_none()
+            && let (Some(path), Some(timeline)) = (replay_path, replay_timeline)
+            && completed_tick == timeline.start_tick()
+        {
+            replay = Some(create_replay_writer(
+                path,
+                scenario_path,
+                &scenario,
+                replay_anim,
+                replay_region,
+                timeline,
+                &simulation,
+            )?);
+        }
+        if let (Some(replay), Some(timeline)) = (replay.as_mut(), replay_timeline)
+            && completed_tick > timeline.start_tick()
+            && completed_tick <= timeline.end_tick()
+        {
             replay.record_delta(&delta).with_context(|| {
                 format!(
                     "编码 Replay Mod tick {} 失败: {}",
@@ -725,12 +724,80 @@ fn log_replay_stats(path: &Path, stats: &ReplayStats) {
     info!(
         path = %path.display(),
         ticks = stats.ticks,
+        start_tick = stats.start_tick,
+        end_tick = stats.end_tick,
+        duration_ms = stats.duration_ms,
         packets = stats.packets,
         block_updates = stats.block_updates,
         file_size = stats.file_size,
         elapsed_ms = stats.elapsed.as_secs_f64() * 1_000.0,
         "导出 Replay Mod 录像"
     );
+}
+
+fn resolve_replay_timeline(scenario: &Scenario) -> Result<ReplayTimeline> {
+    let replay = scenario.replay.as_ref();
+    let start_tick = replay.map_or(0, |replay| replay.start_tick);
+    let end_tick = replay
+        .and_then(|replay| replay.end_tick)
+        .unwrap_or(scenario.max_ticks);
+    if start_tick > end_tick {
+        bail!(
+            "[replay] tick 区间无效: start_tick={start_tick}, end_tick={end_tick}"
+        );
+    }
+    if end_tick > scenario.max_ticks {
+        bail!(
+            "[replay].end_tick 超出 max_ticks: end_tick={end_tick}, max_ticks={}",
+            scenario.max_ticks
+        );
+    }
+    let duration_ms = replay.and_then(|replay| replay.duration_ms).map_or_else(
+        || {
+            (end_tick - start_tick)
+                .checked_mul(redstone_replay_26::TICK_MILLIS)
+                .context("[replay] 默认 duration_ms 计算溢出")
+        },
+        Ok,
+    )?;
+    ReplayTimeline::new(start_tick, end_tick, duration_ms).context("[replay] 时间轴配置无效")
+}
+
+fn create_replay_writer(
+    replay_path: &Path,
+    scenario_path: &Path,
+    scenario: &Scenario,
+    replay_anim: bool,
+    replay_region: ReplayRegion,
+    timeline: ReplayTimeline,
+    simulation: &Simulation<Java26Rules>,
+) -> Result<ReplayWriter> {
+    let name = scenario_path.file_name().map_or_else(
+        || scenario_path.display().to_string(),
+        |name| name.to_string_lossy().into_owned(),
+    );
+    let camera = replay_camera::options(scenario);
+    let camera_hints = replay_camera::hints(
+        scenario,
+        [simulation.world()],
+        simulation.rules().registry(),
+    );
+    ReplayWriter::new(
+        replay_path,
+        ReplayOptions::new(
+            name,
+            scenario.seed,
+            scenario.mode == RedstoneMode::Experimental,
+            replay_region,
+            timeline,
+        )
+        .with_environment(simulation.environment())
+        .with_piston_animation(replay_anim)
+        .with_camera(camera)
+        .with_camera_hints(camera_hints),
+        simulation.world(),
+    )
+    .with_context(|| format!("初始化 Replay Mod 录像失败: {}", replay_path.display()))
 }
 
 async fn test_path(

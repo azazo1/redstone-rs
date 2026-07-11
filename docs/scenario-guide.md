@@ -44,7 +44,7 @@ equals = "true"
 | `skip_oracle` | 布尔值 | 否 | `false` | 使用 `test --oracle` 时仅跳过 Java 对照 |
 | `environment` | 表 | 否 | 默认 Overworld 环境 | 初始时间和基础天空光设置 |
 | `monitor` | 表 | 否 | 立即监视 | trace, probe 和 oracle 的监视起点 |
-| `replay` | 表 | 否 | 自动配置 | Replay Mod 初始摄像头设置 |
+| `replay` | 表 | 否 | 自动配置 | Replay Mod 时间轴和初始摄像头设置 |
 | `source` | 表 | 是 | 无 | 输入结构和装载方式 |
 | `actions` | 表数组 | 否 | 空 | 定时执行的操作 |
 | `probes` | 表数组 | 否 | 空 | 每刻结束后采样的观测项 |
@@ -86,7 +86,30 @@ skip_ticks = 100
 
 `skip_ticks` 是非负整数, 默认值为 `0`. 默认配置从场景初始化阶段开始记录, 因而 trace 可以包含 tick 0 事件. 当值为 N 且 N > 0 时, 初始化和 tick 1..N 仍会完整执行, 但 trace, VCD, probe 采样和 Java oracle 输出均从 tick N+1 开始.
 
-`tick <= skip_ticks` 的 assertions 不会执行, CLI 会聚合输出一条 warning, 包含忽略数量和 tick 范围. `skip_ticks >= max_ticks` 合法, 此时 JSONL trace 为空, VCD 不含探针信号, 所有 assertions 均被忽略. Replay 使用独立的世界事件记录, 始终包含被跳过监视的游戏刻.
+`tick <= skip_ticks` 的 assertions 不会执行, CLI 会聚合输出一条 warning, 包含忽略数量和 tick 范围. `skip_ticks >= max_ticks` 合法, 此时 JSONL trace 为空, VCD 不含探针信号, 所有 assertions 均被忽略. Replay 使用独立的世界事件记录, 不受监视起点影响, 其导出区间只由 `[replay]` 的时间轴字段控制.
+
+## Replay 时间轴
+
+```toml
+[replay]
+start_tick = 20
+end_tick = 80
+duration_ms = 1500
+```
+
+`[replay]` 只影响 `run --replay` 和单场景 `test --replay` 生成的录像. 三个时间轴字段均可省略.
+
+| 字段 | 类型 | 默认值 | 说明 |
+| --- | --- | --- | --- |
+| `start_tick` | 非负整数 | `0` | 导出源区间的起始 tick |
+| `end_tick` | 非负整数 | `max_ticks` | 导出源区间的结束 tick |
+| `duration_ms` | 非负整数 | `(end_tick - start_tick) * 50` | 导出录像播放条的目标毫秒数 |
+
+`start_tick..=end_tick` 是包含首尾的闭区间. 剪切后的 `start_tick` 固定映射到 Replay 时间轴 0, `end_tick` 映射到 `duration_ms`. 中间源 tick 按完整区间比例映射并四舍五入到毫秒. 压缩后的多个事件可以落在同一毫秒, 此时仍保持原始事件顺序.
+
+tick 0 表示初始化完成但 tick 1 尚未执行的世界. 当 `start_tick > 0` 时, writer 会在该 tick 完成后创建完整世界快照, 因而录像首帧表示该 tick 的 post-tick 状态. 该 tick 内的瞬时 block event 不会重新播放, 但最终方块和方块实体状态会进入快照. `end_tick` 的执行结果包含在录像中, 后续仿真仍会运行到 `max_ticks`, 不影响断言, trace, VCD 或 Java oracle.
+
+配置必须满足 `start_tick <= end_tick <= max_ticks`. 非空源区间要求 `duration_ms > 0`. 当起止 tick 相同时, 只能省略 `duration_ms` 或将其设为 0, 此时导出零时长静态快照. 目标时长还必须处于 MCPR 的 `i32` 毫秒时间戳范围内.
 
 ## Replay 初始摄像头
 
@@ -98,7 +121,7 @@ yaw = 135.0
 pitch = 35.0
 ```
 
-`[replay.camera]` 只影响 `run --replay` 和单场景 `test --replay` 生成的录像. 省略整个表时使用自动取景.
+省略 `[replay.camera]` 时使用自动取景.
 
 | 字段 | 类型 | 默认值 | 说明 |
 | --- | --- | --- | --- |

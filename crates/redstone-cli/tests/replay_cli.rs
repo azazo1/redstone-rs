@@ -91,6 +91,84 @@ fn single_scenario_test_exports_replay() {
 }
 
 #[test]
+fn replay_timeline_exports_post_tick_snapshot_and_remaps_included_deltas() {
+    let directory = TestDirectory::new("replay-timeline");
+    let structure_path = directory.path().join("machine.nbt");
+    let scenario_path = directory.path().join("timeline.toml");
+    let replay = directory.path().join("timeline.mcpr");
+    fs::write(structure_path, structure()).unwrap();
+    fs::write(&scenario_path, timeline_scenario()).unwrap();
+
+    let output = run_command("run", &scenario_path, &replay);
+    assert_success(&output);
+    let recording = read_recording(&replay);
+    let packets = parse_packets(&recording);
+
+    let initial_chunk = packets
+        .iter()
+        .filter(|packet| packet.id == LEVEL_CHUNK_WITH_LIGHT && packet.timestamp == 0)
+        .map(|packet| decode_chunk(packet.payload))
+        .find(|(chunk, _)| *chunk == (0, 0))
+        .unwrap();
+    assert_eq!(initial_chunk.1[section_index(0, 0, 0)], 0);
+
+    let updates = packets
+        .iter()
+        .filter(|packet| packet.id == BLOCK_UPDATE)
+        .map(|packet| decode_block_update(packet.timestamp, packet.payload))
+        .filter(|(_, pos, _)| *pos == (0, 0, 0))
+        .collect::<Vec<_>>();
+    assert_eq!(updates.len(), 2);
+    assert_eq!(updates[0].0, 25);
+    assert_eq!(updates[1].0, 50);
+    assert_ne!(updates[0].2, 0);
+    assert_ne!(updates[1].2, 0);
+    assert_ne!(updates[0].2, updates[1].2);
+
+    let metadata = read_metadata(&replay);
+    assert_eq!(metadata["duration"], 50);
+}
+
+#[test]
+fn replay_timeline_rejects_invalid_scenario_ranges_and_durations() {
+    let directory = TestDirectory::new("replay-timeline-invalid");
+    fs::write(directory.path().join("machine.nbt"), structure()).unwrap();
+    let invalid_replays = [
+        "start_tick = 3\nend_tick = 2",
+        "start_tick = 0\nend_tick = 5",
+        "start_tick = 1\nend_tick = 2\nduration_ms = 0",
+        "start_tick = 2\nend_tick = 2\nduration_ms = 1",
+        "start_tick = 0\nend_tick = 4\nduration_ms = 2147483648",
+    ];
+
+    for (index, replay_config) in invalid_replays.into_iter().enumerate() {
+        let scenario = directory.path().join(format!("invalid-{index}.toml"));
+        let replay = directory.path().join(format!("invalid-{index}.mcpr"));
+        fs::write(
+            &scenario,
+            format!(
+                r#"version = "26.1.2"
+mode = "default"
+max_ticks = 4
+
+[replay]
+{replay_config}
+
+[source]
+path = "machine.nbt"
+initialization = "raw"
+"#
+            ),
+        )
+        .unwrap();
+
+        let output = run_command("run", &scenario, &replay);
+        assert!(!output.status.success());
+        assert!(!replay.exists());
+    }
+}
+
+#[test]
 fn scenario_camera_pose_is_encoded_into_replay() {
     let directory = TestDirectory::new("replay-camera");
     let structure_path = directory.path().join("machine.nbt");
@@ -493,6 +571,45 @@ name = "minecraft:redstone_block"
     )
 }
 
+fn timeline_scenario() -> &'static str {
+    r#"version = "26.1.2"
+mode = "default"
+max_ticks = 4
+strict = true
+
+[replay]
+start_tick = 1
+end_tick = 3
+duration_ms = 50
+
+[source]
+path = "machine.nbt"
+initialization = "raw"
+
+[[actions]]
+tick = 1
+type = "break_block"
+pos = { x = 0, y = 0, z = 0 }
+
+[[actions]]
+tick = 2
+type = "set_block"
+pos = { x = 0, y = 0, z = 0 }
+name = "minecraft:redstone_block"
+
+[[actions]]
+tick = 3
+type = "set_block"
+pos = { x = 0, y = 0, z = 0 }
+name = "minecraft:stone"
+
+[[actions]]
+tick = 4
+type = "break_block"
+pos = { x = 0, y = 0, z = 0 }
+"#
+}
+
 fn sticky_branch_scenario() -> &'static str {
     r#"version = "26.1.2"
 mode = "default"
@@ -524,6 +641,14 @@ fn read_recording(path: &Path) -> Vec<u8> {
     let mut bytes = Vec::new();
     recording.read_to_end(&mut bytes).unwrap();
     bytes
+}
+
+fn read_metadata(path: &Path) -> serde_json::Value {
+    let mut archive = ZipArchive::new(File::open(path).unwrap()).unwrap();
+    let mut metadata = archive.by_name("metaData.json").unwrap();
+    let mut bytes = Vec::new();
+    metadata.read_to_end(&mut bytes).unwrap();
+    serde_json::from_slice(&bytes).unwrap()
 }
 
 struct Packet<'a> {

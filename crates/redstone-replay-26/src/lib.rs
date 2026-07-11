@@ -37,7 +37,83 @@ pub use camera::{DEFAULT_VIEW_DISTANCE, ReplayCameraHint, ReplayCameraOptions};
 pub const MINECRAFT_VERSION: &str = "26.1.2";
 pub const PROTOCOL_VERSION: i32 = 775;
 pub const FILE_FORMAT_VERSION: i32 = 14;
-const TICK_MILLIS: u64 = 50;
+pub const TICK_MILLIS: u64 = 50;
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct ReplayTimeline {
+    start_tick: u64,
+    end_tick: u64,
+    duration_ms: i32,
+}
+
+impl ReplayTimeline {
+    pub fn new(
+        start_tick: u64,
+        end_tick: u64,
+        duration_ms: u64,
+    ) -> Result<Self, ReplayError> {
+        if start_tick > end_tick {
+            return Err(ReplayError::InvalidTimelineRange {
+                start_tick,
+                end_tick,
+            });
+        }
+        let source_ticks = end_tick - start_tick;
+        if source_ticks > 0 && duration_ms == 0 {
+            return Err(ReplayError::ZeroTimelineDuration {
+                start_tick,
+                end_tick,
+            });
+        }
+        if source_ticks == 0 && duration_ms != 0 {
+            return Err(ReplayError::StaticTimelineDuration {
+                tick: start_tick,
+                duration_ms,
+            });
+        }
+        let duration_ms = i32::try_from(duration_ms)
+            .map_err(|_| ReplayError::TimelineDurationOverflow { duration_ms })?;
+        Ok(Self {
+            start_tick,
+            end_tick,
+            duration_ms,
+        })
+    }
+
+    pub fn start_tick(self) -> u64 {
+        self.start_tick
+    }
+
+    pub fn end_tick(self) -> u64 {
+        self.end_tick
+    }
+
+    pub fn source_ticks(self) -> u64 {
+        self.end_tick - self.start_tick
+    }
+
+    pub fn duration_ms(self) -> i32 {
+        self.duration_ms
+    }
+
+    fn timestamp_for_tick(self, tick: u64) -> Result<i32, ReplayError> {
+        if !(self.start_tick..=self.end_tick).contains(&tick) {
+            return Err(ReplayError::TimelineTickOutOfRange {
+                tick,
+                start_tick: self.start_tick,
+                end_tick: self.end_tick,
+            });
+        }
+        let source_ticks = self.source_ticks();
+        if source_ticks == 0 {
+            return Ok(0);
+        }
+        let elapsed_ticks = tick - self.start_tick;
+        let numerator = u128::from(elapsed_ticks) * u128::from(self.duration_ms as u32);
+        let rounded = (numerator + u128::from(source_ticks / 2)) / u128::from(source_ticks);
+        Ok(i32::try_from(rounded).expect("validated timeline duration must fit i32"))
+    }
+}
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct ReplayRegion {
@@ -70,6 +146,7 @@ pub struct ReplayOptions {
     pub environment: SimulationEnvironment,
     pub recorded_at: SystemTime,
     pub region: ReplayRegion,
+    pub timeline: ReplayTimeline,
     pub piston_animation: bool,
     pub camera: ReplayCameraOptions,
     pub camera_hints: Vec<ReplayCameraHint>,
@@ -81,6 +158,7 @@ impl ReplayOptions {
         seed: u64,
         experimental: bool,
         region: ReplayRegion,
+        timeline: ReplayTimeline,
     ) -> Self {
         Self {
             name: name.into(),
@@ -89,6 +167,7 @@ impl ReplayOptions {
             environment: SimulationEnvironment::default(),
             recorded_at: SystemTime::now(),
             region,
+            timeline,
             piston_animation: false,
             camera: ReplayCameraOptions::default(),
             camera_hints: Vec::new(),
@@ -119,6 +198,9 @@ impl ReplayOptions {
 #[derive(Clone, Debug)]
 pub struct ReplayStats {
     pub ticks: u64,
+    pub start_tick: u64,
+    pub end_tick: u64,
+    pub duration_ms: i32,
     pub packets: u64,
     pub block_updates: u64,
     pub file_size: u64,
@@ -206,7 +288,7 @@ impl ReplayWriter {
             chunk_radius: initial_chunk_radius,
             packet_count: 0,
             block_updates: 0,
-            last_tick: 0,
+            last_tick: options.timeline.start_tick(),
             last_timestamp: 0,
             options,
             started: Instant::now(),
@@ -223,7 +305,7 @@ impl ReplayWriter {
                 next: delta.tick.0,
             });
         }
-        let timestamp = timestamp_for_tick(delta.tick.0)?;
+        let timestamp = self.options.timeline.timestamp_for_tick(delta.tick.0)?;
         for event in &delta.events {
             self.record_event(timestamp, event)?;
         }
@@ -317,7 +399,7 @@ impl ReplayWriter {
         archive.start_file("recording.tmcpr.crc32", options)?;
         write!(archive, "{}", self.crc.clone().finalize())?;
         archive.start_file("metaData.json", options)?;
-        let metadata = ReplayMetadata::new(&self.options, self.last_timestamp)?;
+        let metadata = ReplayMetadata::new(&self.options, self.options.timeline.duration_ms())?;
         serde_json::to_writer(&mut archive, &metadata)?;
         let archive_file = archive.finish()?;
         archive_file.sync_all()?;
@@ -328,7 +410,10 @@ impl ReplayWriter {
         let _ = std::fs::remove_file(&self.recording_path);
         self.finished = true;
         Ok(ReplayStats {
-            ticks: self.last_tick,
+            ticks: self.options.timeline.source_ticks(),
+            start_tick: self.options.timeline.start_tick(),
+            end_tick: self.options.timeline.end_tick(),
+            duration_ms: self.options.timeline.duration_ms(),
             packets: self.packet_count,
             block_updates: self.block_updates,
             file_size,
@@ -718,13 +803,6 @@ fn validate_position(pos: BlockPos) -> Result<(), ReplayError> {
     Ok(())
 }
 
-fn timestamp_for_tick(tick: u64) -> Result<i32, ReplayError> {
-    let timestamp = tick
-        .checked_mul(TICK_MILLIS)
-        .ok_or(ReplayError::TimestampOverflow { tick })?;
-    i32::try_from(timestamp).map_err(|_| ReplayError::TimestampOverflow { tick })
-}
-
 fn state_name(state: PacketState) -> &'static str {
     match state {
         PacketState::Login => "login",
@@ -757,8 +835,20 @@ pub enum ReplayError {
     BlockStateOutOfRange { state: u32 },
     #[error("block event {name} 超出无符号字节范围: {value}")]
     BlockEventParameter { name: &'static str, value: i32 },
-    #[error("tick {tick} 无法转换为 MCPR 毫秒时间戳")]
-    TimestampOverflow { tick: u64 },
+    #[error("Replay tick 区间无效: start_tick={start_tick}, end_tick={end_tick}")]
+    InvalidTimelineRange { start_tick: u64, end_tick: u64 },
+    #[error("Replay 非空 tick 区间的 duration_ms 必须大于 0: start_tick={start_tick}, end_tick={end_tick}")]
+    ZeroTimelineDuration { start_tick: u64, end_tick: u64 },
+    #[error("Replay 静态快照的 duration_ms 必须为 0: tick={tick}, duration_ms={duration_ms}")]
+    StaticTimelineDuration { tick: u64, duration_ms: u64 },
+    #[error("Replay duration_ms 超出 MCPR 时间戳范围: {duration_ms}")]
+    TimelineDurationOverflow { duration_ms: u64 },
+    #[error("Replay tick 超出导出区间: tick={tick}, 允许 {start_tick}..={end_tick}")]
+    TimelineTickOutOfRange {
+        tick: u64,
+        start_tick: u64,
+        end_tick: u64,
+    },
     #[error("录像时间戳倒退: {previous} -> {next}")]
     TimestampOrder { previous: i32, next: i32 },
     #[error("录像 tick 倒退: {previous} -> {next}")]
@@ -804,10 +894,53 @@ mod tests {
     use super::*;
 
     #[test]
-    fn timestamp_encoding_maps_each_tick_to_fifty_milliseconds() {
-        assert_eq!(timestamp_for_tick(0).unwrap(), 0);
-        assert_eq!(timestamp_for_tick(1).unwrap(), 50);
-        assert_eq!(timestamp_for_tick(20).unwrap(), 1_000);
+    fn timeline_maps_source_range_to_target_duration() {
+        let original_speed = ReplayTimeline::new(0, 20, 1_000).unwrap();
+        assert_eq!(original_speed.timestamp_for_tick(0).unwrap(), 0);
+        assert_eq!(original_speed.timestamp_for_tick(1).unwrap(), 50);
+        assert_eq!(original_speed.timestamp_for_tick(20).unwrap(), 1_000);
+
+        let faster = ReplayTimeline::new(2, 6, 100).unwrap();
+        assert_eq!(faster.timestamp_for_tick(2).unwrap(), 0);
+        assert_eq!(faster.timestamp_for_tick(3).unwrap(), 25);
+        assert_eq!(faster.timestamp_for_tick(4).unwrap(), 50);
+        assert_eq!(faster.timestamp_for_tick(5).unwrap(), 75);
+        assert_eq!(faster.timestamp_for_tick(6).unwrap(), 100);
+
+        let slower = ReplayTimeline::new(2, 4, 400).unwrap();
+        assert_eq!(slower.timestamp_for_tick(2).unwrap(), 0);
+        assert_eq!(slower.timestamp_for_tick(3).unwrap(), 200);
+        assert_eq!(slower.timestamp_for_tick(4).unwrap(), 400);
+    }
+
+    #[test]
+    fn timeline_rounds_each_absolute_position_to_milliseconds() {
+        let timeline = ReplayTimeline::new(10, 13, 100).unwrap();
+
+        assert_eq!(timeline.timestamp_for_tick(10).unwrap(), 0);
+        assert_eq!(timeline.timestamp_for_tick(11).unwrap(), 33);
+        assert_eq!(timeline.timestamp_for_tick(12).unwrap(), 67);
+        assert_eq!(timeline.timestamp_for_tick(13).unwrap(), 100);
+    }
+
+    #[test]
+    fn timeline_rejects_invalid_ranges_and_durations() {
+        assert!(matches!(
+            ReplayTimeline::new(2, 1, 1),
+            Err(ReplayError::InvalidTimelineRange { .. })
+        ));
+        assert!(matches!(
+            ReplayTimeline::new(1, 2, 0),
+            Err(ReplayError::ZeroTimelineDuration { .. })
+        ));
+        assert!(matches!(
+            ReplayTimeline::new(1, 1, 1),
+            Err(ReplayError::StaticTimelineDuration { .. })
+        ));
+        assert!(matches!(
+            ReplayTimeline::new(0, 1, i32::MAX as u64 + 1),
+            Err(ReplayError::TimelineDurationOverflow { .. })
+        ));
     }
 
     #[test]
@@ -827,6 +960,7 @@ mod tests {
                 environment: SimulationEnvironment::default(),
                 recorded_at: UNIX_EPOCH + Duration::from_millis(1234),
                 region: ReplayRegion::new(BlockPos::new(-1, -64, 16), BlockPos::new(-1, -64, 16)),
+                timeline: ReplayTimeline::new(0, 3, 150).unwrap(),
                 piston_animation: false,
                 camera: ReplayCameraOptions::default(),
                 camera_hints: Vec::new(),
@@ -885,6 +1019,58 @@ mod tests {
     }
 
     #[test]
+    fn compressed_timeline_preserves_packet_order_at_equal_timestamps() {
+        let directory = TestDirectory::new();
+        let output = directory.path.join("compressed.mcpr");
+        let world = SparseWorld::new(BlockStateId(0));
+        let first_pos = BlockPos::new(0, 0, 0);
+        let second_pos = BlockPos::new(1, 0, 0);
+        let mut writer = ReplayWriter::new(
+            &output,
+            ReplayOptions::new(
+                "compressed.toml",
+                0,
+                false,
+                ReplayRegion::new(first_pos, second_pos),
+                ReplayTimeline::new(0, 100, 50).unwrap(),
+            ),
+            &world,
+        )
+        .unwrap();
+        for (tick, pos, state) in [
+            (GameTick(1), first_pos, BlockStateId(1)),
+            (GameTick(2), second_pos, BlockStateId(2)),
+        ] {
+            writer
+                .record_delta(&WorldDelta {
+                    tick,
+                    events: vec![WorldEvent::Block {
+                        change: BlockChange {
+                            pos,
+                            old_state: BlockStateId(0),
+                            new_state: state,
+                        },
+                    }],
+                    probes: Vec::new(),
+                })
+                .unwrap();
+        }
+        writer.finish().unwrap();
+
+        let mut archive = ZipArchive::new(File::open(output).unwrap()).unwrap();
+        let recording = read_entry(&mut archive, "recording.tmcpr");
+        let updates = parse_packet_records(&recording)
+            .into_iter()
+            .filter(|packet| packet.id == PLAY_BLOCK_UPDATE)
+            .collect::<Vec<_>>();
+        assert_eq!(updates.len(), 2);
+        assert_eq!(updates[0].timestamp, 1);
+        assert_eq!(updates[1].timestamp, 1);
+        assert_eq!(updates[0].payload, block_update(first_pos, 1));
+        assert_eq!(updates[1].payload, block_update(second_pos, 2));
+    }
+
+    #[test]
     fn encoding_error_removes_temporary_files_and_target() {
         let directory = TestDirectory::new();
         let output = directory.path.join("invalid.mcpr");
@@ -896,6 +1082,7 @@ mod tests {
                 0,
                 false,
                 ReplayRegion::new(BlockPos::ZERO, BlockPos::ZERO),
+                ReplayTimeline::new(0, 1, 50).unwrap(),
             ),
             &world,
         )
@@ -947,6 +1134,7 @@ mod tests {
                 0,
                 false,
                 ReplayRegion::new(BlockPos::ZERO, BlockPos::new(2, 1, 2)),
+                ReplayTimeline::new(0, 1, 50).unwrap(),
             ),
             &world,
         )
