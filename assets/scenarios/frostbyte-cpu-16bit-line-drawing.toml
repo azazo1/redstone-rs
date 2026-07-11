@@ -1,12 +1,12 @@
 version = "26.1.2"
 mode = "default"
 seed = 0
-max_ticks = 210000
+max_ticks = 225000
 strict = true
 skip_oracle = true
 
 [monitor]
-skip_ticks = 209999
+skip_ticks = 224999
 
 [replay.camera]
 view_distance = 8
@@ -34,1630 +34,397 @@ type = "press_button"
 pos = { x = 274, y = 88, z = 197 }
 
 [[probes]]
-name = "screen_y80_z179"
+name = "pixel_02_05"
 type = "property"
-pos = { x = 215, y = 80, z = 179 }
+pos = { x = 215, y = 78, z = 176 }
 property = "lit"
 
 [[probes]]
-name = "screen_y80_z180"
+name = "pixel_03_05"
+type = "property"
+pos = { x = 215, y = 78, z = 178 }
+property = "lit"
+
+[[probes]]
+name = "pixel_04_06"
 type = "property"
 pos = { x = 215, y = 80, z = 180 }
 property = "lit"
 
 [[probes]]
-name = "screen_y80_z181"
-type = "property"
-pos = { x = 215, y = 80, z = 181 }
-property = "lit"
-
-[[probes]]
-name = "screen_y80_z182"
+name = "pixel_05_06"
 type = "property"
 pos = { x = 215, y = 80, z = 182 }
 property = "lit"
 
 [[probes]]
-name = "screen_y80_z183"
-type = "property"
-pos = { x = 215, y = 80, z = 183 }
-property = "lit"
-
-[[probes]]
-name = "screen_y80_z184"
-type = "property"
-pos = { x = 215, y = 80, z = 184 }
-property = "lit"
-
-[[probes]]
-name = "screen_y80_z185"
-type = "property"
-pos = { x = 215, y = 80, z = 185 }
-property = "lit"
-
-[[probes]]
-name = "screen_y80_z186"
-type = "property"
-pos = { x = 215, y = 80, z = 186 }
-property = "lit"
-
-[[probes]]
-name = "screen_y80_z187"
-type = "property"
-pos = { x = 215, y = 80, z = 187 }
-property = "lit"
-
-[[probes]]
-name = "screen_y80_z188"
-type = "property"
-pos = { x = 215, y = 80, z = 188 }
-property = "lit"
-
-[[probes]]
-name = "screen_y80_z189"
-type = "property"
-pos = { x = 215, y = 80, z = 189 }
-property = "lit"
-
-[[probes]]
-name = "screen_y80_z190"
-type = "property"
-pos = { x = 215, y = 80, z = 190 }
-property = "lit"
-
-[[probes]]
-name = "screen_y80_z191"
-type = "property"
-pos = { x = 215, y = 80, z = 191 }
-property = "lit"
-
-[[probes]]
-name = "screen_y80_z192"
-type = "property"
-pos = { x = 215, y = 80, z = 192 }
-property = "lit"
-
-[[probes]]
-name = "screen_y80_z193"
-type = "property"
-pos = { x = 215, y = 80, z = 193 }
-property = "lit"
-
-[[probes]]
-name = "screen_y80_z194"
-type = "property"
-pos = { x = 215, y = 80, z = 194 }
-property = "lit"
-
-[[probes]]
-name = "screen_y80_z195"
-type = "property"
-pos = { x = 215, y = 80, z = 195 }
-property = "lit"
-
-[[probes]]
-name = "screen_y80_z196"
-type = "property"
-pos = { x = 215, y = 80, z = 196 }
-property = "lit"
-
-[[probes]]
-name = "screen_y80_z197"
-type = "property"
-pos = { x = 215, y = 80, z = 197 }
-property = "lit"
-
-[[probes]]
-name = "screen_y80_z198"
-type = "property"
-pos = { x = 215, y = 80, z = 198 }
-property = "lit"
-
-[[probes]]
-name = "screen_y80_z199"
-type = "property"
-pos = { x = 215, y = 80, z = 199 }
-property = "lit"
-
-[[probes]]
-name = "screen_y80_z200"
-type = "property"
-pos = { x = 215, y = 80, z = 200 }
-property = "lit"
-
-[[probes]]
-name = "screen_y80_z201"
-type = "property"
-pos = { x = 215, y = 80, z = 201 }
-property = "lit"
-
-[[probes]]
-name = "screen_y80_z202"
-type = "property"
-pos = { x = 215, y = 80, z = 202 }
-property = "lit"
-
-[[probes]]
-name = "screen_y80_z203"
-type = "property"
-pos = { x = 215, y = 80, z = 203 }
-property = "lit"
-
-[[probes]]
-name = "screen_y80_z204"
-type = "property"
-pos = { x = 215, y = 80, z = 204 }
-property = "lit"
-
-[[probes]]
-name = "screen_y80_z205"
-type = "property"
-pos = { x = 215, y = 80, z = 205 }
-property = "lit"
-
-[[probes]]
-name = "screen_y80_z206"
-type = "property"
-pos = { x = 215, y = 80, z = 206 }
-property = "lit"
-
-[[probes]]
-name = "screen_y80_z207"
-type = "property"
-pos = { x = 215, y = 80, z = 207 }
-property = "lit"
-
-[[probes]]
-name = "screen_y80_z208"
-type = "property"
-pos = { x = 215, y = 80, z = 208 }
-property = "lit"
-
-[[probes]]
-name = "screen_y80_z209"
-type = "property"
-pos = { x = 215, y = 80, z = 209 }
-property = "lit"
-
-[[probes]]
-name = "screen_y80_z210"
-type = "property"
-pos = { x = 215, y = 80, z = 210 }
-property = "lit"
-
-[[probes]]
-name = "screen_y80_z211"
-type = "property"
-pos = { x = 215, y = 80, z = 211 }
-property = "lit"
-
-[[probes]]
-name = "screen_y80_z212"
-type = "property"
-pos = { x = 215, y = 80, z = 212 }
-property = "lit"
-
-[[probes]]
-name = "screen_y80_z213"
-type = "property"
-pos = { x = 215, y = 80, z = 213 }
-property = "lit"
-
-[[probes]]
-name = "screen_y80_z214"
-type = "property"
-pos = { x = 215, y = 80, z = 214 }
-property = "lit"
-
-[[probes]]
-name = "screen_y80_z215"
-type = "property"
-pos = { x = 215, y = 80, z = 215 }
-property = "lit"
-
-[[probes]]
-name = "screen_y80_z216"
-type = "property"
-pos = { x = 215, y = 80, z = 216 }
-property = "lit"
-
-[[probes]]
-name = "screen_y80_z217"
-type = "property"
-pos = { x = 215, y = 80, z = 217 }
-property = "lit"
-
-[[probes]]
-name = "screen_y80_z218"
-type = "property"
-pos = { x = 215, y = 80, z = 218 }
-property = "lit"
-
-[[probes]]
-name = "screen_y80_z219"
-type = "property"
-pos = { x = 215, y = 80, z = 219 }
-property = "lit"
-
-[[probes]]
-name = "screen_y80_z220"
-type = "property"
-pos = { x = 215, y = 80, z = 220 }
-property = "lit"
-
-[[probes]]
-name = "screen_y80_z221"
-type = "property"
-pos = { x = 215, y = 80, z = 221 }
-property = "lit"
-
-[[probes]]
-name = "screen_y80_z222"
-type = "property"
-pos = { x = 215, y = 80, z = 222 }
-property = "lit"
-
-[[probes]]
-name = "screen_y80_z223"
-type = "property"
-pos = { x = 215, y = 80, z = 223 }
-property = "lit"
-
-[[probes]]
-name = "screen_y80_z224"
-type = "property"
-pos = { x = 215, y = 80, z = 224 }
-property = "lit"
-
-[[probes]]
-name = "screen_y80_z225"
-type = "property"
-pos = { x = 215, y = 80, z = 225 }
-property = "lit"
-
-[[probes]]
-name = "screen_y80_z226"
-type = "property"
-pos = { x = 215, y = 80, z = 226 }
-property = "lit"
-
-[[probes]]
-name = "screen_y80_z227"
-type = "property"
-pos = { x = 215, y = 80, z = 227 }
-property = "lit"
-
-[[probes]]
-name = "screen_y80_z228"
-type = "property"
-pos = { x = 215, y = 80, z = 228 }
-property = "lit"
-
-[[probes]]
-name = "screen_y81_z179"
-type = "property"
-pos = { x = 215, y = 81, z = 179 }
-property = "lit"
-
-[[probes]]
-name = "screen_y81_z180"
-type = "property"
-pos = { x = 215, y = 81, z = 180 }
-property = "lit"
-
-[[probes]]
-name = "screen_y81_z181"
-type = "property"
-pos = { x = 215, y = 81, z = 181 }
-property = "lit"
-
-[[probes]]
-name = "screen_y81_z182"
-type = "property"
-pos = { x = 215, y = 81, z = 182 }
-property = "lit"
-
-[[probes]]
-name = "screen_y81_z183"
-type = "property"
-pos = { x = 215, y = 81, z = 183 }
-property = "lit"
-
-[[probes]]
-name = "screen_y81_z184"
-type = "property"
-pos = { x = 215, y = 81, z = 184 }
-property = "lit"
-
-[[probes]]
-name = "screen_y81_z185"
-type = "property"
-pos = { x = 215, y = 81, z = 185 }
-property = "lit"
-
-[[probes]]
-name = "screen_y81_z186"
-type = "property"
-pos = { x = 215, y = 81, z = 186 }
-property = "lit"
-
-[[probes]]
-name = "screen_y81_z187"
-type = "property"
-pos = { x = 215, y = 81, z = 187 }
-property = "lit"
-
-[[probes]]
-name = "screen_y81_z188"
-type = "property"
-pos = { x = 215, y = 81, z = 188 }
-property = "lit"
-
-[[probes]]
-name = "screen_y81_z189"
-type = "property"
-pos = { x = 215, y = 81, z = 189 }
-property = "lit"
-
-[[probes]]
-name = "screen_y81_z190"
-type = "property"
-pos = { x = 215, y = 81, z = 190 }
-property = "lit"
-
-[[probes]]
-name = "screen_y81_z191"
-type = "property"
-pos = { x = 215, y = 81, z = 191 }
-property = "lit"
-
-[[probes]]
-name = "screen_y81_z192"
-type = "property"
-pos = { x = 215, y = 81, z = 192 }
-property = "lit"
-
-[[probes]]
-name = "screen_y81_z193"
-type = "property"
-pos = { x = 215, y = 81, z = 193 }
-property = "lit"
-
-[[probes]]
-name = "screen_y81_z194"
-type = "property"
-pos = { x = 215, y = 81, z = 194 }
-property = "lit"
-
-[[probes]]
-name = "screen_y81_z195"
-type = "property"
-pos = { x = 215, y = 81, z = 195 }
-property = "lit"
-
-[[probes]]
-name = "screen_y81_z196"
-type = "property"
-pos = { x = 215, y = 81, z = 196 }
-property = "lit"
-
-[[probes]]
-name = "screen_y81_z197"
-type = "property"
-pos = { x = 215, y = 81, z = 197 }
-property = "lit"
-
-[[probes]]
-name = "screen_y81_z198"
-type = "property"
-pos = { x = 215, y = 81, z = 198 }
-property = "lit"
-
-[[probes]]
-name = "screen_y81_z199"
-type = "property"
-pos = { x = 215, y = 81, z = 199 }
-property = "lit"
-
-[[probes]]
-name = "screen_y81_z200"
-type = "property"
-pos = { x = 215, y = 81, z = 200 }
-property = "lit"
-
-[[probes]]
-name = "screen_y81_z201"
-type = "property"
-pos = { x = 215, y = 81, z = 201 }
-property = "lit"
-
-[[probes]]
-name = "screen_y81_z202"
-type = "property"
-pos = { x = 215, y = 81, z = 202 }
-property = "lit"
-
-[[probes]]
-name = "screen_y81_z203"
-type = "property"
-pos = { x = 215, y = 81, z = 203 }
-property = "lit"
-
-[[probes]]
-name = "screen_y81_z204"
-type = "property"
-pos = { x = 215, y = 81, z = 204 }
-property = "lit"
-
-[[probes]]
-name = "screen_y81_z205"
-type = "property"
-pos = { x = 215, y = 81, z = 205 }
-property = "lit"
-
-[[probes]]
-name = "screen_y81_z206"
-type = "property"
-pos = { x = 215, y = 81, z = 206 }
-property = "lit"
-
-[[probes]]
-name = "screen_y81_z207"
-type = "property"
-pos = { x = 215, y = 81, z = 207 }
-property = "lit"
-
-[[probes]]
-name = "screen_y81_z208"
-type = "property"
-pos = { x = 215, y = 81, z = 208 }
-property = "lit"
-
-[[probes]]
-name = "screen_y81_z209"
-type = "property"
-pos = { x = 215, y = 81, z = 209 }
-property = "lit"
-
-[[probes]]
-name = "screen_y81_z210"
-type = "property"
-pos = { x = 215, y = 81, z = 210 }
-property = "lit"
-
-[[probes]]
-name = "screen_y81_z211"
-type = "property"
-pos = { x = 215, y = 81, z = 211 }
-property = "lit"
-
-[[probes]]
-name = "screen_y81_z212"
-type = "property"
-pos = { x = 215, y = 81, z = 212 }
-property = "lit"
-
-[[probes]]
-name = "screen_y81_z213"
-type = "property"
-pos = { x = 215, y = 81, z = 213 }
-property = "lit"
-
-[[probes]]
-name = "screen_y81_z214"
-type = "property"
-pos = { x = 215, y = 81, z = 214 }
-property = "lit"
-
-[[probes]]
-name = "screen_y81_z215"
-type = "property"
-pos = { x = 215, y = 81, z = 215 }
-property = "lit"
-
-[[probes]]
-name = "screen_y81_z216"
-type = "property"
-pos = { x = 215, y = 81, z = 216 }
-property = "lit"
-
-[[probes]]
-name = "screen_y81_z217"
-type = "property"
-pos = { x = 215, y = 81, z = 217 }
-property = "lit"
-
-[[probes]]
-name = "screen_y81_z218"
-type = "property"
-pos = { x = 215, y = 81, z = 218 }
-property = "lit"
-
-[[probes]]
-name = "screen_y81_z219"
-type = "property"
-pos = { x = 215, y = 81, z = 219 }
-property = "lit"
-
-[[probes]]
-name = "screen_y81_z220"
-type = "property"
-pos = { x = 215, y = 81, z = 220 }
-property = "lit"
-
-[[probes]]
-name = "screen_y81_z221"
-type = "property"
-pos = { x = 215, y = 81, z = 221 }
-property = "lit"
-
-[[probes]]
-name = "screen_y81_z222"
-type = "property"
-pos = { x = 215, y = 81, z = 222 }
-property = "lit"
-
-[[probes]]
-name = "screen_y81_z223"
-type = "property"
-pos = { x = 215, y = 81, z = 223 }
-property = "lit"
-
-[[probes]]
-name = "screen_y81_z224"
-type = "property"
-pos = { x = 215, y = 81, z = 224 }
-property = "lit"
-
-[[probes]]
-name = "screen_y81_z225"
-type = "property"
-pos = { x = 215, y = 81, z = 225 }
-property = "lit"
-
-[[probes]]
-name = "screen_y81_z226"
-type = "property"
-pos = { x = 215, y = 81, z = 226 }
-property = "lit"
-
-[[probes]]
-name = "screen_y81_z227"
-type = "property"
-pos = { x = 215, y = 81, z = 227 }
-property = "lit"
-
-[[probes]]
-name = "screen_y81_z228"
-type = "property"
-pos = { x = 215, y = 81, z = 228 }
-property = "lit"
-
-[[probes]]
-name = "screen_y82_z180"
-type = "property"
-pos = { x = 215, y = 82, z = 180 }
-property = "lit"
-
-[[probes]]
-name = "screen_y82_z181"
-type = "property"
-pos = { x = 215, y = 82, z = 181 }
-property = "lit"
-
-[[probes]]
-name = "screen_y82_z182"
-type = "property"
-pos = { x = 215, y = 82, z = 182 }
-property = "lit"
-
-[[probes]]
-name = "screen_y82_z183"
-type = "property"
-pos = { x = 215, y = 82, z = 183 }
-property = "lit"
-
-[[probes]]
-name = "screen_y82_z184"
+name = "pixel_06_07"
 type = "property"
 pos = { x = 215, y = 82, z = 184 }
 property = "lit"
 
 [[probes]]
-name = "screen_y82_z185"
-type = "property"
-pos = { x = 215, y = 82, z = 185 }
-property = "lit"
-
-[[probes]]
-name = "screen_y82_z186"
+name = "pixel_07_07"
 type = "property"
 pos = { x = 215, y = 82, z = 186 }
 property = "lit"
 
 [[probes]]
-name = "screen_y82_z187"
+name = "pixel_08_08"
 type = "property"
-pos = { x = 215, y = 82, z = 187 }
+pos = { x = 215, y = 84, z = 188 }
 property = "lit"
 
 [[probes]]
-name = "screen_y82_z188"
+name = "pixel_09_08"
 type = "property"
-pos = { x = 215, y = 82, z = 188 }
+pos = { x = 215, y = 84, z = 190 }
 property = "lit"
 
 [[probes]]
-name = "screen_y82_z189"
+name = "pixel_10_09"
 type = "property"
-pos = { x = 215, y = 82, z = 189 }
+pos = { x = 215, y = 86, z = 192 }
 property = "lit"
 
 [[probes]]
-name = "screen_y82_z190"
+name = "pixel_11_09"
 type = "property"
-pos = { x = 215, y = 82, z = 190 }
+pos = { x = 215, y = 86, z = 194 }
 property = "lit"
 
 [[probes]]
-name = "screen_y82_z191"
+name = "pixel_12_10"
 type = "property"
-pos = { x = 215, y = 82, z = 191 }
+pos = { x = 215, y = 88, z = 196 }
 property = "lit"
 
 [[probes]]
-name = "screen_y82_z192"
+name = "pixel_13_10"
 type = "property"
-pos = { x = 215, y = 82, z = 192 }
+pos = { x = 215, y = 88, z = 198 }
 property = "lit"
 
 [[probes]]
-name = "screen_y82_z193"
+name = "pixel_14_11"
 type = "property"
-pos = { x = 215, y = 82, z = 193 }
+pos = { x = 215, y = 90, z = 200 }
 property = "lit"
 
 [[probes]]
-name = "screen_y82_z194"
+name = "pixel_15_11"
 type = "property"
-pos = { x = 215, y = 82, z = 194 }
+pos = { x = 215, y = 90, z = 202 }
 property = "lit"
 
 [[probes]]
-name = "screen_y82_z195"
+name = "pixel_16_12"
 type = "property"
-pos = { x = 215, y = 82, z = 195 }
+pos = { x = 215, y = 92, z = 204 }
 property = "lit"
 
 [[probes]]
-name = "screen_y82_z196"
+name = "pixel_17_12"
 type = "property"
-pos = { x = 215, y = 82, z = 196 }
+pos = { x = 215, y = 92, z = 206 }
 property = "lit"
 
 [[probes]]
-name = "screen_y82_z197"
+name = "pixel_18_13"
 type = "property"
-pos = { x = 215, y = 82, z = 197 }
+pos = { x = 215, y = 94, z = 208 }
 property = "lit"
 
 [[probes]]
-name = "screen_y82_z198"
+name = "pixel_19_13"
 type = "property"
-pos = { x = 215, y = 82, z = 198 }
+pos = { x = 215, y = 94, z = 210 }
 property = "lit"
 
 [[probes]]
-name = "screen_y82_z199"
+name = "pixel_20_14"
 type = "property"
-pos = { x = 215, y = 82, z = 199 }
+pos = { x = 215, y = 96, z = 212 }
 property = "lit"
 
 [[probes]]
-name = "screen_y82_z200"
+name = "pixel_21_14"
 type = "property"
-pos = { x = 215, y = 82, z = 200 }
+pos = { x = 215, y = 96, z = 214 }
 property = "lit"
 
 [[probes]]
-name = "screen_y82_z201"
+name = "pixel_22_15"
 type = "property"
-pos = { x = 215, y = 82, z = 201 }
+pos = { x = 215, y = 98, z = 216 }
 property = "lit"
 
 [[probes]]
-name = "screen_y82_z202"
+name = "pixel_23_15"
 type = "property"
-pos = { x = 215, y = 82, z = 202 }
+pos = { x = 215, y = 98, z = 218 }
 property = "lit"
 
 [[probes]]
-name = "screen_y82_z203"
+name = "pixel_24_16"
 type = "property"
-pos = { x = 215, y = 82, z = 203 }
+pos = { x = 215, y = 100, z = 220 }
 property = "lit"
 
 [[probes]]
-name = "screen_y82_z204"
+name = "pixel_25_16"
 type = "property"
-pos = { x = 215, y = 82, z = 204 }
+pos = { x = 215, y = 100, z = 222 }
 property = "lit"
 
 [[probes]]
-name = "screen_y82_z205"
+name = "pixel_26_17"
 type = "property"
-pos = { x = 215, y = 82, z = 205 }
+pos = { x = 215, y = 102, z = 224 }
 property = "lit"
 
 [[probes]]
-name = "screen_y82_z206"
+name = "pixel_27_17"
 type = "property"
-pos = { x = 215, y = 82, z = 206 }
+pos = { x = 215, y = 102, z = 226 }
 property = "lit"
 
 [[probes]]
-name = "screen_y82_z207"
+name = "first_pixel_y78_z177"
 type = "property"
-pos = { x = 215, y = 82, z = 207 }
+pos = { x = 215, y = 78, z = 177 }
 property = "lit"
 
 [[probes]]
-name = "screen_y82_z208"
+name = "first_pixel_y79_z176"
 type = "property"
-pos = { x = 215, y = 82, z = 208 }
+pos = { x = 215, y = 79, z = 176 }
 property = "lit"
 
 [[probes]]
-name = "screen_y82_z209"
+name = "first_pixel_y79_z177"
 type = "property"
-pos = { x = 215, y = 82, z = 209 }
+pos = { x = 215, y = 79, z = 177 }
 property = "lit"
 
 [[probes]]
-name = "screen_y82_z210"
+name = "last_pixel_y102_z227"
 type = "property"
-pos = { x = 215, y = 82, z = 210 }
+pos = { x = 215, y = 102, z = 227 }
 property = "lit"
 
 [[probes]]
-name = "screen_y82_z211"
+name = "last_pixel_y103_z226"
 type = "property"
-pos = { x = 215, y = 82, z = 211 }
+pos = { x = 215, y = 103, z = 226 }
 property = "lit"
 
 [[probes]]
-name = "screen_y82_z212"
+name = "last_pixel_y103_z227"
 type = "property"
-pos = { x = 215, y = 82, z = 212 }
+pos = { x = 215, y = 103, z = 227 }
 property = "lit"
 
 [[probes]]
-name = "screen_y82_z213"
+name = "empty_top_right"
 type = "property"
-pos = { x = 215, y = 82, z = 213 }
+pos = { x = 215, y = 78, z = 227 }
 property = "lit"
 
 [[probes]]
-name = "screen_y82_z214"
+name = "empty_bottom_left"
 type = "property"
-pos = { x = 215, y = 82, z = 214 }
+pos = { x = 215, y = 103, z = 176 }
 property = "lit"
 
 [[probes]]
-name = "screen_y82_z215"
+name = "empty_below_first_run"
 type = "property"
-pos = { x = 215, y = 82, z = 215 }
+pos = { x = 215, y = 80, z = 176 }
 property = "lit"
 
 [[probes]]
-name = "screen_y82_z216"
+name = "empty_above_last_run"
 type = "property"
-pos = { x = 215, y = 82, z = 216 }
-property = "lit"
-
-[[probes]]
-name = "screen_y82_z217"
-type = "property"
-pos = { x = 215, y = 82, z = 217 }
-property = "lit"
-
-[[probes]]
-name = "screen_y82_z218"
-type = "property"
-pos = { x = 215, y = 82, z = 218 }
-property = "lit"
-
-[[probes]]
-name = "screen_y82_z219"
-type = "property"
-pos = { x = 215, y = 82, z = 219 }
-property = "lit"
-
-[[probes]]
-name = "screen_y82_z220"
-type = "property"
-pos = { x = 215, y = 82, z = 220 }
-property = "lit"
-
-[[probes]]
-name = "screen_y82_z221"
-type = "property"
-pos = { x = 215, y = 82, z = 221 }
-property = "lit"
-
-[[probes]]
-name = "screen_y82_z222"
-type = "property"
-pos = { x = 215, y = 82, z = 222 }
-property = "lit"
-
-[[probes]]
-name = "screen_y82_z223"
-type = "property"
-pos = { x = 215, y = 82, z = 223 }
-property = "lit"
-
-[[probes]]
-name = "screen_y82_z224"
-type = "property"
-pos = { x = 215, y = 82, z = 224 }
-property = "lit"
-
-[[probes]]
-name = "screen_y82_z225"
-type = "property"
-pos = { x = 215, y = 82, z = 225 }
-property = "lit"
-
-[[probes]]
-name = "screen_y82_z226"
-type = "property"
-pos = { x = 215, y = 82, z = 226 }
-property = "lit"
-
-[[probes]]
-name = "screen_y82_z227"
-type = "property"
-pos = { x = 215, y = 82, z = 227 }
+pos = { x = 215, y = 101, z = 226 }
 property = "lit"
 
 [[expectations]]
-tick = 210000
-probe = "screen_y80_z179"
+tick = 225000
+probe = "pixel_02_05"
+equals = "true"
+
+[[expectations]]
+tick = 225000
+probe = "pixel_03_05"
+equals = "true"
+
+[[expectations]]
+tick = 225000
+probe = "pixel_04_06"
+equals = "true"
+
+[[expectations]]
+tick = 225000
+probe = "pixel_05_06"
+equals = "true"
+
+[[expectations]]
+tick = 225000
+probe = "pixel_06_07"
+equals = "true"
+
+[[expectations]]
+tick = 225000
+probe = "pixel_07_07"
+equals = "true"
+
+[[expectations]]
+tick = 225000
+probe = "pixel_08_08"
+equals = "true"
+
+[[expectations]]
+tick = 225000
+probe = "pixel_09_08"
+equals = "true"
+
+[[expectations]]
+tick = 225000
+probe = "pixel_10_09"
+equals = "true"
+
+[[expectations]]
+tick = 225000
+probe = "pixel_11_09"
+equals = "true"
+
+[[expectations]]
+tick = 225000
+probe = "pixel_12_10"
+equals = "true"
+
+[[expectations]]
+tick = 225000
+probe = "pixel_13_10"
+equals = "true"
+
+[[expectations]]
+tick = 225000
+probe = "pixel_14_11"
+equals = "true"
+
+[[expectations]]
+tick = 225000
+probe = "pixel_15_11"
+equals = "true"
+
+[[expectations]]
+tick = 225000
+probe = "pixel_16_12"
+equals = "true"
+
+[[expectations]]
+tick = 225000
+probe = "pixel_17_12"
+equals = "true"
+
+[[expectations]]
+tick = 225000
+probe = "pixel_18_13"
+equals = "true"
+
+[[expectations]]
+tick = 225000
+probe = "pixel_19_13"
+equals = "true"
+
+[[expectations]]
+tick = 225000
+probe = "pixel_20_14"
+equals = "true"
+
+[[expectations]]
+tick = 225000
+probe = "pixel_21_14"
+equals = "true"
+
+[[expectations]]
+tick = 225000
+probe = "pixel_22_15"
+equals = "true"
+
+[[expectations]]
+tick = 225000
+probe = "pixel_23_15"
+equals = "true"
+
+[[expectations]]
+tick = 225000
+probe = "pixel_24_16"
+equals = "true"
+
+[[expectations]]
+tick = 225000
+probe = "pixel_25_16"
+equals = "true"
+
+[[expectations]]
+tick = 225000
+probe = "pixel_26_17"
+equals = "true"
+
+[[expectations]]
+tick = 225000
+probe = "pixel_27_17"
+equals = "true"
+
+[[expectations]]
+tick = 225000
+probe = "first_pixel_y78_z177"
+equals = "true"
+
+[[expectations]]
+tick = 225000
+probe = "first_pixel_y79_z176"
+equals = "true"
+
+[[expectations]]
+tick = 225000
+probe = "first_pixel_y79_z177"
+equals = "true"
+
+[[expectations]]
+tick = 225000
+probe = "last_pixel_y102_z227"
+equals = "true"
+
+[[expectations]]
+tick = 225000
+probe = "last_pixel_y103_z226"
+equals = "true"
+
+[[expectations]]
+tick = 225000
+probe = "last_pixel_y103_z227"
+equals = "true"
+
+[[expectations]]
+tick = 225000
+probe = "empty_top_right"
 equals = "false"
 
 [[expectations]]
-tick = 210000
-probe = "screen_y80_z180"
-equals = "true"
-
-[[expectations]]
-tick = 210000
-probe = "screen_y80_z181"
-equals = "true"
-
-[[expectations]]
-tick = 210000
-probe = "screen_y80_z182"
-equals = "true"
-
-[[expectations]]
-tick = 210000
-probe = "screen_y80_z183"
-equals = "true"
-
-[[expectations]]
-tick = 210000
-probe = "screen_y80_z184"
-equals = "true"
-
-[[expectations]]
-tick = 210000
-probe = "screen_y80_z185"
-equals = "true"
-
-[[expectations]]
-tick = 210000
-probe = "screen_y80_z186"
-equals = "true"
-
-[[expectations]]
-tick = 210000
-probe = "screen_y80_z187"
-equals = "true"
-
-[[expectations]]
-tick = 210000
-probe = "screen_y80_z188"
-equals = "true"
-
-[[expectations]]
-tick = 210000
-probe = "screen_y80_z189"
-equals = "true"
-
-[[expectations]]
-tick = 210000
-probe = "screen_y80_z190"
-equals = "true"
-
-[[expectations]]
-tick = 210000
-probe = "screen_y80_z191"
-equals = "true"
-
-[[expectations]]
-tick = 210000
-probe = "screen_y80_z192"
-equals = "true"
-
-[[expectations]]
-tick = 210000
-probe = "screen_y80_z193"
-equals = "true"
-
-[[expectations]]
-tick = 210000
-probe = "screen_y80_z194"
-equals = "true"
-
-[[expectations]]
-tick = 210000
-probe = "screen_y80_z195"
-equals = "true"
-
-[[expectations]]
-tick = 210000
-probe = "screen_y80_z196"
-equals = "true"
-
-[[expectations]]
-tick = 210000
-probe = "screen_y80_z197"
-equals = "true"
-
-[[expectations]]
-tick = 210000
-probe = "screen_y80_z198"
-equals = "true"
-
-[[expectations]]
-tick = 210000
-probe = "screen_y80_z199"
-equals = "true"
-
-[[expectations]]
-tick = 210000
-probe = "screen_y80_z200"
-equals = "true"
-
-[[expectations]]
-tick = 210000
-probe = "screen_y80_z201"
-equals = "true"
-
-[[expectations]]
-tick = 210000
-probe = "screen_y80_z202"
-equals = "true"
-
-[[expectations]]
-tick = 210000
-probe = "screen_y80_z203"
-equals = "true"
-
-[[expectations]]
-tick = 210000
-probe = "screen_y80_z204"
-equals = "true"
-
-[[expectations]]
-tick = 210000
-probe = "screen_y80_z205"
-equals = "true"
-
-[[expectations]]
-tick = 210000
-probe = "screen_y80_z206"
-equals = "true"
-
-[[expectations]]
-tick = 210000
-probe = "screen_y80_z207"
-equals = "true"
-
-[[expectations]]
-tick = 210000
-probe = "screen_y80_z208"
-equals = "true"
-
-[[expectations]]
-tick = 210000
-probe = "screen_y80_z209"
-equals = "true"
-
-[[expectations]]
-tick = 210000
-probe = "screen_y80_z210"
-equals = "true"
-
-[[expectations]]
-tick = 210000
-probe = "screen_y80_z211"
-equals = "true"
-
-[[expectations]]
-tick = 210000
-probe = "screen_y80_z212"
-equals = "true"
-
-[[expectations]]
-tick = 210000
-probe = "screen_y80_z213"
-equals = "true"
-
-[[expectations]]
-tick = 210000
-probe = "screen_y80_z214"
-equals = "true"
-
-[[expectations]]
-tick = 210000
-probe = "screen_y80_z215"
-equals = "true"
-
-[[expectations]]
-tick = 210000
-probe = "screen_y80_z216"
-equals = "true"
-
-[[expectations]]
-tick = 210000
-probe = "screen_y80_z217"
-equals = "true"
-
-[[expectations]]
-tick = 210000
-probe = "screen_y80_z218"
-equals = "true"
-
-[[expectations]]
-tick = 210000
-probe = "screen_y80_z219"
-equals = "true"
-
-[[expectations]]
-tick = 210000
-probe = "screen_y80_z220"
-equals = "true"
-
-[[expectations]]
-tick = 210000
-probe = "screen_y80_z221"
-equals = "true"
-
-[[expectations]]
-tick = 210000
-probe = "screen_y80_z222"
-equals = "true"
-
-[[expectations]]
-tick = 210000
-probe = "screen_y80_z223"
-equals = "true"
-
-[[expectations]]
-tick = 210000
-probe = "screen_y80_z224"
-equals = "true"
-
-[[expectations]]
-tick = 210000
-probe = "screen_y80_z225"
-equals = "true"
-
-[[expectations]]
-tick = 210000
-probe = "screen_y80_z226"
-equals = "true"
-
-[[expectations]]
-tick = 210000
-probe = "screen_y80_z227"
-equals = "true"
-
-[[expectations]]
-tick = 210000
-probe = "screen_y80_z228"
+tick = 225000
+probe = "empty_bottom_left"
 equals = "false"
 
 [[expectations]]
-tick = 210000
-probe = "screen_y81_z179"
+tick = 225000
+probe = "empty_below_first_run"
 equals = "false"
 
 [[expectations]]
-tick = 210000
-probe = "screen_y81_z180"
-equals = "true"
-
-[[expectations]]
-tick = 210000
-probe = "screen_y81_z181"
-equals = "true"
-
-[[expectations]]
-tick = 210000
-probe = "screen_y81_z182"
-equals = "true"
-
-[[expectations]]
-tick = 210000
-probe = "screen_y81_z183"
-equals = "true"
-
-[[expectations]]
-tick = 210000
-probe = "screen_y81_z184"
-equals = "true"
-
-[[expectations]]
-tick = 210000
-probe = "screen_y81_z185"
-equals = "true"
-
-[[expectations]]
-tick = 210000
-probe = "screen_y81_z186"
-equals = "true"
-
-[[expectations]]
-tick = 210000
-probe = "screen_y81_z187"
-equals = "true"
-
-[[expectations]]
-tick = 210000
-probe = "screen_y81_z188"
-equals = "true"
-
-[[expectations]]
-tick = 210000
-probe = "screen_y81_z189"
-equals = "true"
-
-[[expectations]]
-tick = 210000
-probe = "screen_y81_z190"
-equals = "true"
-
-[[expectations]]
-tick = 210000
-probe = "screen_y81_z191"
-equals = "true"
-
-[[expectations]]
-tick = 210000
-probe = "screen_y81_z192"
-equals = "true"
-
-[[expectations]]
-tick = 210000
-probe = "screen_y81_z193"
-equals = "true"
-
-[[expectations]]
-tick = 210000
-probe = "screen_y81_z194"
-equals = "true"
-
-[[expectations]]
-tick = 210000
-probe = "screen_y81_z195"
-equals = "true"
-
-[[expectations]]
-tick = 210000
-probe = "screen_y81_z196"
-equals = "true"
-
-[[expectations]]
-tick = 210000
-probe = "screen_y81_z197"
-equals = "true"
-
-[[expectations]]
-tick = 210000
-probe = "screen_y81_z198"
-equals = "true"
-
-[[expectations]]
-tick = 210000
-probe = "screen_y81_z199"
-equals = "true"
-
-[[expectations]]
-tick = 210000
-probe = "screen_y81_z200"
-equals = "true"
-
-[[expectations]]
-tick = 210000
-probe = "screen_y81_z201"
-equals = "true"
-
-[[expectations]]
-tick = 210000
-probe = "screen_y81_z202"
-equals = "true"
-
-[[expectations]]
-tick = 210000
-probe = "screen_y81_z203"
-equals = "true"
-
-[[expectations]]
-tick = 210000
-probe = "screen_y81_z204"
-equals = "true"
-
-[[expectations]]
-tick = 210000
-probe = "screen_y81_z205"
-equals = "true"
-
-[[expectations]]
-tick = 210000
-probe = "screen_y81_z206"
-equals = "true"
-
-[[expectations]]
-tick = 210000
-probe = "screen_y81_z207"
-equals = "true"
-
-[[expectations]]
-tick = 210000
-probe = "screen_y81_z208"
-equals = "true"
-
-[[expectations]]
-tick = 210000
-probe = "screen_y81_z209"
-equals = "true"
-
-[[expectations]]
-tick = 210000
-probe = "screen_y81_z210"
-equals = "true"
-
-[[expectations]]
-tick = 210000
-probe = "screen_y81_z211"
-equals = "true"
-
-[[expectations]]
-tick = 210000
-probe = "screen_y81_z212"
-equals = "true"
-
-[[expectations]]
-tick = 210000
-probe = "screen_y81_z213"
-equals = "true"
-
-[[expectations]]
-tick = 210000
-probe = "screen_y81_z214"
-equals = "true"
-
-[[expectations]]
-tick = 210000
-probe = "screen_y81_z215"
-equals = "true"
-
-[[expectations]]
-tick = 210000
-probe = "screen_y81_z216"
-equals = "true"
-
-[[expectations]]
-tick = 210000
-probe = "screen_y81_z217"
-equals = "true"
-
-[[expectations]]
-tick = 210000
-probe = "screen_y81_z218"
-equals = "true"
-
-[[expectations]]
-tick = 210000
-probe = "screen_y81_z219"
-equals = "true"
-
-[[expectations]]
-tick = 210000
-probe = "screen_y81_z220"
-equals = "true"
-
-[[expectations]]
-tick = 210000
-probe = "screen_y81_z221"
-equals = "true"
-
-[[expectations]]
-tick = 210000
-probe = "screen_y81_z222"
-equals = "true"
-
-[[expectations]]
-tick = 210000
-probe = "screen_y81_z223"
-equals = "true"
-
-[[expectations]]
-tick = 210000
-probe = "screen_y81_z224"
-equals = "true"
-
-[[expectations]]
-tick = 210000
-probe = "screen_y81_z225"
-equals = "true"
-
-[[expectations]]
-tick = 210000
-probe = "screen_y81_z226"
-equals = "true"
-
-[[expectations]]
-tick = 210000
-probe = "screen_y81_z227"
-equals = "true"
-
-[[expectations]]
-tick = 210000
-probe = "screen_y81_z228"
+tick = 225000
+probe = "empty_above_last_run"
 equals = "false"
-
-[[expectations]]
-tick = 210000
-probe = "screen_y82_z180"
-equals = "false"
-
-[[expectations]]
-tick = 210000
-probe = "screen_y82_z181"
-equals = "false"
-
-[[expectations]]
-tick = 210000
-probe = "screen_y82_z182"
-equals = "false"
-
-[[expectations]]
-tick = 210000
-probe = "screen_y82_z183"
-equals = "false"
-
-[[expectations]]
-tick = 210000
-probe = "screen_y82_z184"
-equals = "false"
-
-[[expectations]]
-tick = 210000
-probe = "screen_y82_z185"
-equals = "false"
-
-[[expectations]]
-tick = 210000
-probe = "screen_y82_z186"
-equals = "false"
-
-[[expectations]]
-tick = 210000
-probe = "screen_y82_z187"
-equals = "false"
-
-[[expectations]]
-tick = 210000
-probe = "screen_y82_z188"
-equals = "false"
-
-[[expectations]]
-tick = 210000
-probe = "screen_y82_z189"
-equals = "false"
-
-[[expectations]]
-tick = 210000
-probe = "screen_y82_z190"
-equals = "false"
-
-[[expectations]]
-tick = 210000
-probe = "screen_y82_z191"
-equals = "false"
-
-[[expectations]]
-tick = 210000
-probe = "screen_y82_z192"
-equals = "false"
-
-[[expectations]]
-tick = 210000
-probe = "screen_y82_z193"
-equals = "false"
-
-[[expectations]]
-tick = 210000
-probe = "screen_y82_z194"
-equals = "false"
-
-[[expectations]]
-tick = 210000
-probe = "screen_y82_z195"
-equals = "false"
-
-[[expectations]]
-tick = 210000
-probe = "screen_y82_z196"
-equals = "false"
-
-[[expectations]]
-tick = 210000
-probe = "screen_y82_z197"
-equals = "false"
-
-[[expectations]]
-tick = 210000
-probe = "screen_y82_z198"
-equals = "false"
-
-[[expectations]]
-tick = 210000
-probe = "screen_y82_z199"
-equals = "false"
-
-[[expectations]]
-tick = 210000
-probe = "screen_y82_z200"
-equals = "false"
-
-[[expectations]]
-tick = 210000
-probe = "screen_y82_z201"
-equals = "false"
-
-[[expectations]]
-tick = 210000
-probe = "screen_y82_z202"
-equals = "false"
-
-[[expectations]]
-tick = 210000
-probe = "screen_y82_z203"
-equals = "false"
-
-[[expectations]]
-tick = 210000
-probe = "screen_y82_z204"
-equals = "false"
-
-[[expectations]]
-tick = 210000
-probe = "screen_y82_z205"
-equals = "false"
-
-[[expectations]]
-tick = 210000
-probe = "screen_y82_z206"
-equals = "false"
-
-[[expectations]]
-tick = 210000
-probe = "screen_y82_z207"
-equals = "false"
-
-[[expectations]]
-tick = 210000
-probe = "screen_y82_z208"
-equals = "false"
-
-[[expectations]]
-tick = 210000
-probe = "screen_y82_z209"
-equals = "false"
-
-[[expectations]]
-tick = 210000
-probe = "screen_y82_z210"
-equals = "false"
-
-[[expectations]]
-tick = 210000
-probe = "screen_y82_z211"
-equals = "false"
-
-[[expectations]]
-tick = 210000
-probe = "screen_y82_z212"
-equals = "false"
-
-[[expectations]]
-tick = 210000
-probe = "screen_y82_z213"
-equals = "false"
-
-[[expectations]]
-tick = 210000
-probe = "screen_y82_z214"
-equals = "false"
-
-[[expectations]]
-tick = 210000
-probe = "screen_y82_z215"
-equals = "false"
-
-[[expectations]]
-tick = 210000
-probe = "screen_y82_z216"
-equals = "false"
-
-[[expectations]]
-tick = 210000
-probe = "screen_y82_z217"
-equals = "false"
-
-[[expectations]]
-tick = 210000
-probe = "screen_y82_z218"
-equals = "false"
-
-[[expectations]]
-tick = 210000
-probe = "screen_y82_z219"
-equals = "false"
-
-[[expectations]]
-tick = 210000
-probe = "screen_y82_z220"
-equals = "false"
-
-[[expectations]]
-tick = 210000
-probe = "screen_y82_z221"
-equals = "false"
-
-[[expectations]]
-tick = 210000
-probe = "screen_y82_z222"
-equals = "false"
-
-[[expectations]]
-tick = 210000
-probe = "screen_y82_z223"
-equals = "false"
-
-[[expectations]]
-tick = 210000
-probe = "screen_y82_z224"
-equals = "false"
-
-[[expectations]]
-tick = 210000
-probe = "screen_y82_z225"
-equals = "false"
-
-[[expectations]]
-tick = 210000
-probe = "screen_y82_z226"
-equals = "false"
-
-[[expectations]]
-tick = 210000
-probe = "screen_y82_z227"
-equals = "false"
-

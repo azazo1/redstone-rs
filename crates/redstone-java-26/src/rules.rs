@@ -662,7 +662,13 @@ impl Java26Rules {
             .direction_property("facing")
             .unwrap_or(Direction::North);
         let rear = pos.relative(facing);
-        self.signal(world, rear, facing)
+        let input = self.signal(world, rear, facing);
+        let wire_power = self
+            .state(world.get_block(rear))
+            .ok()
+            .filter(|state| matches!(state.behavior, BlockBehavior::Wire))
+            .map_or(0, |state| state.power);
+        input.max(wire_power)
     }
 
     fn side_input(&self, world: &SparseWorld, pos: BlockPos, state: &StateDefinition) -> u8 {
@@ -749,7 +755,7 @@ impl Java26Rules {
                 .analog_output(world, rear, facing.opposite())
                 .unwrap_or(0);
         }
-        let direct = self.signal(world, rear, facing);
+        let direct = self.diode_input(world, pos, state);
         if direct < 15 && rear_state.is_some_and(|state| state.redstone_conductor) {
             let far = rear.relative(facing);
             let far_state = self.state(world.get_block(far)).ok();
@@ -2047,6 +2053,86 @@ fn wire_power_of(state: &StateDefinition) -> u8 {
         state.power
     } else {
         0
+    }
+}
+
+#[cfg(test)]
+mod diode_tests {
+    use super::*;
+    use crate::StateResolver;
+
+    fn resolve_state(
+        registry: &mut Java26Registry,
+        name: &str,
+        properties: &[(&str, &str)],
+    ) -> BlockStateId {
+        registry
+            .resolve_state(
+                name,
+                &properties
+                    .iter()
+                    .map(|(name, value)| ((*name).to_owned(), (*value).to_owned()))
+                    .collect(),
+            )
+            .unwrap()
+    }
+
+    #[test]
+    fn diode_input_reads_wire_power_without_a_facing_connection() {
+        let mut registry = Java26Registry::new();
+        let wire = resolve_state(
+            &mut registry,
+            "minecraft:redstone_wire",
+            &[
+                ("power", "7"),
+                ("north", "none"),
+                ("east", "none"),
+                ("south", "none"),
+                ("west", "none"),
+            ],
+        );
+        let repeater = resolve_state(
+            &mut registry,
+            "minecraft:repeater",
+            &[
+                ("delay", "1"),
+                ("facing", "north"),
+                ("locked", "false"),
+                ("powered", "false"),
+            ],
+        );
+        let comparator = resolve_state(
+            &mut registry,
+            "minecraft:comparator",
+            &[
+                ("facing", "north"),
+                ("mode", "compare"),
+                ("powered", "false"),
+            ],
+        );
+        let mut world = SparseWorld::new(registry.air_state());
+        world.set_block(BlockPos::new(0, 0, -1), wire).unwrap();
+        world.set_block(BlockPos::ZERO, repeater).unwrap();
+        world.set_block(BlockPos::new(2, 0, -1), wire).unwrap();
+        world.set_block(BlockPos::new(2, 0, 0), comparator).unwrap();
+        let rules = Java26Rules::new(registry);
+
+        assert_eq!(
+            rules.signal(&world, BlockPos::new(0, 0, -1), Direction::North),
+            0
+        );
+        assert_eq!(
+            rules.diode_input(&world, BlockPos::ZERO, rules.state(repeater).unwrap()),
+            7
+        );
+        assert_eq!(
+            rules.comparator_output(
+                &world,
+                BlockPos::new(2, 0, 0),
+                rules.state(comparator).unwrap(),
+            ),
+            7
+        );
     }
 }
 
