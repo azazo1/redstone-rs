@@ -48,7 +48,7 @@ enum Command {
             long,
             value_name = "X_RANGE,Y_RANGE,Z_RANGE",
             value_parser = inspect::parse_finite_region,
-            help = "读取 Minecraft 世界目录时限制有限区域"
+            help = "读取 Minecraft 世界目录或 ZIP 时限制有限区域"
         )]
         region: Option<StructureRegion>,
         #[arg(
@@ -137,7 +137,7 @@ enum Command {
             long,
             value_name = "X_RANGE,Y_RANGE,Z_RANGE",
             value_parser = inspect::parse_finite_region,
-            help = "读取 Minecraft 世界目录时限制有限区域"
+            help = "读取 Minecraft 世界目录或 ZIP 时限制有限区域"
         )]
         region: Option<StructureRegion>,
     },

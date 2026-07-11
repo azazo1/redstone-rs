@@ -13,15 +13,20 @@ use super::{
 mod chunk;
 mod region;
 mod settings;
+mod source;
 
 pub(super) fn load<R: StructureStateResolver>(
     path: &Path,
     options: StructureLoadOptions,
     resolver: &mut R,
 ) -> Result<LoadedStructure, StructureError> {
-    let settings_path = path.join("data/world_gen_settings.dat");
-    let settings = settings::read(&settings_path).map_err(StructureError::MinecraftWorld)?;
-    settings::require_data_version(&settings, &settings_path)
+    let mut source = source::WorldSource::open(path).map_err(StructureError::MinecraftWorld)?;
+    let settings_path = Path::new("data/world_gen_settings.dat");
+    let settings_display = source.display(settings_path);
+    let settings_bytes = source.read(settings_path).map_err(StructureError::MinecraftWorld)?;
+    let settings = settings::read(settings_bytes, &settings_display)
+        .map_err(StructureError::MinecraftWorld)?;
+    settings::require_data_version(&settings, &settings_display)
         .map_err(StructureError::MinecraftWorld)?;
     let explicit_region = options.region;
     if explicit_region.is_none() && !settings::is_strict_void(&settings) {
@@ -29,12 +34,13 @@ pub(super) fn load<R: StructureStateResolver>(
             "世界不是可证明的严格虚空世界, 必须提供有限 region".to_owned(),
         ));
     }
-    let dimension = path.join("dimensions/minecraft/overworld");
-    let block_regions = region::list(&dimension.join("region"))
+    let dimension = Path::new("dimensions/minecraft/overworld");
+    let block_regions = region::list(&source, &dimension.join("region"))
         .map_err(StructureError::MinecraftWorld)?;
     let entity_directory = dimension.join("entities");
-    let entity_regions = region::list(&entity_directory).map_err(StructureError::MinecraftWorld)?;
-    let separate_entities = entity_directory.is_dir();
+    let entity_regions = region::list(&source, &entity_directory)
+        .map_err(StructureError::MinecraftWorld)?;
+    let separate_entities = source.has_directory(&entity_directory);
     info!(
         world = %path.display(),
         regions = block_regions.len(),
@@ -48,13 +54,15 @@ pub(super) fn load<R: StructureStateResolver>(
         if !region_intersects(region_path.x, region_path.z, explicit_region) {
             continue;
         }
+        let region_display = source.display(&region_path.path);
         chunks += region::read_chunks(
+            &mut source,
             region_path,
             |chunk_x, chunk_z| chunk_intersects(chunk_x, chunk_z, explicit_region),
             |chunk_x, chunk_z, bytes| {
                 let root = fastnbt::from_bytes::<HashMap<String, Value>>(&bytes)
                     .map_err(|error| error.to_string())?;
-                settings::require_data_version(&root, &region_path.path)?;
+                settings::require_data_version(&root, &region_display)?;
                 chunk::load_chunk(
                     &root,
                     (chunk_x, chunk_z),
@@ -70,7 +78,7 @@ pub(super) fn load<R: StructureStateResolver>(
         )
         .map_err(StructureError::MinecraftWorld)?;
         info!(
-            path = %region_path.path.display(),
+            path = %region_display,
             chunks,
             blocks = state.world.non_air_blocks(),
             "读取世界 region"
@@ -81,13 +89,15 @@ pub(super) fn load<R: StructureStateResolver>(
             if !region_intersects(region_path.x, region_path.z, explicit_region) {
                 continue;
             }
+            let region_display = source.display(&region_path.path);
             region::read_chunks(
+                &mut source,
                 region_path,
                 |chunk_x, chunk_z| chunk_intersects(chunk_x, chunk_z, explicit_region),
                 |_chunk_x, _chunk_z, bytes| {
                     let root = fastnbt::from_bytes::<HashMap<String, Value>>(&bytes)
                         .map_err(|error| error.to_string())?;
-                    settings::require_data_version(&root, &region_path.path)?;
+                    settings::require_data_version(&root, &region_display)?;
                     chunk::load_entities(&root, "Entities", explicit_region, options, &mut state)
                 },
             )

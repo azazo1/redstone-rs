@@ -1,8 +1,9 @@
-use std::fs::File;
 use std::io::{Cursor, Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
 
 use flate2::read::{GzDecoder, ZlibDecoder};
+
+use super::source::WorldSource;
 
 const HEADER_BYTES: usize = 8192;
 const SECTOR_BYTES: u64 = 4096;
@@ -14,14 +15,12 @@ pub(super) struct RegionPath {
     pub z: i32,
 }
 
-pub(super) fn list(directory: &Path) -> Result<Vec<RegionPath>, String> {
-    if !directory.is_dir() {
-        return Ok(Vec::new());
-    }
+pub(super) fn list(
+    source: &WorldSource,
+    directory: &Path,
+) -> Result<Vec<RegionPath>, String> {
     let mut regions = Vec::new();
-    for entry in std::fs::read_dir(directory).map_err(|error| error.to_string())? {
-        let entry = entry.map_err(|error| error.to_string())?;
-        let path = entry.path();
+    for path in source.list_files(directory)? {
         let Some((x, z)) = parse_name(&path) else {
             continue;
         };
@@ -32,14 +31,16 @@ pub(super) fn list(directory: &Path) -> Result<Vec<RegionPath>, String> {
 }
 
 pub(super) fn read_chunks(
+    source: &mut WorldSource,
     region: &RegionPath,
     mut accepts: impl FnMut(i32, i32) -> bool,
     mut consume: impl FnMut(i32, i32, Vec<u8>) -> Result<(), String>,
 ) -> Result<usize, String> {
-    let mut file = File::open(&region.path).map_err(|error| error.to_string())?;
+    let display = source.display(&region.path);
+    let mut file = source.open_region(&region.path)?;
     let mut header = [0u8; HEADER_BYTES];
     file.read_exact(&mut header).map_err(|error| {
-        format!("region header 截断 {}: {error}", region.path.display())
+        format!("region header 截断 {display}: {error}")
     })?;
     let mut count = 0usize;
     for index in 0..1024usize {
@@ -89,8 +90,7 @@ pub(super) fn read_chunks(
                 .parent()
                 .unwrap_or_else(|| Path::new("."))
                 .join(format!("c.{chunk_x}.{chunk_z}.mcc"));
-            std::fs::read(&path)
-                .map_err(|error| format!("读取外部 chunk {} 失败: {error}", path.display()))?
+            source.read(&path)?
         } else {
             let compressed_length = length - 1;
             let maximum = sectors
@@ -198,9 +198,15 @@ mod tests {
         bytes[HEADER_BYTES + 4] = 0x83;
         std::fs::write(&path, bytes).unwrap();
         std::fs::write(directory.join("c.0.0.mcc"), b"external").unwrap();
-        let region = RegionPath { path, x: 0, z: 0 };
+        let mut source = WorldSource::open(&directory).unwrap();
+        let region = RegionPath {
+            path: PathBuf::from("r.0.0.mca"),
+            x: 0,
+            z: 0,
+        };
         let mut received = Vec::new();
         let count = read_chunks(
+            &mut source,
             &region,
             |_, _| true,
             |x, z, bytes| {

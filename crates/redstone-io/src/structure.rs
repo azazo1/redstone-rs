@@ -172,6 +172,7 @@ impl StructureLoader {
             Some("litematic") => Ok(StructureFormat::Litematic),
             Some("schem") => Ok(StructureFormat::SpongeSchematic),
             Some("nbt" | "structure") => Ok(StructureFormat::VanillaStructure),
+            Some("zip") => Ok(StructureFormat::MinecraftWorld),
             _ => Err(StructureError::UnknownFormat(path.to_path_buf())),
         }
     }

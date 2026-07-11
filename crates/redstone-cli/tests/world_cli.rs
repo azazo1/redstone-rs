@@ -1,9 +1,13 @@
 use std::collections::HashMap;
+use std::fs::File;
+use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use fastnbt::Value;
+use zip::ZipWriter;
+use zip::write::SimpleFileOptions;
 
 #[test]
 fn world_directory_supports_inspect_convert_and_scenario_loading() {
@@ -36,6 +40,29 @@ fn world_directory_supports_inspect_convert_and_scenario_loading() {
     assert_success(&convert);
     assert!(converted.is_file());
 
+    let archive = directory.path().join("world.zip");
+    write_world_zip(&world, &archive, "saved-world");
+    let inspect_zip = Command::new(env!("CARGO_BIN_EXE_redstone"))
+        .arg("inspect")
+        .arg(&archive)
+        .arg("--region")
+        .arg("0..=15,0..=15,0..=15")
+        .arg("--json")
+        .output()
+        .unwrap();
+    assert_success(&inspect_zip);
+    let converted_zip = directory.path().join("world-from-zip.litematic");
+    let convert_zip = Command::new(env!("CARGO_BIN_EXE_redstone"))
+        .arg("convert")
+        .arg(&archive)
+        .arg(&converted_zip)
+        .arg("--region")
+        .arg("0..=15,0..=15,0..=15")
+        .output()
+        .unwrap();
+    assert_success(&convert_zip);
+    assert!(converted_zip.is_file());
+
     let scenario = directory.path().join("world.toml");
     std::fs::write(
         &scenario,
@@ -50,7 +77,7 @@ path = "{}"
 initialization = "raw"
 region = {{ min = {{ x = 0, y = 0, z = 0 }}, max = {{ x = 15, y = 15, z = 15 }} }}
 "#,
-            world.display()
+            archive.display()
         ),
     )
     .unwrap();
@@ -122,6 +149,26 @@ fn write_world(path: &Path) {
     region[8196] = 3;
     region[8197..8197 + chunk.len()].copy_from_slice(&chunk);
     std::fs::write(region_path, region).unwrap();
+}
+
+fn write_world_zip(world: &Path, output: &Path, prefix: &str) {
+    let file = File::create(output).unwrap();
+    let mut archive = ZipWriter::new(file);
+    let options = SimpleFileOptions::default()
+        .compression_method(zip::CompressionMethod::Deflated)
+        .unix_permissions(0o644);
+    for relative in [
+        "data/world_gen_settings.dat",
+        "dimensions/minecraft/overworld/region/r.0.0.mca",
+    ] {
+        archive
+            .start_file(format!("{prefix}/{relative}"), options)
+            .unwrap();
+        archive
+            .write_all(&std::fs::read(world.join(relative)).unwrap())
+            .unwrap();
+    }
+    archive.finish().unwrap();
 }
 
 struct TestDirectory(PathBuf);

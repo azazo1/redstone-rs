@@ -512,6 +512,7 @@ dependencies = [
  "thiserror",
  "toml",
  "tracing",
+ "zip",
 ]
 
 [[package]]

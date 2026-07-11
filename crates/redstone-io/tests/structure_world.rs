@@ -1,6 +1,7 @@
 mod common;
 
 use std::collections::HashMap;
+use std::fs::File;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -10,6 +11,8 @@ use fastnbt::Value;
 use flate2::{Compression, write::GzEncoder};
 use redstone_core::{BlockPos, BlockStateId};
 use redstone_io::{StructureLoadOptions, StructureLoader, StructureRegion};
+use zip::ZipWriter;
+use zip::write::SimpleFileOptions;
 
 #[test]
 fn explicit_region_loads_blocks_block_entities_and_entities_from_normal_world() {
@@ -67,6 +70,46 @@ fn empty_strict_void_world_uses_one_block_origin_region() {
     assert_eq!(loaded.region_min, BlockPos::ZERO);
     assert_eq!(loaded.region_max, BlockPos::ZERO);
     assert_eq!(loaded.world.non_air_blocks(), 0);
+}
+
+#[test]
+fn zip_world_supports_root_files_and_one_top_level_directory() {
+    let directory = TestDirectory::new();
+    let world = directory.path().join("world");
+    write_world_settings(&world, false);
+    let dimension = world.join("dimensions/minecraft/overworld");
+    write_region(
+        &dimension.join("region/r.0.0.mca"),
+        0,
+        block_chunk(),
+    );
+    write_region(
+        &dimension.join("entities/r.0.0.mca"),
+        0,
+        entity_chunk(),
+    );
+    for prefix in [None, Some("saved-world")] {
+        let suffix = prefix.unwrap_or("root");
+        let archive = directory.path().join(format!("{suffix}.zip"));
+        write_world_zip(&world, &archive, prefix);
+        let mut resolver = TestResolver::default();
+        let loaded = StructureLoader::load_with_options(
+            &archive,
+            StructureLoadOptions {
+                region: Some(StructureRegion::new(
+                    BlockPos::new(0, 0, 0),
+                    BlockPos::new(15, 15, 15),
+                )),
+                ..StructureLoadOptions::default()
+            },
+            &mut resolver,
+        )
+        .unwrap();
+        assert_eq!(loaded.format, "minecraft_world");
+        assert_eq!(loaded.world.non_air_blocks(), 4096);
+        assert_eq!(loaded.world.block_entities().count(), 1);
+        assert_eq!(loaded.world.entities().count(), 1);
+    }
 }
 
 fn block_chunk() -> Vec<u8> {
@@ -190,6 +233,29 @@ fn write_region(path: &Path, index: usize, chunk: Vec<u8>) {
     bytes[8196] = 3;
     bytes[8197..8197 + chunk.len()].copy_from_slice(&chunk);
     std::fs::write(path, bytes).unwrap();
+}
+
+fn write_world_zip(world: &Path, output: &Path, prefix: Option<&str>) {
+    let file = File::create(output).unwrap();
+    let mut archive = ZipWriter::new(file);
+    let options = SimpleFileOptions::default()
+        .compression_method(zip::CompressionMethod::Deflated)
+        .unix_permissions(0o644);
+    for relative in [
+        "data/world_gen_settings.dat",
+        "dimensions/minecraft/overworld/region/r.0.0.mca",
+        "dimensions/minecraft/overworld/entities/r.0.0.mca",
+    ] {
+        let name = prefix.map_or_else(
+            || relative.to_owned(),
+            |prefix| format!("{prefix}/{relative}"),
+        );
+        archive.start_file(name, options).unwrap();
+        archive
+            .write_all(&std::fs::read(world.join(relative)).unwrap())
+            .unwrap();
+    }
+    archive.finish().unwrap();
 }
 
 fn block_state(name: &str) -> Value {

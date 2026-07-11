@@ -118,7 +118,7 @@ mirror = "none"
 
 支持 `.litematic`, `.schem`, `.nbt` 和 `.structure` 文件.
 
-Java 26.1.2 世界目录也可以直接作为 `source.path` 或 paste 路径. 当前固定读取 `minecraft:overworld`. 普通世界必须声明有限 `region`, 严格虚空世界可以省略:
+Java 26.1.2 世界目录或 ZIP 也可以直接作为 `source.path` 或 paste 路径. ZIP 直接在内存中读取 entry, 不创建中间解压目录, 并支持存档散放在根目录或包含一个顶层文件夹. 当前固定读取 `minecraft:overworld`. 普通世界必须声明有限 `region`, 严格虚空世界可以省略:
 
 ```toml
 [source]

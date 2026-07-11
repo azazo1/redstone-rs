@@ -65,7 +65,7 @@ cargo run --release -p redstone-cli -- bench
 
 `inspect` 默认输出结构汇总. `--block X,Y,Z` 可重复查询指定坐标, 每个坐标轴也支持 `a..b`, `a..=b`, `..b`, `..=b`, `a..` 和 `..` 范围. 范围只返回非空气方块, 并可叠加 `--type BLOCK_ID` 按方块类型筛选. `--all` 输出全部非空气方块. 明细包含状态 ID, properties, 支持状态和完整方块实体 NBT, 包括嵌套的 `components`. `--format json` 与 `--json` 均可输出 JSON.
 
-`convert` 根据输入自动识别场景 TOML, Minecraft Java 26.1.2 世界目录或结构文件, 并根据输出扩展名写出 Litematic v7, Sponge v3 或 vanilla structure NBT. 世界目录仅读取 `minecraft:overworld`. 普通世界必须通过 `--region` 指定 3 轴都有有限边界的区域. 可证明使用标准虚空生成设置的世界可以省略范围, 此时自动读取全部已保存内容. 场景转换会在输出旁创建独立 assets 目录, 供 Java oracle 或其他场景副本直接加载.
+`convert` 根据输入自动识别场景 TOML, Minecraft Java 26.1.2 世界目录, 世界 ZIP 或结构文件, 并根据输出扩展名写出 Litematic v7, Sponge v3 或 vanilla structure NBT. 世界 ZIP 直接从 archive entry 读取, 不创建中间解压目录, 可将存档文件散放在 ZIP 根目录或放在一个顶层文件夹中. 世界输入仅读取 `minecraft:overworld`. 普通世界必须通过 `--region` 指定 3 轴都有有限边界的区域. 可证明使用标准虚空生成设置的世界可以省略范围, 此时自动读取全部已保存内容. 场景转换会在输出旁创建独立 assets 目录, 供 Java oracle 或其他场景副本直接加载.
 
 `run --replay` 和单场景 `test --replay` 会直接从 Rust 仿真生成 Replay Mod 格式 14 录像. 录像目标版本为 Minecraft `26.1.2`, 每个游戏 tick 对应 50 ms. 初始原理图声明区域覆盖的全部 chunk 会在同一批次加载, 外围保留一圈渲染邻居. 后续方块变化进入新 chunk 时只加载目标 chunk 的局部邻接圈, 可随飞行器移动持续扩展, 不会补齐与原理图之间的无关 chunk. 目录批量测试暂不支持共享录像输出路径. 断言失败时录像仍会完成并保留, 仿真或编码失败时不会替换目标文件.
 
