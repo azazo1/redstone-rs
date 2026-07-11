@@ -27,16 +27,22 @@ pub struct Java26Rules {
     registry: Java26Registry,
     comparator_outputs: BTreeMap<BlockPos, u8>,
     block_signal_cache: HashMap<BlockPos, u8, BuildHasherDefault<BlockPosHasher>>,
+    wire_kind: Option<BlockKindId>,
     torch_toggles: VecDeque<(u64, BlockPos)>,
     event_counts: BTreeMap<String, i64>,
 }
 
 impl Java26Rules {
     pub fn new(registry: Java26Registry) -> Self {
+        let wire_kind = registry
+            .states()
+            .find(|state| matches!(state.behavior, BlockBehavior::Wire))
+            .map(|state| state.kind);
         Self {
             registry,
             comparator_outputs: BTreeMap::new(),
             block_signal_cache: HashMap::default(),
+            wire_kind,
             torch_toggles: VecDeque::new(),
             event_counts: BTreeMap::new(),
         }
@@ -438,22 +444,24 @@ impl Java26Rules {
         if !state.redstone_conductor {
             return own_signal;
         }
-        Direction::UPDATE_ORDER
-            .into_iter()
-            .map(|neighbor_direction| {
-                let neighbor_pos = pos.relative(neighbor_direction);
-                let Ok(neighbor) = self.state(world.get_block(neighbor_pos)) else {
-                    return 0;
-                };
-                if matches!(neighbor.behavior, BlockBehavior::Wire) {
-                    0
-                } else {
-                    self.direct_signal(world, neighbor_pos, neighbor_direction)
+        let mut signal = own_signal;
+        for neighbor_direction in Direction::UPDATE_ORDER {
+            let neighbor_pos = pos.relative(neighbor_direction);
+            let Ok(neighbor) = self.state(world.get_block(neighbor_pos)) else {
+                continue;
+            };
+            if !matches!(neighbor.behavior, BlockBehavior::Wire) {
+                signal = signal.max(self.direct_signal(
+                    world,
+                    neighbor_pos,
+                    neighbor_direction,
+                ));
+                if signal == 15 {
+                    break;
                 }
-            })
-            .max()
-            .unwrap_or(0)
-            .max(own_signal)
+            }
+        }
+        signal
     }
 
     fn wire_target_power(&mut self, world: &SparseWorld, pos: BlockPos) -> u8 {
@@ -498,6 +506,9 @@ impl Java26Rules {
                         .map_or(0, wire_power_of),
                 );
             }
+            if wire_power == 15 {
+                break;
+            }
         }
         block_power.max(wire_power.saturating_sub(1))
     }
@@ -520,7 +531,7 @@ impl Java26Rules {
                 if old_power == new_power {
                     return Ok(());
                 }
-                let new_state = self.changed_state(state_id, "power", new_power.to_string())?;
+                let new_state = self.changed_state(state_id, "power", power_value(new_power))?;
                 self.set_block(ctx, initial_pos, new_state, "default_wire")?;
                 self.update_observers_after_wire_power_change(ctx, initial_pos)?;
                 for candidate in default_wire_update_positions(initial_pos) {
@@ -552,7 +563,7 @@ impl Java26Rules {
                         turn_on.push_back((pos, orientation));
                     }
                     if next != old {
-                        let new_state = self.changed_state(state_id, "power", next.to_string())?;
+                        let new_state = self.changed_state(state_id, "power", power_value(next))?;
                         self.set_state_and_notify(
                             ctx,
                             pos,
@@ -579,8 +590,7 @@ impl Java26Rules {
                     let old = state.power;
                     let target = self.wire_target_power(ctx.world, pos);
                     if target > old {
-                        let new_state =
-                            self.changed_state(state_id, "power", target.to_string())?;
+                        let new_state = self.changed_state(state_id, "power", power_value(target))?;
                         self.set_state_and_notify(
                             ctx,
                             pos,
@@ -1101,36 +1111,18 @@ impl BlockRules for Java26Rules {
         ctx: &mut EventContext<'_>,
         update: NeighborUpdate,
     ) -> Result<(), RulesError> {
-        if self.registry.kind_name(update.source_block) != Some("minecraft:redstone_wire") {
+        if Some(update.source_block) != self.wire_kind {
             self.block_signal_cache.clear();
         }
         let current_state_id = ctx.world.get_block(update.pos);
         let current_state = self.state(current_state_id)?;
-        let is_rail = shape::is_rail_name(&current_state.name);
-        let is_piston_head = current_state.name.as_ref() == "minecraft:piston_head";
-        let handles_neighbor_update = matches!(
-            current_state.behavior,
-            BlockBehavior::Wire
-                | BlockBehavior::Torch { .. }
-                | BlockBehavior::Repeater
-                | BlockBehavior::Comparator
-                | BlockBehavior::Dropper
-                | BlockBehavior::Dispenser
-                | BlockBehavior::Crafter
-                | BlockBehavior::Piston { .. }
-                | BlockBehavior::Lamp
-                | BlockBehavior::CopperBulb
-                | BlockBehavior::PoweredConsumer
-                | BlockBehavior::Door
-                | BlockBehavior::PoweredRail
-                | BlockBehavior::NoteBlock
-                | BlockBehavior::Bell
-                | BlockBehavior::Tnt
-        );
-        if !is_rail && !is_piston_head && !handles_neighbor_update {
+        if !current_state.is_rail
+            && !current_state.is_piston_head
+            && !current_state.handles_neighbor_update
+        {
             return Ok(());
         }
-        let loses_support = is_rail
+        let loses_support = current_state.is_rail
             && self.rail_support_changed(update.pos, current_state, update.source_pos)
             && !self.rail_survives(ctx.world, update.pos, current_state);
         if loses_support {
@@ -1138,11 +1130,14 @@ impl BlockRules for Java26Rules {
             return Ok(());
         }
         let state_id = current_state_id;
-        let state = self.state(state_id)?.clone();
-        if is_piston_head {
-            self.refresh_piston_head(ctx, update.pos, &state, update)?;
+        let behavior = current_state.behavior;
+        let piston_head_state = current_state
+            .is_piston_head
+            .then(|| current_state.clone());
+        if let Some(state) = piston_head_state.as_ref() {
+            self.refresh_piston_head(ctx, update.pos, state, update)?;
         }
-        match state.behavior {
+        match behavior {
             BlockBehavior::Wire => self.update_wire(ctx, update.pos, update.orientation)?,
             BlockBehavior::Torch { .. } => self.refresh_torch(ctx, update.pos, state_id)?,
             BlockBehavior::Repeater => self.refresh_repeater(ctx, update.pos, state_id)?,
@@ -1974,6 +1969,14 @@ fn wire_power_of(state: &StateDefinition) -> u8 {
     } else {
         0
     }
+}
+
+fn power_value(power: u8) -> &'static str {
+    const VALUES: [&str; 16] = [
+        "0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12", "13",
+        "14", "15",
+    ];
+    VALUES[usize::from(power.min(15))]
 }
 
 fn attached_direction(state: &StateDefinition) -> Direction {

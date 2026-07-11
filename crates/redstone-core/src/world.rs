@@ -17,6 +17,7 @@ pub struct SectionPos {
 }
 
 impl SectionPos {
+    #[inline(always)]
     pub fn from_block(pos: BlockPos) -> Self {
         Self {
             x: pos.x >> 4,
@@ -25,6 +26,7 @@ impl SectionPos {
         }
     }
 
+    #[inline(always)]
     pub fn local_index(pos: BlockPos) -> usize {
         let x = (pos.x & 15) as usize;
         let y = (pos.y & 15) as usize;
@@ -49,6 +51,7 @@ impl PaletteSection {
         }
     }
 
+    #[inline(always)]
     pub fn get(&self, index: usize) -> BlockStateId {
         self.palette[self.indices[index] as usize]
     }
@@ -128,6 +131,7 @@ impl SparseWorld {
         self.air
     }
 
+    #[inline(always)]
     pub fn get_block(&self, pos: BlockPos) -> BlockStateId {
         let section_pos = SectionPos::from_block(pos);
         self.section(section_pos).map_or(self.air, |section| {
@@ -401,6 +405,7 @@ impl SparseWorld {
             })
     }
 
+    #[inline(always)]
     fn section(&self, pos: SectionPos) -> Option<&PaletteSection> {
         if let Some(slot) = self
             .dense_sections
@@ -440,6 +445,7 @@ impl DenseSections {
         }
     }
 
+    #[inline(always)]
     fn index(&self, pos: SectionPos) -> Option<usize> {
         let x = i64::from(pos.x) - i64::from(self.min.x);
         let y = i64::from(pos.y) - i64::from(self.min.y);
@@ -456,6 +462,7 @@ impl DenseSections {
         Some((y as usize * self.size_z + z as usize) * self.size_x + x as usize)
     }
 
+    #[inline(always)]
     fn slot(&self, pos: SectionPos) -> Option<&Option<PaletteSection>> {
         self.sections.get(self.index(pos)?)
     }

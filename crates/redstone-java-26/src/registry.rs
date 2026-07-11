@@ -79,6 +79,9 @@ pub struct StateDefinition {
     pub has_block_entity: bool,
     pub supported: bool,
     pub power: u8,
+    pub is_rail: bool,
+    pub is_piston_head: bool,
+    pub handles_neighbor_update: bool,
 }
 
 impl StateDefinition {
@@ -268,6 +271,28 @@ impl StateResolver for Java26Registry {
             .and_then(|value| value.parse::<u8>().ok())
             .unwrap_or(0)
             .min(15);
+        let path = name.strip_prefix("minecraft:").unwrap_or(name);
+        let is_rail = path == "rail" || path.ends_with("_rail");
+        let is_piston_head = name == "minecraft:piston_head";
+        let handles_neighbor_update = matches!(
+            traits.behavior,
+            BlockBehavior::Wire
+                | BlockBehavior::Torch { .. }
+                | BlockBehavior::Repeater
+                | BlockBehavior::Comparator
+                | BlockBehavior::Dropper
+                | BlockBehavior::Dispenser
+                | BlockBehavior::Crafter
+                | BlockBehavior::Piston { .. }
+                | BlockBehavior::Lamp
+                | BlockBehavior::CopperBulb
+                | BlockBehavior::PoweredConsumer
+                | BlockBehavior::Door
+                | BlockBehavior::PoweredRail
+                | BlockBehavior::NoteBlock
+                | BlockBehavior::Bell
+                | BlockBehavior::Tnt
+        );
         self.states[id.0 as usize] = Some(StateDefinition {
             id,
             kind,
@@ -280,6 +305,9 @@ impl StateResolver for Java26Registry {
             has_block_entity,
             supported: traits.supported,
             power,
+            is_rail,
+            is_piston_head,
+            handles_neighbor_update,
         });
         Ok(id)
     }

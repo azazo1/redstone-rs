@@ -185,3 +185,37 @@ cargo samply --profile samply -p redstone-java-26 --test suite --samply-args="--
 `EventContext` 现在直接借用当前任务栈. 每次回调记录追加前的长度, 回调结束后只反转新增切片, 从而保持 nested task 先于 multi continuation 的原有顺序. Core 中验证 nested neighbor, deferred tick 和 deferred block change 顺序的 17 个测试全部通过.
 
 普通 release 连续运行 7 次得到 142.5, 162.7, 162.6, 163.9, 164.0, 159.6 和 163.6 tick/s. 首次运行存在冷启动抖动, 全部结果中位数为 162.7 tick/s. 相对上一轮 148.5 tick/s 中位数改善约 9.6%.
+
+### 状态预分类和方块读取内联
+
+每条 neighbor update 原先都按方块名称判断 rail 和 piston head, 再用一个较长的 `BlockBehavior` match 判断是否需要处理. 这些结果对注册后的 state 永远不变, 因此改为在 `StateDefinition` 构建时预计算. Redstone wire 的 `BlockKindId` 也在 `Java26Rules` 构建时缓存, 避免每条更新查询名称.
+
+`SectionPos` 计算, 稠密 section 索引, palette 读取和 `SparseWorld::get_block` 是 wire 功率计算的最底层路径. 这些短函数增加明确内联, 让优化器把边界检查和 `Option` 分支合并到调用点.
+
+Java 规则的 80 个测试全部通过. 普通 release 连续运行 7 次得到 146.3, 197.7, 193.1, 197.4, 182.7, 198.2 和 199.9 tick/s. 全部结果中位数为 197.4 tick/s, 相对上一轮 162.7 tick/s 中位数改善约 21.3%. 除冷启动和一次系统抖动外, 热运行已经接近 200 tick/s, 但仍需要提高稳定余量.
+
+### Wire 最大值早停
+
+一次规则级 neighbor 预筛选实验把静态目标挡在 `EventContext` 之外, 但 CPU 场景的大多数通知确实落在活跃红石元件上. 额外 trait 调用和重复方块读取使结果降到 94.7-185.4 tick/s, 因此该实验已撤回.
+
+保留的下一轮优化只利用信号范围的数学上界. `signal_without_wire_feedback` 得到 15 后不再扫描剩余方向, wire 邻接扫描得到 15 后也不再继续求最大值. Wire power 的 `0-15` 属性值改用静态字符串表, 避免每次状态转换创建临时 `String`. 这些变化不改变最大值和 neighbor 顺序.
+
+Java 规则的 80 个测试再次全部通过. 普通 release 连续运行 10 次得到 199.0, 207.6, 206.3, 208.5, 208.2, 199.4, 211.0, 206.0, 203.7 和 205.3 tick/s. 中位数约为 206.2 tick/s, 相对最初 30-33 tick/s 约有 6.3-6.9x 加速, 也达到原游戏 20 tick/s 的约 10.3x.
+
+CPU+DVD 的完整 Java oracle 对比使用临时的 60 tick 场景运行, 共比较 7937630 条微轨迹事件, 结果通过. 这覆盖了当前 CPU 活动阶段的 wire, repeater, comparator 和 neighbor 顺序, 证明最大值早停和任务栈复用没有改变 oracle 可见行为.
+
+### 最终验证
+
+当前 release 同时通过 tracing 的 `release_max_level_info` 移除 debug 和 trace 级别 callsite, 因此热路径中的 `debug!` 不进入 release 二进制执行路径.
+
+最终验证结果如下.
+
+| 验证 | 结果 |
+| --- | --- |
+| `cargo test --workspace` | 通过 |
+| `cargo clippy --workspace --all-targets` | 通过 |
+| `just oracle-scenario-self-test` | 通过, Java GameTest 约 497.6 tick/s |
+| 三种结构格式 oracle converter 测试 | 通过 |
+| initial source paste Java 微轨迹 | 通过 |
+| default wire chain Java 微轨迹 | 通过 |
+| CPU+DVD 60 tick 完整 oracle | 通过, 7937630 条事件 |
