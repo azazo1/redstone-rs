@@ -1,0 +1,39 @@
+version = "26.1.2"
+mode = "default"
+seed = 0
+max_ticks = 10000
+strict = true
+
+[source]
+path = "../schematics/cpu-8bit.litematic"
+initialization = "raw"
+
+[[source.pastes]]
+path = "../schematics/dvdprogram.schem"
+origin = { x = 222, y = 58, z = 110 }
+rotation = "none"
+mirror = "none"
+ignore_air = true
+paste_entities = false
+update = true
+
+[[actions]]
+tick = 1
+type = "press_button"
+pos = { x = 51, y = 58, z = 102 }
+
+[[probes]]
+name = "run_program_button"
+type = "property"
+pos = { x = 51, y = 58, z = 102 }
+property = "powered"
+
+[[expectations]]
+tick = 1
+probe = "run_program_button"
+equals = "true"
+
+[[expectations]]
+tick = 21
+probe = "run_program_button"
+equals = "false"

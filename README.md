@@ -111,3 +111,8 @@ equals = 15
 ## 当前限制
 
 目前仍处于行为覆盖和 oracle 差分阶段. 多方块活塞分支及破坏反应顺序, 铁轨支撑破坏和矿车物理, 墙的精确碰撞判定, 发射器剩余物品行为, 全量物品标签和完整合成配方尚未达到稳定标准. TNT 引信和爆炸触发会进入轨迹, 但爆炸, 火传播和流体不修改世界.
+
+## 部分原理图来源
+
+- [cpu-8bit.litematic](assets/schematics/cpu-8bit.litematic): <https://www.planetminecraft.com/project/new-redstone-computer/>
+- [dvdprogram.schem](assets/schematics/dvdprogram.schem): <https://github.com/mattbatwings/BatPU-2>

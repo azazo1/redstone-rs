@@ -6,6 +6,8 @@ REPORT_DIR := "crates/redstone-java-26/data/26.1.2"
 ORACLE_DIR := "tools/vanilla-oracle"
 ORACLE_LIB_DIR := "assets/oracle-libraries"
 
+import? 'local.just'
+
 [private]
 default:
     @just --list
