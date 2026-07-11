@@ -27,9 +27,16 @@ pub(super) fn require_data_version(
 ) -> Result<(), String> {
     let version = root.get("DataVersion").and_then(value_i32);
     if version != Some(DATA_VERSION) {
+        let hint = if display.ends_with(".mca")
+            && version.is_some_and(|version| version < DATA_VERSION)
+        {
+            ", 世界元数据升级不会自动升级全部区块, 请在游戏中执行优化世界或限制到已升级 region"
+        } else {
+            ""
+        };
         return Err(format!(
-            "{} 的 DataVersion 必须为 {DATA_VERSION}, 收到 {version:?}",
-            display
+            "{} 的 DataVersion 必须为 {DATA_VERSION}, 收到 {version:?}{hint}",
+            display,
         ));
     }
     Ok(())

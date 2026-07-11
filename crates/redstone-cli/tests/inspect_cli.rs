@@ -63,7 +63,7 @@ fn inspect_queries_real_litematic_block_entities_by_type() {
 }
 
 #[test]
-fn inspect_queries_sparse_ranges_with_types_and_stable_union() {
+fn inspect_queries_region_with_points_types_and_stable_union() {
     let directory = TestDirectory::new("inspect-range");
     let structure_path = directory.path().join("range.nbt");
     fs::write(&structure_path, range_structure()).unwrap();
@@ -71,12 +71,11 @@ fn inspect_queries_sparse_ranges_with_types_and_stable_union() {
     let range_output = inspect(
         &structure_path,
         &[
-            "--block",
-            "4..=2,0,0",
-            "--block",
-            "0..2,0,0",
-            "--block",
+            "--region",
+            "2,0,0",
             "4,0,0",
+            "--block",
+            "0,0,0",
             "--json",
         ],
     );
@@ -86,7 +85,14 @@ fn inspect_queries_sparse_ranges_with_types_and_stable_union() {
 
     let typed_output = inspect(
         &structure_path,
-        &["--block", "..,..,..", "--type", "stone", "--json"],
+        &[
+            "--region",
+            "0,0,0",
+            "4,0,0",
+            "--type",
+            "stone",
+            "--json",
+        ],
     );
     assert_success(&typed_output);
     let typed_report = serde_json::from_slice::<serde_json::Value>(&typed_output.stdout).unwrap();

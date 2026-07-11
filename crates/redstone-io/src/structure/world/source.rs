@@ -1,4 +1,4 @@
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fs::File;
 use std::io::{Cursor, Read, Seek};
 use std::path::{Path, PathBuf};
@@ -17,7 +17,7 @@ pub(super) enum WorldSource {
         path: PathBuf,
         archive: ZipArchive<File>,
         prefix: String,
-        files: BTreeSet<String>,
+        files: BTreeMap<String, u64>,
     },
 }
 
@@ -35,7 +35,7 @@ impl WorldSource {
             .map_err(|error| format!("打开世界 ZIP {} 失败: {error}", path.display()))?;
         let mut archive = ZipArchive::new(file)
             .map_err(|error| format!("读取世界 ZIP {} 失败: {error}", path.display()))?;
-        let mut files = BTreeSet::new();
+        let mut files = BTreeMap::new();
         for index in 0..archive.len() {
             let entry = archive
                 .by_index(index)
@@ -46,11 +46,11 @@ impl WorldSource {
             let Some(enclosed) = entry.enclosed_name() else {
                 return Err(format!("ZIP 包含不安全路径: {}", entry.name()));
             };
-            files.insert(normalize(&enclosed));
+            files.insert(normalize(&enclosed), entry.size());
         }
-        let suffix = "data/world_gen_settings.dat";
+        let suffix = "data/minecraft/world_gen_settings.dat";
         let roots = files
-            .iter()
+            .keys()
             .filter_map(|name| {
                 if name == suffix {
                     Some(String::new())
@@ -128,7 +128,9 @@ impl WorldSource {
                 let mut files = Vec::new();
                 for entry in std::fs::read_dir(&directory).map_err(|error| error.to_string())? {
                     let entry = entry.map_err(|error| error.to_string())?;
-                    if entry.path().is_file() {
+                    if entry.path().is_file()
+                        && entry.metadata().is_ok_and(|metadata| metadata.len() >= 8192)
+                    {
                         files.push(relative_directory.join(entry.file_name()));
                     }
                 }
@@ -140,7 +142,10 @@ impl WorldSource {
                 let directory = format!("{}/", directory.trim_end_matches('/'));
                 let mut entries = files
                     .iter()
-                    .filter_map(|name| {
+                    .filter_map(|(name, size)| {
+                        if *size < 8192 {
+                            return None;
+                        }
                         let rest = name.strip_prefix(&directory)?;
                         (!rest.contains('/')).then(|| relative_directory.join(rest))
                     })
@@ -157,7 +162,7 @@ impl WorldSource {
             Self::Zip { prefix, files, .. } => {
                 let directory = archive_name(prefix, relative_directory);
                 let directory = format!("{}/", directory.trim_end_matches('/'));
-                files.iter().any(|name| name.starts_with(&directory))
+                files.keys().any(|name| name.starts_with(&directory))
             }
         }
     }

@@ -21,7 +21,7 @@ pub(super) fn load<R: StructureStateResolver>(
     resolver: &mut R,
 ) -> Result<LoadedStructure, StructureError> {
     let mut source = source::WorldSource::open(path).map_err(StructureError::MinecraftWorld)?;
-    let settings_path = Path::new("data/world_gen_settings.dat");
+    let settings_path = Path::new("data/minecraft/world_gen_settings.dat");
     let settings_display = source.display(settings_path);
     let settings_bytes = source.read(settings_path).map_err(StructureError::MinecraftWorld)?;
     let settings = settings::read(settings_bytes, &settings_display)

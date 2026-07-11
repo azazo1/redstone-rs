@@ -216,7 +216,7 @@ fn write_world_settings(path: &Path, strict_void: bool) {
         ),
     ]);
     let data = fastnbt::to_bytes(&root).unwrap();
-    let target = path.join("data/world_gen_settings.dat");
+    let target = path.join("data/minecraft/world_gen_settings.dat");
     std::fs::create_dir_all(target.parent().unwrap()).unwrap();
     let mut encoder = GzEncoder::new(Vec::new(), Compression::default());
     encoder.write_all(&data).unwrap();
@@ -242,7 +242,7 @@ fn write_world_zip(world: &Path, output: &Path, prefix: Option<&str>) {
         .compression_method(zip::CompressionMethod::Deflated)
         .unix_permissions(0o644);
     for relative in [
-        "data/world_gen_settings.dat",
+        "data/minecraft/world_gen_settings.dat",
         "dimensions/minecraft/overworld/region/r.0.0.mca",
         "dimensions/minecraft/overworld/entities/r.0.0.mca",
     ] {

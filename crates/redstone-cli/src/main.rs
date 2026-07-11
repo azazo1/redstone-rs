@@ -12,8 +12,7 @@ use redstone_core::{
     SimulationConfig, SparseWorld, TraceEvent, TraceKind, WorldPaste,
 };
 use redstone_io::{
-    InitializationMode, Scenario, ScenarioActionKind, StructureLoader, StructureRegion,
-    StructureStateResolver,
+    InitializationMode, Scenario, ScenarioActionKind, StructureLoader, StructureStateResolver,
 };
 use redstone_java_26::{
     JAVA_DATA_VERSION, JAVA_VERSION, Java26Registry, Java26Rules, StateResolveError, StateResolver,
@@ -42,26 +41,29 @@ struct Cli {
 #[derive(Debug, Subcommand)]
 enum Command {
     Inspect {
-        #[arg(help = "要检查的 litematic, schem 或 structure NBT 文件")]
-        structure: PathBuf,
+        #[arg(help = "要检查的结构文件, Minecraft 世界目录或世界 ZIP")]
+        input: PathBuf,
         #[arg(
             long,
-            value_name = "X_RANGE,Y_RANGE,Z_RANGE",
-            value_parser = inspect::parse_finite_region,
-            help = "读取 Minecraft 世界目录或 ZIP 时限制有限区域"
+            num_args = 2,
+            value_names = ["FROM", "TO"],
+            value_parser = inspect::parse_block_pos,
+            allow_hyphen_values = true,
+            conflicts_with = "all",
+            help = "按两个方块坐标查询闭合区域, 世界输入同时限制读取区域"
         )]
-        region: Option<StructureRegion>,
+        region: Vec<redstone_core::BlockPos>,
         #[arg(
             long = "block",
-            value_name = "X_OR_RANGE,Y_OR_RANGE,Z_OR_RANGE",
-            value_parser = inspect::parse_block_selector,
+            value_name = "X,Y,Z",
+            value_parser = inspect::parse_block_pos,
             conflicts_with = "all",
-            help = "按坐标或 Rust 风格范围查询方块, 可重复使用"
+            help = "按单个坐标查询方块, 可重复使用"
         )]
-        blocks: Vec<inspect::BlockSelector>,
+        blocks: Vec<redstone_core::BlockPos>,
         #[arg(
             long,
-            conflicts_with_all = ["blocks", "block_types"],
+            conflicts_with_all = ["region", "blocks", "block_types"],
             help = "输出全部非空气方块"
         )]
         all: bool,
@@ -131,15 +133,19 @@ enum Command {
         ticks: usize,
     },
     Convert {
+        #[arg(help = "场景 TOML, 结构文件, Minecraft 世界目录或世界 ZIP")]
         input: PathBuf,
+        #[arg(help = "输出场景 TOML 或结构文件")]
         output: PathBuf,
         #[arg(
             long,
-            value_name = "X_RANGE,Y_RANGE,Z_RANGE",
-            value_parser = inspect::parse_finite_region,
-            help = "读取 Minecraft 世界目录或 ZIP 时限制有限区域"
+            num_args = 2,
+            value_names = ["FROM", "TO"],
+            value_parser = inspect::parse_block_pos,
+            allow_hyphen_values = true,
+            help = "使用两个方块坐标限制 Minecraft 世界目录或 ZIP 的读取区域"
         )]
-        region: Option<StructureRegion>,
+        region: Vec<redstone_core::BlockPos>,
     },
 }
 
@@ -160,7 +166,7 @@ async fn main() -> Result<()> {
     let cli = Cli::parse();
     match cli.command {
         Command::Inspect {
-            structure,
+            input,
             region,
             blocks,
             all,
@@ -168,8 +174,8 @@ async fn main() -> Result<()> {
             format,
             json,
         } => inspect::run(
-            &structure,
-            region,
+            &input,
+            inspect::region_from_corners(&region),
             &blocks,
             all,
             &block_types,
@@ -224,7 +230,7 @@ async fn main() -> Result<()> {
             input,
             output,
             region,
-        } => convert::run(&input, &output, region),
+        } => convert::run(&input, &output, inspect::region_from_corners(&region)),
     }
 }
 

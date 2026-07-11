@@ -19,7 +19,8 @@ fn world_directory_supports_inspect_convert_and_scenario_loading() {
         .arg("inspect")
         .arg(&world)
         .arg("--region")
-        .arg("0..=15,0..=15,0..=15")
+        .arg("0,0,0")
+        .arg("15,15,15")
         .arg("--json")
         .output()
         .unwrap();
@@ -34,7 +35,8 @@ fn world_directory_supports_inspect_convert_and_scenario_loading() {
         .arg(&world)
         .arg(&converted)
         .arg("--region")
-        .arg("0..=15,0..=15,0..=15")
+        .arg("0,0,0")
+        .arg("15,15,15")
         .output()
         .unwrap();
     assert_success(&convert);
@@ -46,7 +48,8 @@ fn world_directory_supports_inspect_convert_and_scenario_loading() {
         .arg("inspect")
         .arg(&archive)
         .arg("--region")
-        .arg("0..=15,0..=15,0..=15")
+        .arg("0,0,0")
+        .arg("15,15,15")
         .arg("--json")
         .output()
         .unwrap();
@@ -57,7 +60,8 @@ fn world_directory_supports_inspect_convert_and_scenario_loading() {
         .arg(&archive)
         .arg(&converted_zip)
         .arg("--region")
-        .arg("0..=15,0..=15,0..=15")
+        .arg("0,0,0")
+        .arg("15,15,15")
         .output()
         .unwrap();
     assert_success(&convert_zip);
@@ -118,7 +122,7 @@ fn write_world(path: &Path) {
             )])),
         ),
     ]);
-    let settings_path = path.join("data/world_gen_settings.dat");
+    let settings_path = path.join("data/minecraft/world_gen_settings.dat");
     std::fs::create_dir_all(settings_path.parent().unwrap()).unwrap();
     std::fs::write(settings_path, fastnbt::to_bytes(&settings).unwrap()).unwrap();
 
@@ -158,7 +162,7 @@ fn write_world_zip(world: &Path, output: &Path, prefix: &str) {
         .compression_method(zip::CompressionMethod::Deflated)
         .unix_permissions(0o644);
     for relative in [
-        "data/world_gen_settings.dat",
+        "data/minecraft/world_gen_settings.dat",
         "dimensions/minecraft/overworld/region/r.0.0.mca",
     ] {
         archive

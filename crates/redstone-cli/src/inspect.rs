@@ -1,5 +1,4 @@
 use std::collections::{BTreeMap, BTreeSet};
-use std::ops::Bound;
 use std::path::Path;
 
 use anyhow::{Context, Result, anyhow};
@@ -19,166 +18,23 @@ pub enum OutputFormat {
     Json,
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(crate) struct BlockSelector {
-    region: BlockRegion,
-    point: Option<BlockPos>,
-}
-
-impl BlockSelector {
-    fn matches(self, pos: BlockPos) -> bool {
-        self.region.x.contains(pos.x)
-            && self.region.y.contains(pos.y)
-            && self.region.z.contains(pos.z)
-    }
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-struct BlockRegion {
-    x: AxisRange,
-    y: AxisRange,
-    z: AxisRange,
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-struct AxisRange {
-    start: Bound<i32>,
-    end: Bound<i32>,
-}
-
-impl AxisRange {
-    fn point(value: i32) -> Self {
-        Self {
-            start: Bound::Included(value),
-            end: Bound::Included(value),
-        }
-    }
-
-    fn new(start: Option<i32>, end: Option<i32>, inclusive_end: bool) -> Self {
-        let (start, end) = match (start, end) {
-            (Some(start), Some(end)) if start > end => (Some(end), Some(start)),
-            bounds => bounds,
-        };
-        Self {
-            start: start.map_or(Bound::Unbounded, Bound::Included),
-            end: end.map_or(Bound::Unbounded, |value| {
-                if inclusive_end {
-                    Bound::Included(value)
-                } else {
-                    Bound::Excluded(value)
-                }
-            }),
-        }
-    }
-
-    fn contains(self, value: i32) -> bool {
-        let after_start = match self.start {
-            Bound::Included(start) => value >= start,
-            Bound::Excluded(start) => value > start,
-            Bound::Unbounded => true,
-        };
-        let before_end = match self.end {
-            Bound::Included(end) => value <= end,
-            Bound::Excluded(end) => value < end,
-            Bound::Unbounded => true,
-        };
-        after_start && before_end
-    }
-}
-
-pub(crate) fn parse_block_selector(value: &str) -> Result<BlockSelector, String> {
+pub(crate) fn parse_block_pos(value: &str) -> Result<BlockPos, String> {
     let coordinates = value.split(',').map(str::trim).collect::<Vec<_>>();
     if coordinates.len() != 3 {
-        return Err("方块选择器必须使用 X,Y,Z 格式".to_owned());
+        return Err("方块坐标必须使用 X,Y,Z 格式".to_owned());
     }
-    let (x, point_x) = parse_axis_range(coordinates[0])?;
-    let (y, point_y) = parse_axis_range(coordinates[1])?;
-    let (z, point_z) = parse_axis_range(coordinates[2])?;
-    Ok(BlockSelector {
-        region: BlockRegion { x, y, z },
-        point: match (point_x, point_y, point_z) {
-            (Some(x), Some(y), Some(z)) => Some(BlockPos::new(x, y, z)),
-            _ => None,
-        },
-    })
-}
-
-pub(crate) fn parse_finite_region(value: &str) -> Result<StructureRegion, String> {
-    let coordinates = value.split(',').map(str::trim).collect::<Vec<_>>();
-    if coordinates.len() != 3 {
-        return Err("region 必须使用 X_RANGE,Y_RANGE,Z_RANGE 格式".to_owned());
-    }
-    let x = finite_axis(coordinates[0])?;
-    let y = finite_axis(coordinates[1])?;
-    let z = finite_axis(coordinates[2])?;
-    Ok(StructureRegion::new(
-        BlockPos::new(x.0, y.0, z.0),
-        BlockPos::new(x.1, y.1, z.1),
+    Ok(BlockPos::new(
+        parse_coordinate(coordinates[0])?,
+        parse_coordinate(coordinates[1])?,
+        parse_coordinate(coordinates[2])?,
     ))
 }
 
-fn finite_axis(value: &str) -> Result<(i32, i32), String> {
-    let (axis, point) = parse_axis_range(value)?;
-    if let Some(point) = point {
-        return Ok((point, point));
-    }
-    let start = match axis.start {
-        Bound::Included(value) => value,
-        _ => return Err(format!("region 范围缺少有限下界: {value}")),
-    };
-    let end = match axis.end {
-        Bound::Included(value) => value,
-        Bound::Excluded(value) => value
-            .checked_sub(1)
-            .ok_or_else(|| format!("region 半开范围上界溢出: {value}"))?,
-        Bound::Unbounded => return Err(format!("region 范围缺少有限上界: {value}")),
-    };
-    if start > end {
-        return Err(format!("region 范围为空: {value}"));
-    }
-    Ok((start, end))
-}
-
-fn parse_axis_range(value: &str) -> Result<(AxisRange, Option<i32>), String> {
-    if let Some((start, end)) = value.split_once("..=") {
-        reject_additional_range_operator(start, end, value)?;
-        if end.trim().is_empty() {
-            return Err(format!("闭区间范围缺少上界: {value}"));
-        }
-        return Ok((
-            AxisRange::new(parse_optional_coordinate(start)?, Some(parse_coordinate(end)?), true),
-            None,
-        ));
-    }
-    if let Some((start, end)) = value.split_once("..") {
-        reject_additional_range_operator(start, end, value)?;
-        return Ok((
-            AxisRange::new(
-                parse_optional_coordinate(start)?,
-                parse_optional_coordinate(end)?,
-                false,
-            ),
-            None,
-        ));
-    }
-
-    let coordinate = parse_coordinate(value)?;
-    Ok((AxisRange::point(coordinate), Some(coordinate)))
-}
-
-fn reject_additional_range_operator(start: &str, end: &str, value: &str) -> Result<(), String> {
-    if start.contains("..") || end.contains("..") {
-        return Err(format!("范围包含多个运算符: {value}"));
-    }
-    Ok(())
-}
-
-fn parse_optional_coordinate(value: &str) -> Result<Option<i32>, String> {
-    let value = value.trim();
-    if value.is_empty() {
-        Ok(None)
-    } else {
-        parse_coordinate(value).map(Some)
+pub(crate) fn region_from_corners(corners: &[BlockPos]) -> Option<StructureRegion> {
+    match corners {
+        [] => None,
+        [first, second] => Some(StructureRegion::new(*first, *second)),
+        _ => unreachable!("clap 保证 region 包含两个坐标"),
     }
 }
 
@@ -192,17 +48,20 @@ fn parse_coordinate(value: &str) -> Result<i32, String> {
 pub fn run(
     path: &Path,
     region: Option<StructureRegion>,
-    requested_blocks: &[BlockSelector],
+    requested_blocks: &[BlockPos],
     all: bool,
     requested_types: &[String],
     output_format: OutputFormat,
 ) -> Result<()> {
     let mut resolver = RegistryResolver(Java26Registry::new());
+    let load_region = (StructureLoader::detect(path)? == redstone_io::StructureFormat::MinecraftWorld)
+        .then_some(region)
+        .flatten();
     let structure = StructureLoader::load_with_options(
         path,
         StructureLoadOptions {
             transform: StructureTransform::default(),
-            region,
+            region: load_region,
         },
         &mut resolver,
     )?;
@@ -220,6 +79,7 @@ pub fn run(
         &structure,
         &resolver.0,
         requested_blocks,
+        region,
         all,
         requested_types,
     )?;
@@ -257,7 +117,8 @@ pub fn run(
 fn selected_positions(
     structure: &LoadedStructure,
     registry: &Java26Registry,
-    requested_blocks: &[BlockSelector],
+    requested_blocks: &[BlockPos],
+    requested_region: Option<StructureRegion>,
     all: bool,
     requested_types: &[String],
 ) -> Result<Vec<BlockPos>> {
@@ -278,26 +139,16 @@ fn selected_positions(
                 .is_some_and(|state| requested_types.contains(state.name.as_ref()))
     };
 
-    if !requested_blocks.is_empty() {
+    if !requested_blocks.is_empty() || requested_region.is_some() {
         let mut positions = BTreeSet::new();
-        for selector in requested_blocks {
-            let Some(pos) = selector.point else {
-                continue;
-            };
-            if matches_type(structure.world.get_block(pos)) {
-                positions.insert(pos);
+        for pos in requested_blocks {
+            if matches_type(structure.world.get_block(*pos)) {
+                positions.insert(*pos);
             }
         }
-
-        let regions = requested_blocks
-            .iter()
-            .filter(|selector| selector.point.is_none())
-            .copied()
-            .collect::<Vec<_>>();
-        if !regions.is_empty() {
+        if let Some(region) = requested_region {
             positions.extend(structure.world.iter_blocks().filter_map(|(pos, state_id)| {
-                (matches_type(state_id) && regions.iter().any(|region| region.matches(pos)))
-                    .then_some(pos)
+                (matches_type(state_id) && region.contains(pos)).then_some(pos)
             }));
         }
         return Ok(positions.into_iter().collect());
@@ -454,47 +305,25 @@ mod tests {
     use super::*;
 
     #[test]
-    fn block_selector_parses_points_and_mixed_ranges() {
-        let point = parse_block_selector("-1, 2, 30").unwrap();
-        assert_eq!(point.point, Some(BlockPos::new(-1, 2, 30)));
-
-        let range = parse_block_selector("-3..=-1, 2..5, ..").unwrap();
-        assert_eq!(range.point, None);
-        assert!(range.matches(BlockPos::new(-3, 2, i32::MIN)));
-        assert!(range.matches(BlockPos::new(-1, 4, i32::MAX)));
-        assert!(!range.matches(BlockPos::new(0, 4, 0)));
-        assert!(!range.matches(BlockPos::new(-2, 5, 0)));
+    fn block_position_accepts_only_single_coordinates() {
+        assert_eq!(
+            parse_block_pos("-1, 2, 30").unwrap(),
+            BlockPos::new(-1, 2, 30)
+        );
+        assert!(parse_block_pos("1,2").is_err());
+        assert!(parse_block_pos("1,two,3").is_err());
+        assert!(parse_block_pos("0..1,2,3").is_err());
     }
 
     #[test]
-    fn block_selector_supports_open_and_reversed_ranges() {
-        let open = parse_block_selector("..=-1, 3.., ..10").unwrap();
-        assert!(open.matches(BlockPos::new(-1, 3, 9)));
-        assert!(!open.matches(BlockPos::new(0, 3, 9)));
-        assert!(!open.matches(BlockPos::new(-1, 2, 9)));
-        assert!(!open.matches(BlockPos::new(-1, 3, 10)));
-
-        let reversed = parse_block_selector("3..1, 5..=2, 0").unwrap();
-        assert!(reversed.matches(BlockPos::new(1, 2, 0)));
-        assert!(reversed.matches(BlockPos::new(2, 5, 0)));
-        assert!(!reversed.matches(BlockPos::new(3, 5, 0)));
-    }
-
-    #[test]
-    fn block_selector_rejects_invalid_syntax() {
-        assert!(parse_block_selector("1,2").is_err());
-        assert!(parse_block_selector("1,two,3").is_err());
-        assert!(parse_block_selector("1..=,2,3").is_err());
-        assert!(parse_block_selector("1..2..3,0,0").is_err());
-    }
-
-    #[test]
-    fn finite_region_requires_bounded_non_empty_axes() {
-        let region = parse_finite_region("-2..=3,0..16,5").unwrap();
-        assert_eq!(region.min, BlockPos::new(-2, 0, 5));
-        assert_eq!(region.max, BlockPos::new(3, 15, 5));
-        assert!(parse_finite_region("..3,0..1,0..1").is_err());
-        assert!(parse_finite_region("0..,0..1,0..1").is_err());
-        assert!(parse_finite_region("0..0,0..1,0..1").is_err());
+    fn region_uses_two_inclusive_block_coordinates() {
+        let region = region_from_corners(&[
+            BlockPos::new(3, 5, 0),
+            BlockPos::new(1, 2, -4),
+        ])
+        .unwrap();
+        assert_eq!(region.min, BlockPos::new(1, 2, -4));
+        assert_eq!(region.max, BlockPos::new(3, 5, 0));
+        assert!(region_from_corners(&[]).is_none());
     }
 }
