@@ -30,6 +30,7 @@ final class OracleTraceRecorder implements AutoCloseable {
     private final long baseSubTickOrder;
     private final List<JsonObject> samples = new ArrayList<>();
     private boolean blockChangesEnabled;
+    private boolean monitoringEnabled;
     private int tick;
 
     OracleTraceRecorder(Scenario scenario, FrameGeometry frame, GameTestHelper helper) {
@@ -51,6 +52,10 @@ final class OracleTraceRecorder implements AutoCloseable {
 
     void setTick(int tick) {
         this.tick = tick;
+    }
+
+    void setMonitoringEnabled(boolean enabled) {
+        this.monitoringEnabled = enabled;
     }
 
     void enableBlockChanges() {
@@ -77,6 +82,9 @@ final class OracleTraceRecorder implements AutoCloseable {
         Orientation orientation,
         boolean movedByPiston
     ) {
+        if (!monitoringEnabled) {
+            return;
+        }
         Scenario.Pos pos = normalize(updatedLevel, absolutePos);
         if (pos == null) {
             return;
@@ -93,6 +101,9 @@ final class OracleTraceRecorder implements AutoCloseable {
     }
 
     void recordScheduledTickQueued(ScheduledTick<?> scheduled) {
+        if (!monitoringEnabled) {
+            return;
+        }
         if (!(scheduled.type() instanceof Block block)) {
             return;
         }
@@ -115,6 +126,9 @@ final class OracleTraceRecorder implements AutoCloseable {
     }
 
     void recordScheduledBlockTick(Level updatedLevel, BlockPos absolutePos, Block block) {
+        if (!monitoringEnabled) {
+            return;
+        }
         Scenario.Pos pos = normalize(updatedLevel, absolutePos);
         if (pos == null) {
             return;
@@ -130,7 +144,7 @@ final class OracleTraceRecorder implements AutoCloseable {
         BlockState oldState,
         BlockState newState
     ) {
-        if (!blockChangesEnabled) {
+        if (!monitoringEnabled || !blockChangesEnabled) {
             return;
         }
         Scenario.Pos pos = normalize(updatedLevel, absolutePos);
@@ -179,6 +193,9 @@ final class OracleTraceRecorder implements AutoCloseable {
         int paramA,
         int paramB
     ) {
+        if (!monitoringEnabled) {
+            return;
+        }
         Scenario.Pos pos = normalize(updatedLevel, absolutePos);
         if (pos == null) {
             return;

@@ -19,6 +19,11 @@ const PISTON_BLOCK_ENTITY_TYPE: i32 = 11;
 fn run_exports_parseable_replay_and_atomically_replaces_target() {
     let directory = TestDirectory::new("replay-run");
     let scenario = write_fixture(directory.path(), false);
+    let scenario_text = fs::read_to_string(&scenario).unwrap().replace(
+        "strict = true",
+        "strict = true\n\n[monitor]\nskip_ticks = 2",
+    );
+    fs::write(&scenario, scenario_text).unwrap();
     let replay = directory.path().join("run.mcpr");
     fs::write(&replay, b"old replay").unwrap();
 

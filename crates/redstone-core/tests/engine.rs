@@ -565,6 +565,51 @@ fn identical_runs_produce_byte_identical_jsonl_and_vcd() {
 }
 
 #[test]
+fn monitoring_can_start_after_world_event_recording() {
+    let mut simulation = Simulation::load(
+        MockRules::default(),
+        SparseWorld::new(AIR),
+        SimulationConfig {
+            trace: true,
+            record_events: true,
+            ..SimulationConfig::default()
+        },
+    )
+    .unwrap();
+    simulation.add_probe(
+        "counter",
+        Probe::EventCount {
+            kind: "counter".to_owned(),
+        },
+    );
+    simulation.set_monitoring_enabled(false);
+
+    let skipped = simulation
+        .step_with_actions(&[Action::SetBlockEntity {
+            pos: BlockPos::ZERO,
+            data: BlockEntityData {
+                kind: "test:block_entity".to_owned(),
+                fields: BTreeMap::new(),
+            },
+        }])
+        .unwrap();
+
+    assert!(!skipped.events.is_empty());
+    assert!(skipped.probes.is_empty());
+    assert!(simulation.trace().events().is_empty());
+
+    simulation.set_monitoring_enabled(true);
+    let monitored = simulation.step().unwrap();
+
+    assert_eq!(monitored.probes.len(), 1);
+    assert!(simulation
+        .trace()
+        .events()
+        .iter()
+        .all(|event| event.tick.0 == 2));
+}
+
+#[test]
 fn environment_time_advances_before_tick_callbacks() {
     let mut simulation = Simulation::load(
         MockRules::default(),

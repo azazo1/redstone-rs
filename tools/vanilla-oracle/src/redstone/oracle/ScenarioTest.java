@@ -156,6 +156,7 @@ final class ScenarioTest {
                 if (scenario.oracleMicroTrace) {
                     microTrace = new OracleTraceRecorder(scenario, frame, helper);
                     microTrace.setTick(0);
+                    microTrace.setMonitoringEnabled(scenario.skipMonitorTicks == 0);
                 }
                 initialize(helper);
                 if (microTrace != null) {
@@ -164,7 +165,7 @@ final class ScenarioTest {
                 applyPastes(helper, null);
                 tickStartedNanos = System.nanoTime();
             }
-            if (tick > 0) {
+            if (tick > scenario.skipMonitorTicks) {
                 for (Scenario.Probe probe : scenario.probes) {
                     writeSample(helper, tick, probe);
                 }
@@ -172,6 +173,7 @@ final class ScenarioTest {
             int nextTick = tick + 1;
             if (microTrace != null) {
                 microTrace.setTick(nextTick);
+                microTrace.setMonitoringEnabled(nextTick > scenario.skipMonitorTicks);
             }
             if (hasPasteAt(nextTick)
                 || actionIndex < actions.size() && actions.get(actionIndex).tick() == nextTick) {

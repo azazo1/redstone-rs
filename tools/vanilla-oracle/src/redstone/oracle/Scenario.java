@@ -27,6 +27,7 @@ final class Scenario {
     final String mode;
     final long seed;
     final int maxTicks;
+    final long skipMonitorTicks;
     final boolean oracleMicroTrace;
     final Environment environment;
     final Source source;
@@ -38,6 +39,7 @@ final class Scenario {
         String mode,
         long seed,
         int maxTicks,
+        long skipMonitorTicks,
         boolean oracleMicroTrace,
         Environment environment,
         Source source,
@@ -48,6 +50,7 @@ final class Scenario {
         this.mode = mode;
         this.seed = seed;
         this.maxTicks = maxTicks;
+        this.skipMonitorTicks = skipMonitorTicks;
         this.oracleMicroTrace = oracleMicroTrace;
         this.environment = environment;
         this.source = source;
@@ -71,6 +74,10 @@ final class Scenario {
         }
         long seed = optionalLong(document, "seed", 0L);
         int maxTicks = Math.toIntExact(optionalLong(document, "max_ticks", 100L));
+        TomlTable monitorTable = document.getTable("monitor");
+        long skipMonitorTicks = monitorTable == null
+            ? 0L
+            : optionalLong(monitorTable, "skip_ticks", 0L);
         boolean oracleMicroTrace = optionalBoolean(document, "oracle_micro_trace", false);
         TomlTable environmentTable = document.getTable("environment");
         Environment environment = environmentTable == null
@@ -89,6 +96,9 @@ final class Scenario {
         }
         if (maxTicks <= 0) {
             throw new IllegalArgumentException("max_ticks 必须大于 0");
+        }
+        if (skipMonitorTicks < 0) {
+            throw new IllegalArgumentException("monitor.skip_ticks 不能为负数");
         }
 
         TomlTable sourceTable = requiredTable(document, "source");
@@ -283,6 +293,7 @@ final class Scenario {
             mode,
             seed,
             maxTicks,
+            skipMonitorTicks,
             oracleMicroTrace,
             environment,
             source,

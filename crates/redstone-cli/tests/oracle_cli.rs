@@ -45,6 +45,26 @@ fn real_java_oracle_matches_a_basic_action_scenario() {
 
 #[test]
 #[ignore = "需要先执行 just oracle-build"]
+fn real_java_oracle_delays_probe_monitoring() {
+    let scenario = basic_scenario().replace(
+        "strict = true",
+        "strict = true\n\n[monitor]\nskip_ticks = 1",
+    );
+    assert_oracle_matches("oracle-monitor-probe", structure(1, 0), &scenario);
+}
+
+#[test]
+#[ignore = "需要先执行 just oracle-build"]
+fn real_java_oracle_delays_micro_trace_monitoring() {
+    let scenario = basic_scenario().replace(
+        "strict = true",
+        "strict = true\noracle_micro_trace = true\n\n[monitor]\nskip_ticks = 1",
+    );
+    assert_oracle_matches("oracle-monitor-trace", structure(1, 0), &scenario);
+}
+
+#[test]
+#[ignore = "需要先执行 just oracle-build"]
 fn real_java_oracle_matches_transformed_coordinates() {
     assert_oracle_matches("oracle-transform", structure(2, 1), transformed_scenario());
 }

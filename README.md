@@ -115,6 +115,9 @@ overworld_time = 0
 advance_time = true
 sky_light = 15
 
+[monitor]
+skip_ticks = 0
+
 [source]
 path = "machine.litematic"
 initialization = "notify"
@@ -139,6 +142,8 @@ equals = 15
 
 环境字段可固定游戏时间, Overworld 时钟和日光探测器位置的原始天空光. tick 1 使用初始时间加 1, 暂停 Overworld 时钟不会暂停 `game_time`. Java oracle 当前只支持 `sky_light = 15`.
 
+`monitor.skip_ticks = N` 会完整执行初始化和前 N 个游戏刻, 但 JSONL trace, VCD, probe, assertions 和 Java oracle 从 tick N+1 才开始监视. 跳过区间内的 assertions 会被忽略并产生 warning. 默认值 `0` 保留包括 tick 0 初始化事件在内的当前行为. Replay 始终记录完整仿真, 不受该设置影响.
+
 严格模式会拒绝已识别但未实现的主动方块. `--allow-static-fallback` 可以保留其静态状态并继续执行.
 
 ## Java oracle
@@ -149,7 +154,7 @@ equals = 15
 
 当前 GameTest oracle 支持原版 structure NBT, `raw`/`notify` 初始化, 非零原点, 旋转/镜像, 任意场景 seed, 默认/实验性红石模式, 基础方块与实体动作, 方块与实体探针. 测试场景可启用 ASM 邻居更新, 计划方块刻, 方块事件及状态写入采样. CLI 会差分探针和全局微轨迹, 包括同步嵌套顺序, `Orientation`, `moved_by_piston`, 计划刻优先级, `sub_tick_order`, 方块事件参数和官方全局 state ID. 当前 18 个真实 Java 场景达到零状态差异和零事件顺序差异. 形状更新的完整 ASM 微轨迹仍待完成.
 
-包含服务端后台随机流差异的场景可以设置 `skip-oracle = true`. `redstone test --oracle` 仍会执行 Rust 仿真和全部断言, 但会记录 tracing 日志并跳过该场景的 Java 对照.
+包含服务端后台随机流差异的场景可以设置 `skip_oracle = true`. `redstone test --oracle` 仍会执行 Rust 仿真和全部断言, 但会记录 tracing 日志并跳过该场景的 Java 对照.
 
 `redstone bench` 默认构建 100 万已放置方块和 1 万活跃元件, 运行 100 个空闲刻并输出 P50/P95/P99 与可获取的常驻内存.
 

@@ -34,6 +34,7 @@ fn convert_scenario_converts_all_supported_structure_formats_to_vanilla_nbt() {
     );
 
     let prepared = Scenario::load(&prepared).unwrap();
+    assert_eq!(prepared.monitor.skip_ticks, 3);
     let paths = std::iter::once(&prepared.source.path)
         .chain(prepared.source.pastes.iter().map(|paste| &paste.path))
         .collect::<Vec<_>>();
@@ -150,6 +151,9 @@ fn scenario_text() -> &'static str {
 mode = "default"
 max_ticks = 1
 strict = true
+
+[monitor]
+skip_ticks = 3
 
 [source]
 path = "source.litematic"

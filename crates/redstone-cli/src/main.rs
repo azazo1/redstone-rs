@@ -21,7 +21,7 @@ use redstone_replay_26::{ReplayOptions, ReplayRegion, ReplayStats, ReplayWriter}
 use tokio::io::{AsyncBufReadExt, AsyncRead, BufReader};
 use tokio::process::Command as ProcessCommand;
 use tokio::sync::Semaphore;
-use tracing::{Instrument, debug, info};
+use tracing::{Instrument, debug, info, warn};
 use tracing_indicatif::{IndicatifLayer, span_ext::IndicatifSpanExt, style::ProgressStyle};
 use tracing_subscriber::EnvFilter;
 use tracing_subscriber::layer::SubscriberExt;
@@ -513,6 +513,8 @@ fn execute_scenario(
             ..SimulationConfig::default()
         },
     )?;
+    let mut monitoring_enabled = scenario.monitor.skip_ticks == 0;
+    simulation.set_monitoring_enabled(monitoring_enabled);
     for probe in &scenario.probes {
         simulation.add_probe(&probe.name, probe.probe.clone());
     }
@@ -569,6 +571,29 @@ fn execute_scenario(
 
     let mut action_index = 0;
     let mut samples = BTreeMap::<(GameTick, String), ProbeValue>::new();
+    let (skipped_expectations, monitored_expectations): (Vec<_>, Vec<_>) = scenario
+        .expectations()
+        .into_iter()
+        .partition(|expectation| expectation.tick.0 <= scenario.monitor.skip_ticks);
+    if !skipped_expectations.is_empty() {
+        let first_tick = skipped_expectations
+            .iter()
+            .map(|expectation| expectation.tick.0)
+            .min()
+            .expect("skipped expectations must not be empty");
+        let last_tick = skipped_expectations
+            .iter()
+            .map(|expectation| expectation.tick.0)
+            .max()
+            .expect("skipped expectations must not be empty");
+        warn!(
+            count = skipped_expectations.len(),
+            first_tick,
+            last_tick,
+            skip_ticks = scenario.monitor.skip_ticks,
+            "忽略监视开始前的场景断言"
+        );
+    }
     let progress = tracing::info_span!("scenario_ticks");
     progress.pb_set_style(&simulation_progress_style()?);
     progress.pb_set_length(scenario.max_ticks);
@@ -583,6 +608,10 @@ fn execute_scenario(
     let tick_started = Instant::now();
     while simulation.current_tick().0 < scenario.max_ticks {
         let next_tick = GameTick(simulation.current_tick().0 + 1);
+        if !monitoring_enabled && next_tick.0 > scenario.monitor.skip_ticks {
+            simulation.set_monitoring_enabled(true);
+            monitoring_enabled = true;
+        }
         let current_pastes = pastes
             .iter()
             .filter(|(paste, _)| paste.tick == Some(next_tick))
@@ -638,7 +667,7 @@ fn execute_scenario(
     drop(progress);
 
     let mut failures = Vec::new();
-    for expectation in scenario.expectations() {
+    for expectation in monitored_expectations {
         let actual = samples.get(&(expectation.tick, expectation.probe.clone()));
         if actual != Some(&expectation.equals) {
             failures.push(format!(
@@ -800,7 +829,7 @@ async fn execute_test_scenario(
         if parsed.skip_oracle {
             info!(parent: None,
                 scenario = %scenario.display(),
-                "跳过 Java oracle 对照: 场景设置了 skip-oracle"
+                "跳过 Java oracle 对照: 场景设置了 skip_oracle"
             );
             false
         } else {

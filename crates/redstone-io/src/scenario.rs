@@ -25,8 +25,10 @@ pub struct Scenario {
     pub environment: ScenarioEnvironment,
     #[serde(default)]
     pub oracle_micro_trace: bool,
-    #[serde(default, rename = "skip-oracle")]
+    #[serde(default, alias = "skip-oracle")]
     pub skip_oracle: bool,
+    #[serde(default, skip_serializing_if = "ScenarioMonitor::is_default")]
+    pub monitor: ScenarioMonitor,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub replay: Option<ScenarioReplay>,
     pub source: ScenarioSource,
@@ -36,6 +38,18 @@ pub struct Scenario {
     pub probes: Vec<ScenarioProbe>,
     #[serde(default)]
     pub expectations: Vec<ScenarioExpectation>,
+}
+
+#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+pub struct ScenarioMonitor {
+    #[serde(default)]
+    pub skip_ticks: u64,
+}
+
+impl ScenarioMonitor {
+    fn is_default(&self) -> bool {
+        *self == Self::default()
+    }
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -377,6 +391,33 @@ path = "machine.nbt"
 
         assert_eq!(scenario.environment, ScenarioEnvironment::default());
         assert!(!scenario.skip_oracle);
+        assert_eq!(scenario.monitor, ScenarioMonitor::default());
+    }
+
+    #[test]
+    fn monitor_parses_skip_ticks_and_omits_default_serialization() {
+        let scenario = toml::from_str::<Scenario>(
+            r#"
+version = "26.1.2"
+mode = "default"
+
+[monitor]
+skip_ticks = 12
+
+[source]
+path = "machine.nbt"
+"#,
+        )
+        .unwrap();
+
+        assert_eq!(scenario.monitor.skip_ticks, 12);
+        assert!(toml::to_string(&scenario).unwrap().contains("[monitor]"));
+
+        let mut default_monitor = scenario;
+        default_monitor.monitor = ScenarioMonitor::default();
+        assert!(!toml::to_string(&default_monitor)
+            .unwrap()
+            .contains("[monitor]"));
     }
 
     #[test]

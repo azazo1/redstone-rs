@@ -3,7 +3,7 @@ mode = "default"
 seed = 0
 max_ticks = 160
 strict = true
-skip-oracle = true
+skip_oracle = true
 
 [environment]
 game_time = 8

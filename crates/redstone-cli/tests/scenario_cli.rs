@@ -59,6 +59,79 @@ fn run_executes_entity_and_target_actions_through_the_cli() {
     );
 }
 
+#[test]
+fn monitor_skip_ticks_delays_trace_vcd_and_expectations() {
+    let directory = TestDirectory::new("monitor-skip-ticks");
+    let structure_path = directory.path().join("machine.nbt");
+    let scenario_path = directory.path().join("scenario.toml");
+    let trace_path = directory.path().join("trace.jsonl");
+    let vcd_path = directory.path().join("signals.vcd");
+    fs::write(&structure_path, structure()).unwrap();
+    fs::write(
+        &scenario_path,
+        scenario().replace(
+            "strict = true",
+            "strict = true\n\n[monitor]\nskip_ticks = 1",
+        ),
+    )
+    .unwrap();
+
+    let output = run(&scenario_path, &trace_path, &vcd_path);
+
+    assert!(
+        output.status.success(),
+        "stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(String::from_utf8_lossy(&output.stderr)
+        .contains("忽略监视开始前的场景断言"));
+    let ticks = fs::read_to_string(&trace_path)
+        .unwrap()
+        .lines()
+        .map(|line| serde_json::from_str::<serde_json::Value>(line).unwrap()["tick"]
+            .as_u64()
+            .unwrap())
+        .collect::<Vec<_>>();
+    assert!(!ticks.is_empty());
+    assert!(ticks.iter().all(|tick| *tick >= 2));
+
+    let vcd = fs::read_to_string(vcd_path).unwrap();
+    assert!(!vcd.lines().any(|line| line == "#1"));
+    assert!(vcd.lines().any(|line| line == "#2"));
+}
+
+#[test]
+fn monitor_can_skip_the_entire_scenario() {
+    let directory = TestDirectory::new("monitor-empty");
+    let structure_path = directory.path().join("machine.nbt");
+    let scenario_path = directory.path().join("scenario.toml");
+    let trace_path = directory.path().join("trace.jsonl");
+    let vcd_path = directory.path().join("signals.vcd");
+    fs::write(&structure_path, structure()).unwrap();
+    fs::write(
+        &scenario_path,
+        scenario().replace(
+            "strict = true",
+            "strict = true\n\n[monitor]\nskip_ticks = 9",
+        ),
+    )
+    .unwrap();
+
+    let output = run(&scenario_path, &trace_path, &vcd_path);
+
+    assert!(
+        output.status.success(),
+        "stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(fs::read(&trace_path).unwrap().is_empty());
+    let vcd = fs::read_to_string(vcd_path).unwrap();
+    assert!(vcd.contains("$enddefinitions $end"));
+    assert!(!vcd.contains("$var wire"));
+}
+
 fn run(scenario: &Path, trace: &Path, vcd: &Path) -> std::process::Output {
     Command::new(env!("CARGO_BIN_EXE_redstone"))
         .arg("run")

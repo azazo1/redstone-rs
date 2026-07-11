@@ -85,6 +85,7 @@ pub struct Simulation<R: BlockRules> {
     block_events: VecDeque<BlockEvent>,
     block_event_keys: BTreeSet<BlockEvent>,
     trace: Vec<TraceEvent>,
+    monitoring_enabled: bool,
     probes: IndexMap<String, Probe>,
     tickable_block_entities: IndexSet<BlockPos>,
     delta_tx: broadcast::Sender<WorldDelta>,
@@ -135,6 +136,7 @@ impl<R: BlockRules> Simulation<R> {
             block_events: VecDeque::new(),
             block_event_keys: BTreeSet::new(),
             trace: Vec::new(),
+            monitoring_enabled: true,
             probes: IndexMap::new(),
             tickable_block_entities,
             delta_tx,
@@ -167,6 +169,10 @@ impl<R: BlockRules> Simulation<R> {
         if !enabled {
             self.trace.clear();
         }
+    }
+
+    pub fn set_monitoring_enabled(&mut self, enabled: bool) {
+        self.monitoring_enabled = enabled;
     }
 
     pub fn initialize(&mut self) -> Result<(), SimulationError> {
@@ -737,6 +743,9 @@ impl<R: BlockRules> Simulation<R> {
     }
 
     fn sample_probes(&mut self) -> Vec<ProbeSample> {
+        if !self.monitoring_enabled {
+            return Vec::new();
+        }
         let samples = self
             .probes
             .iter()
@@ -796,7 +805,7 @@ impl<R: BlockRules> Simulation<R> {
         tasks: &mut NeighborTasks,
         callback: impl FnOnce(&mut R, &mut EventContext<'_>) -> Result<T, RulesError>,
     ) -> Result<(), SimulationError> {
-        let trace = self.config.trace.then_some(&mut self.trace);
+        let trace = (self.monitoring_enabled && self.config.trace).then_some(&mut self.trace);
         let events = self.config.record_events.then_some(changes);
         let mut ctx = EventContext::new(
             &mut self.world,
@@ -835,7 +844,7 @@ impl<R: BlockRules> Simulation<R> {
     }
 
     fn push_trace(&mut self, phase: SimulationPhase, kind: TraceKind) {
-        if !self.config.trace {
+        if !self.monitoring_enabled || !self.config.trace {
             return;
         }
         self.micro_step.0 += 1;
