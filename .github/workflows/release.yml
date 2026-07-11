@@ -1,0 +1,206 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+      - "[0-9]*"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  version:
+    name: Confirm version
+    runs-on: ubuntu-24.04
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Confirm tag matches Cargo version
+        id: version
+        shell: bash
+        run: |
+          set -euo pipefail
+          tag_version="${GITHUB_REF_NAME#v}"
+          cargo_version="$(cargo metadata --locked --no-deps --format-version 1 \
+            | jq -r '.packages[] | select(.name == "redstone-cli") | .version')"
+
+          if [[ -z "$cargo_version" || "$cargo_version" == "null" ]]; then
+            echo "Unable to determine the redstone-cli version." >&2
+            exit 1
+          fi
+
+          if [[ "$tag_version" != "$cargo_version" ]]; then
+            echo "Tag version $tag_version does not match Cargo version $cargo_version." >&2
+            exit 1
+          fi
+
+          echo "Confirmed release version $cargo_version."
+          echo "version=$cargo_version" >> "$GITHUB_OUTPUT"
+
+  prepare:
+    name: Generate Minecraft reports
+    needs: version
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Java 25
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "25"
+
+      - name: Install just
+        uses: extractions/setup-just@v3
+
+      - name: Generate Minecraft reports
+        run: just generate-reports
+
+      - name: Upload generated reports
+        uses: actions/upload-artifact@v4
+        with:
+          name: generated-minecraft-reports
+          path: crates/redstone-java-26/data/26.1.2/reports
+          if-no-files-found: error
+          retention-days: 1
+
+  build:
+    name: Build ${{ matrix.target }}
+    needs:
+      - version
+      - prepare
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-24.04
+            target: x86_64-unknown-linux-gnu
+            archive: tar.gz
+          - runner: ubuntu-24.04-arm
+            target: aarch64-unknown-linux-gnu
+            archive: tar.gz
+          - runner: windows-2025
+            target: x86_64-pc-windows-msvc
+            archive: zip
+          - runner: windows-11-arm
+            target: aarch64-pc-windows-msvc
+            archive: zip
+          - runner: macos-15-intel
+            target: x86_64-apple-darwin
+            archive: tar.gz
+          - runner: macos-15
+            target: aarch64-apple-darwin
+            archive: tar.gz
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Download generated reports
+        uses: actions/download-artifact@v4
+        with:
+          name: generated-minecraft-reports
+          path: crates/redstone-java-26/data/26.1.2/reports
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Build release binary
+        run: cargo build --release --locked -p redstone-cli --target ${{ matrix.target }}
+
+      - name: Package Unix binary
+        if: runner.os != 'Windows'
+        shell: bash
+        env:
+          VERSION: ${{ needs.version.outputs.version }}
+          TARGET: ${{ matrix.target }}
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          tar -C "target/$TARGET/release" -czf \
+            "dist/redstone-v$VERSION-$TARGET.tar.gz" redstone
+
+      - name: Package Windows binary
+        if: runner.os == 'Windows'
+        shell: pwsh
+        env:
+          VERSION: ${{ needs.version.outputs.version }}
+          TARGET: ${{ matrix.target }}
+        run: |
+          New-Item -ItemType Directory -Force dist | Out-Null
+          Compress-Archive `
+            -Path "target/$env:TARGET/release/redstone.exe" `
+            -DestinationPath "dist/redstone-v$env:VERSION-$env:TARGET.zip"
+
+      - name: Upload release archive
+        uses: actions/upload-artifact@v4
+        with:
+          name: redstone-${{ matrix.target }}
+          path: dist/*.${{ matrix.archive }}
+          if-no-files-found: error
+          retention-days: 1
+
+  release:
+    name: Create GitHub release
+    needs:
+      - version
+      - build
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout release tag
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Extract tag description
+        shell: bash
+        run: |
+          set -euo pipefail
+          tag_ref="refs/tags/$GITHUB_REF_NAME"
+
+          if [[ "$(git cat-file -t "$tag_ref")" == "tag" ]]; then
+            git for-each-ref \
+              --format='%(contents:subject)%0a%0a%(contents:body)' \
+              "$tag_ref" > tag-notes.md
+          else
+            : > tag-notes.md
+          fi
+
+      - name: Download release archives
+        uses: actions/download-artifact@v4
+        with:
+          pattern: redstone-*
+          path: dist
+          merge-multiple: true
+
+      - name: Generate checksums
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd dist
+          sha256sum redstone-* > SHA256SUMS
+
+      - name: Create release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: redstone v${{ needs.version.outputs.version }}
+          body_path: tag-notes.md
+          generate_release_notes: true
+          fail_on_unmatched_files: true
+          files: |
+            dist/*.tar.gz
+            dist/*.zip
+            dist/SHA256SUMS
