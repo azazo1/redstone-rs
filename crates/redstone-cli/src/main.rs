@@ -9,7 +9,7 @@ use anyhow::{Context, Result, anyhow, bail};
 use clap::{Parser, Subcommand};
 use redstone_core::{
     Action, BlockPos, BlockStateId, GameTick, ProbeValue, RedstoneMode, Simulation,
-    SimulationConfig, SparseWorld, TraceEvent, TraceKind,
+    SimulationConfig, SparseWorld, TraceEvent, TraceKind, WorldPaste,
 };
 use redstone_io::{
     InitializationMode, Scenario, ScenarioActionKind, StructureLoader, StructureStateResolver,
@@ -391,7 +391,31 @@ fn execute_scenario(
         &mut resolver,
     )?;
     reject_newer_data_version(loaded.data_version)?;
-    let replay_region = ReplayRegion::new(loaded.region_min, loaded.region_max);
+    let mut replay_region = ReplayRegion::new(loaded.region_min, loaded.region_max);
+    let mut pastes = Vec::with_capacity(scenario.source.pastes.len());
+    for paste in &scenario.source.pastes {
+        if paste
+            .tick
+            .is_some_and(|tick| tick.0 == 0 || tick.0 > scenario.max_ticks)
+        {
+            bail!(
+                "附加结构 {} 的 tick 必须在 1..={} 范围内",
+                paste.path.display(),
+                scenario.max_ticks
+            );
+        }
+        let structure = StructureLoader::load_transformed(
+            &paste.path,
+            paste.transform(),
+            &mut resolver,
+        )?;
+        reject_newer_data_version(structure.data_version)?;
+        replay_region = union_replay_regions(
+            replay_region,
+            ReplayRegion::new(structure.region_min, structure.region_max),
+        );
+        pastes.push((paste, structure));
+    }
     let mut actions = scenario
         .actions
         .iter()
@@ -421,6 +445,26 @@ fn execute_scenario(
     }
     if scenario.source.initialization == InitializationMode::Notify {
         simulation.initialize()?;
+    }
+    for (paste, structure) in pastes.iter().filter(|(paste, _)| paste.tick.is_none()) {
+        simulation.paste_world(
+            &structure.world,
+            structure.region_min,
+            structure.region_max,
+            paste.ignore_air,
+            paste.paste_entities,
+        )?;
+        if paste.update {
+            simulation.update_region(structure.region_min, structure.region_max)?;
+        }
+        info!(
+            path = %paste.path.display(),
+            origin = ?paste.origin,
+            ignore_air = paste.ignore_air,
+            paste_entities = paste.paste_entities,
+            update = paste.update,
+            "粘贴场景附加结构"
+        );
     }
 
     let mut replay = if let Some(path) = replay_path {
@@ -461,6 +505,29 @@ fn execute_scenario(
     progress.pb_start();
     while simulation.current_tick().0 < scenario.max_ticks {
         let next_tick = GameTick(simulation.current_tick().0 + 1);
+        let current_pastes = pastes
+            .iter()
+            .filter(|(paste, _)| paste.tick == Some(next_tick))
+            .map(|(paste, structure)| {
+                info!(
+                    path = %paste.path.display(),
+                    tick = next_tick.0,
+                    origin = ?paste.origin,
+                    ignore_air = paste.ignore_air,
+                    paste_entities = paste.paste_entities,
+                    update = paste.update,
+                    "执行场景附加结构粘贴"
+                );
+                WorldPaste {
+                    source: &structure.world,
+                    region_min: structure.region_min,
+                    region_max: structure.region_max,
+                    ignore_air: paste.ignore_air,
+                    paste_entities: paste.paste_entities,
+                    update: paste.update,
+                }
+            })
+            .collect::<Vec<_>>();
         let mut current_actions = Vec::new();
         while actions
             .get(action_index)
@@ -469,7 +536,7 @@ fn execute_scenario(
             current_actions.push(actions[action_index].1.clone());
             action_index += 1;
         }
-        let delta = simulation.step_with_actions(&current_actions)?;
+        let delta = simulation.step_with_pastes_and_actions(&current_pastes, &current_actions)?;
         let completed_tick = delta.tick.0;
         if let Some(replay) = replay.as_mut() {
             replay.record_delta(&delta).with_context(|| {
@@ -528,6 +595,21 @@ fn execute_scenario(
         blocks: simulation.world().non_air_blocks(),
         trace_events: simulation.trace().events().len(),
     })
+}
+
+fn union_replay_regions(left: ReplayRegion, right: ReplayRegion) -> ReplayRegion {
+    ReplayRegion::new(
+        BlockPos::new(
+            left.min.x.min(right.min.x),
+            left.min.y.min(right.min.y),
+            left.min.z.min(right.min.z),
+        ),
+        BlockPos::new(
+            left.max.x.max(right.max.x),
+            left.max.y.max(right.max.y),
+            left.max.z.max(right.max.z),
+        ),
+    )
 }
 
 fn log_replay_stats(path: &Path, stats: &ReplayStats) {

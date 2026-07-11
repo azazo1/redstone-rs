@@ -3,7 +3,7 @@ use std::collections::{BTreeSet, VecDeque};
 use indexmap::IndexMap;
 use thiserror::Error;
 use tokio::sync::broadcast;
-use tracing::{debug, warn};
+use tracing::{debug, info, warn};
 
 use crate::{
     Action, BlockEvent, BlockKindId, BlockPos, BlockRules, DeferredBlockEntityUpdate, Direction,
@@ -14,6 +14,7 @@ use crate::{
 
 const DEFAULT_MAX_SCHEDULED_TICKS_PER_TICK: usize = 65_536;
 const DEFAULT_MAX_CHAINED_NEIGHBOR_UPDATES: usize = 1_000_000;
+const UPDATE_REGION_PROGRESS_INTERVAL: usize = 16_384;
 
 #[derive(Clone, Debug)]
 pub struct SimulationConfig {
@@ -42,6 +43,16 @@ impl Default for SimulationConfig {
 pub struct Snapshot {
     pub tick: GameTick,
     pub world: SparseWorld,
+}
+
+#[derive(Clone, Copy)]
+pub struct WorldPaste<'a> {
+    pub source: &'a SparseWorld,
+    pub region_min: BlockPos,
+    pub region_max: BlockPos,
+    pub ignore_air: bool,
+    pub paste_entities: bool,
+    pub update: bool,
 }
 
 pub struct Simulation<R: BlockRules> {
@@ -133,6 +144,128 @@ impl<R: BlockRules> Simulation<R> {
         Ok(())
     }
 
+    pub fn paste_world(
+        &mut self,
+        source: &SparseWorld,
+        region_min: BlockPos,
+        region_max: BlockPos,
+        ignore_air: bool,
+        paste_entities: bool,
+    ) -> Result<(), SimulationError> {
+        let paste = WorldPaste {
+            source,
+            region_min,
+            region_max,
+            ignore_air,
+            paste_entities,
+            update: false,
+        };
+        self.paste_world_with_changes(paste, &mut Vec::new())
+    }
+
+    fn paste_world_with_changes(
+        &mut self,
+        paste: WorldPaste<'_>,
+        changes: &mut Vec<WorldEvent>,
+    ) -> Result<(), SimulationError> {
+        let source = paste.source;
+        let (region_min, region_max) = ordered_bounds(paste.region_min, paste.region_max);
+        let blocks = if paste.ignore_air {
+            source
+                .iter_blocks()
+                .filter(|(pos, _)| position_in_region(*pos, region_min, region_max))
+                .collect::<Vec<_>>()
+        } else {
+            region_positions(region_min, region_max)
+                .map(|pos| (pos, source.get_block(pos)))
+                .collect::<Vec<_>>()
+        };
+        if self.config.strict {
+            let unsupported = blocks
+                .iter()
+                .filter(|(_, state)| !self.rules.is_supported(*state))
+                .map(|(pos, state)| (*pos, self.rules.block_name(*state).to_owned()))
+                .collect::<Vec<_>>();
+            if !unsupported.is_empty() {
+                return Err(SimulationError::UnsupportedBlocks(unsupported));
+            }
+        }
+        let block_entities = source
+            .block_entities()
+            .filter(|(pos, _)| {
+                position_in_region(**pos, region_min, region_max)
+                    && (!paste.ignore_air || source.get_block(**pos) != source.air())
+            })
+            .map(|(pos, data)| (*pos, data.clone()))
+            .collect::<Vec<_>>();
+        let entities = if paste.paste_entities {
+            source
+                .entities()
+                .map(|(_, entity)| entity.clone())
+                .collect::<Vec<_>>()
+        } else {
+            Vec::new()
+        };
+        let tasks = self.with_context_and_changes(
+            SimulationPhase::PreTick,
+            changes,
+            |_rules, ctx| {
+                for (pos, state) in blocks {
+                    ctx.set_block(pos, state, "structure_paste")?;
+                    ctx.remove_block_entity(pos);
+                }
+                for (pos, data) in block_entities {
+                    ctx.set_block_entity(pos, data);
+                }
+                for entity in entities {
+                    ctx.world.spawn_entity(entity);
+                }
+                Ok(())
+            },
+        )?;
+        self.process_neighbor_tasks_with_changes(tasks, SimulationPhase::PreTick, changes)?;
+        self.rules.load_world(&self.world)?;
+        Ok(())
+    }
+
+    pub fn update_region(
+        &mut self,
+        region_min: BlockPos,
+        region_max: BlockPos,
+    ) -> Result<(), SimulationError> {
+        self.update_region_with_changes(region_min, region_max, &mut Vec::new())
+    }
+
+    fn update_region_with_changes(
+        &mut self,
+        region_min: BlockPos,
+        region_max: BlockPos,
+        changes: &mut Vec<WorldEvent>,
+    ) -> Result<(), SimulationError> {
+        let (region_min, region_max) = ordered_bounds(region_min, region_max);
+        let positions = region_positions(region_min, region_max).collect::<Vec<_>>();
+        info!(
+            ?region_min,
+            ?region_max,
+            blocks = positions.len(),
+            "开始应用选区更新"
+        );
+        for (index, pos) in positions.iter().copied().enumerate() {
+            let tasks = self.with_context_and_changes(
+                SimulationPhase::PreTick,
+                changes,
+                |rules, ctx| rules.apply_update_side_effects(ctx, pos),
+            )?;
+            self.process_neighbor_tasks_with_changes(tasks, SimulationPhase::PreTick, changes)?;
+            let processed = index + 1;
+            if processed % UPDATE_REGION_PROGRESS_INTERVAL == 0 {
+                info!(processed, total = positions.len(), "应用选区更新进度");
+            }
+        }
+        info!(blocks = positions.len(), "完成选区更新");
+        Ok(())
+    }
+
     pub fn apply(&mut self, action: Action) -> Result<WorldDelta, SimulationError> {
         let mut changes = Vec::new();
         self.push_trace(
@@ -165,9 +298,28 @@ impl<R: BlockRules> Simulation<R> {
         &mut self,
         actions: &[Action],
     ) -> Result<WorldDelta, SimulationError> {
+        self.step_with_pastes_and_actions(&[], actions)
+    }
+
+    pub fn step_with_pastes_and_actions(
+        &mut self,
+        pastes: &[WorldPaste<'_>],
+        actions: &[Action],
+    ) -> Result<WorldDelta, SimulationError> {
         self.tick.0 += 1;
         self.micro_step = MicroStep(0);
         let mut changes = Vec::new();
+
+        for paste in pastes {
+            self.paste_world_with_changes(*paste, &mut changes)?;
+            if paste.update {
+                self.update_region_with_changes(
+                    paste.region_min,
+                    paste.region_max,
+                    &mut changes,
+                )?;
+            }
+        }
 
         for action in actions {
             self.push_trace(
@@ -588,6 +740,37 @@ impl<R: BlockRules> Simulation<R> {
             kind,
         });
     }
+}
+
+fn ordered_bounds(first: BlockPos, second: BlockPos) -> (BlockPos, BlockPos) {
+    (
+        BlockPos::new(
+            first.x.min(second.x),
+            first.y.min(second.y),
+            first.z.min(second.z),
+        ),
+        BlockPos::new(
+            first.x.max(second.x),
+            first.y.max(second.y),
+            first.z.max(second.z),
+        ),
+    )
+}
+
+fn position_in_region(pos: BlockPos, min: BlockPos, max: BlockPos) -> bool {
+    (min.x..=max.x).contains(&pos.x)
+        && (min.y..=max.y).contains(&pos.y)
+        && (min.z..=max.z).contains(&pos.z)
+}
+
+fn region_positions(
+    min: BlockPos,
+    max: BlockPos,
+) -> impl Iterator<Item = BlockPos> {
+    (min.y..=max.y).flat_map(move |y| {
+        (min.z..=max.z)
+            .flat_map(move |z| (min.x..=max.x).map(move |x| BlockPos::new(x, y, z)))
+    })
 }
 
 #[derive(Debug, Error)]

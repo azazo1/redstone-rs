@@ -63,6 +63,32 @@ mirror = "none"
 
 支持 `.litematic`, `.schem`, `.nbt` 和 `.structure` 文件.
 
+### 粘贴附加结构
+
+主结构加载完成后, 可以按顺序粘贴 ROM 或其他附加结构:
+
+```toml
+[source]
+path = "computer.schem"
+initialization = "raw"
+
+[[source.pastes]]
+path = "rom.schem"
+tick = 20
+origin = { x = 10, y = 64, z = -20 }
+rotation = "none"
+mirror = "none"
+ignore_air = true
+paste_entities = false
+update = true
+```
+
+每个 `source.pastes` 都使用自己的 `origin`, `rotation` 和 `mirror`. `tick` 省略时在仿真开始前粘贴, 设置为 `1..=max_ticks` 时在指定 tick 的 PreTick 阶段粘贴. 同 tick 中, 结构粘贴和选区更新先于普通 `actions`, 计划刻及方块事件执行, 探针在这些操作全部完成后采样.
+
+`ignore_air = true` 对应 WorldEdit 的 `//paste -a`, 保留目标区域中与剪贴板空气重叠的现有方块. `paste_entities = true` 对应 `//paste -e`, 默认不粘贴实体.
+
+附加结构的完整变换后区域会作为 pasted selection, 不会因为 `ignore_air` 而缩小. `update = true` 会在该次粘贴后立即对这个选区应用方块形状刷新和邻居更新, 对应 `//paste -as` 后执行 `//update`. 多个 `source.pastes` 严格按声明顺序粘贴和更新, 路径相对于场景 TOML 文件解析.
+
 | 字段 | 可选值 | 默认值 | 说明 |
 | --- | --- | --- | --- |
 | `path` | 文件路径 | 无 | 相对于场景文件所在目录 |

@@ -41,9 +41,40 @@ pub struct ScenarioSource {
     pub rotation: Rotation,
     #[serde(default)]
     pub mirror: Mirror,
+    #[serde(default)]
+    pub pastes: Vec<ScenarioPaste>,
 }
 
 impl ScenarioSource {
+    pub fn transform(&self) -> StructureTransform {
+        StructureTransform {
+            origin: self.origin,
+            rotation: self.rotation,
+            mirror: self.mirror,
+        }
+    }
+}
+
+#[derive(Clone, Debug, Deserialize)]
+pub struct ScenarioPaste {
+    pub path: PathBuf,
+    #[serde(default)]
+    pub tick: Option<GameTick>,
+    #[serde(default)]
+    pub origin: BlockPos,
+    #[serde(default)]
+    pub rotation: Rotation,
+    #[serde(default)]
+    pub mirror: Mirror,
+    #[serde(default)]
+    pub ignore_air: bool,
+    #[serde(default)]
+    pub paste_entities: bool,
+    #[serde(default)]
+    pub update: bool,
+}
+
+impl ScenarioPaste {
     pub fn transform(&self) -> StructureTransform {
         StructureTransform {
             origin: self.origin,
@@ -175,6 +206,11 @@ impl Scenario {
         if scenario.source.path.is_relative() {
             scenario.source.path = parent.join(&scenario.source.path);
         }
+        for paste in &mut scenario.source.pastes {
+            if paste.path.is_relative() {
+                paste.path = parent.join(&paste.path);
+            }
+        }
         Ok(scenario)
     }
 
@@ -303,5 +339,37 @@ id = 9
             scenario.probes[0].probe,
             Probe::EntityContainerCount { id: EntityId(9) }
         ));
+    }
+
+    #[test]
+    fn source_pastes_parse_worldedit_style_options() {
+        let scenario = toml::from_str::<Scenario>(
+            r#"
+version = "26.1.2"
+mode = "default"
+
+[source]
+path = "computer.schem"
+
+[[source.pastes]]
+path = "rom.nbt"
+tick = 4
+origin = { x = 10, y = 20, z = 30 }
+rotation = "clockwise90"
+ignore_air = true
+paste_entities = false
+update = true
+"#,
+        )
+        .unwrap();
+
+        let paste = &scenario.source.pastes[0];
+        assert_eq!(paste.path, PathBuf::from("rom.nbt"));
+        assert_eq!(paste.tick, Some(GameTick(4)));
+        assert_eq!(paste.origin, BlockPos::new(10, 20, 30));
+        assert_eq!(paste.rotation, Rotation::Clockwise90);
+        assert!(paste.ignore_air);
+        assert!(!paste.paste_entities);
+        assert!(paste.update);
     }
 }

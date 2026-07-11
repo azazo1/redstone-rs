@@ -10,7 +10,7 @@ pub use event::{
     NeighborUpdate, ScheduledTick, TickPriority,
 };
 pub use rules::{BlockRules, EventContext, RulesError};
-pub use simulation::{Simulation, SimulationConfig, SimulationError, Snapshot};
+pub use simulation::{Simulation, SimulationConfig, SimulationError, Snapshot, WorldPaste};
 pub use trace::{TraceError, TraceLog};
 pub use types::{
     Action, BlockChange, BlockEntityChange, BlockEntityData, BlockKindId, BlockPos, BlockStateId,

@@ -17,6 +17,7 @@ struct MockRules {
     neighbor_positions: Vec<BlockPos>,
     block_entity_order: Vec<(&'static str, BlockPos)>,
     execute_block_events: bool,
+    side_effect_order: Vec<(&'static str, BlockPos)>,
 }
 
 impl BlockRules for MockRules {
@@ -42,6 +43,16 @@ impl BlockRules for MockRules {
 
     fn is_supported(&self, _state: BlockStateId) -> bool {
         true
+    }
+
+    fn initialize(
+        &mut self,
+        _ctx: &mut EventContext<'_>,
+        positions: &[BlockPos],
+    ) -> Result<(), RulesError> {
+        self.side_effect_order
+            .extend(positions.iter().map(|pos| ("initialize", *pos)));
+        Ok(())
     }
 
     fn apply_action(
@@ -104,6 +115,7 @@ impl BlockRules for MockRules {
         update: NeighborUpdate,
     ) -> Result<(), RulesError> {
         self.neighbor_positions.push(update.pos);
+        self.side_effect_order.push(("neighbor", update.pos));
         self.block_entity_order.push(("neighbor", update.pos));
         if update.pos == BlockPos::new(-1, 0, 0) {
             ctx.neighbor_changed(NeighborUpdate {
@@ -175,6 +187,36 @@ impl BlockRules for MockRules {
     fn read_probe(&self, _world: &SparseWorld, _probe: &Probe) -> ProbeValue {
         ProbeValue::Integer(self.scheduled_executions as i64)
     }
+}
+
+#[test]
+fn region_update_completes_each_position_before_advancing() {
+    let mut world = SparseWorld::new(AIR);
+    world.set_block(BlockPos::ZERO, BLOCK).unwrap();
+    world.set_block(BlockPos::new(1, 0, 0), BLOCK).unwrap();
+    let mut simulation = Simulation::load(
+        MockRules::default(),
+        world,
+        SimulationConfig::default(),
+    )
+    .unwrap();
+
+    simulation
+        .update_region(BlockPos::ZERO, BlockPos::new(1, 0, 0))
+        .unwrap();
+
+    let order = &simulation.rules().side_effect_order;
+    let second_position = order
+        .iter()
+        .position(|entry| *entry == ("initialize", BlockPos::new(1, 0, 0)))
+        .unwrap();
+    assert_eq!(order[0], ("initialize", BlockPos::ZERO));
+    assert!(order[1..second_position]
+        .iter()
+        .any(|entry| *entry == ("neighbor", BlockPos::new(99, 0, 0))));
+    assert!(order[1..second_position]
+        .iter()
+        .all(|(kind, _)| *kind == "neighbor"));
 }
 
 #[test]
