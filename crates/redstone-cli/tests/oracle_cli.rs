@@ -7,6 +7,37 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use fastnbt::{ByteArray, Value};
 
 #[test]
+fn skip_oracle_runs_rust_assertions_without_starting_the_oracle() {
+    let directory = TestDirectory::new("skip-oracle");
+    let structure_path = directory.path().join("machine.nbt");
+    let scenario_path = directory.path().join("scenario.toml");
+    fs::write(&structure_path, structure(1, 0)).unwrap();
+    fs::write(
+        &scenario_path,
+        basic_scenario().replace("strict = true", "strict = true\nskip-oracle = true"),
+    )
+    .unwrap();
+
+    let workspace = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let output = Command::new(env!("CARGO_BIN_EXE_redstone"))
+        .current_dir(&workspace)
+        .env("REDSTONE_ORACLE", directory.path().join("missing-oracle"))
+        .arg("test")
+        .arg(&scenario_path)
+        .arg("--oracle")
+        .output()
+        .unwrap();
+
+    assert!(
+        output.status.success(),
+        "stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(String::from_utf8_lossy(&output.stdout).contains("PASS"));
+}
+
+#[test]
 #[ignore = "需要先执行 just oracle-build"]
 fn real_java_oracle_matches_a_basic_action_scenario() {
     assert_oracle_matches("oracle-basic", structure(1, 0), basic_scenario());

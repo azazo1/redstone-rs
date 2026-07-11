@@ -751,7 +751,21 @@ async fn execute_test_scenario(
     oracle: bool,
     allow_static_fallback: bool,
 ) -> Result<RunSummary> {
-    let trace_path = oracle.then(|| {
+    let run_oracle = if oracle {
+        let parsed = Scenario::load(scenario)?;
+        if parsed.skip_oracle {
+            info!(parent: None,
+                scenario = %scenario.display(),
+                "跳过 Java oracle 对照: 场景设置了 skip-oracle"
+            );
+            false
+        } else {
+            true
+        }
+    } else {
+        false
+    };
+    let trace_path = run_oracle.then(|| {
         std::env::temp_dir().join(format!(
             "redstone-rust-trace-{}-{}.jsonl",
             std::process::id(),

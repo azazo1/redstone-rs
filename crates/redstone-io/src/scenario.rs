@@ -25,6 +25,8 @@ pub struct Scenario {
     pub environment: ScenarioEnvironment,
     #[serde(default)]
     pub oracle_micro_trace: bool,
+    #[serde(default, rename = "skip-oracle")]
+    pub skip_oracle: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub replay: Option<ScenarioReplay>,
     pub source: ScenarioSource,
@@ -354,6 +356,24 @@ path = "machine.nbt"
         .unwrap();
 
         assert_eq!(scenario.environment, ScenarioEnvironment::default());
+        assert!(!scenario.skip_oracle);
+    }
+
+    #[test]
+    fn skip_oracle_uses_the_hyphenated_top_level_field() {
+        let scenario = toml::from_str::<Scenario>(
+            r#"
+version = "26.1.2"
+mode = "default"
+skip-oracle = true
+
+[source]
+path = "machine.nbt"
+"#,
+        )
+        .unwrap();
+
+        assert!(scenario.skip_oracle);
     }
 
     #[test]
