@@ -35,12 +35,12 @@ test:
 # just run path/to/scenario.toml
 # 运行一个红石时序场景.
 run scenario *args:
-    cargo run -p redstone-cli -- run {{ scenario }} {{ args }}
+    cargo run --release -p redstone-cli -- run {{ scenario }} {{ args }}
 
 # just inspect path/to/structure.litematic --block 0,0,0 --json
 # 检查结构内容和未支持方块.
 inspect structure *args:
-    cargo run -p redstone-cli -- inspect {{ structure }} {{ args }}
+    cargo run --release -p redstone-cli -- inspect {{ structure }} {{ args }}
 
 # just bench --ticks 100
 # 运行大规模空闲刻基准.
