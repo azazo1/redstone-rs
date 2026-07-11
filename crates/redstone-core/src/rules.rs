@@ -111,6 +111,9 @@ pub struct EventContext<'a> {
     pub world: &'a mut SparseWorld,
     pub mode: RedstoneMode,
     pub tick: GameTick,
+    game_time: u64,
+    overworld_time: u64,
+    sky_light: u8,
     pub phase: SimulationPhase,
     micro_step: &'a mut MicroStep,
     next_sub_tick_order: &'a mut i64,
@@ -131,6 +134,9 @@ impl<'a> EventContext<'a> {
         world: &'a mut SparseWorld,
         mode: RedstoneMode,
         tick: GameTick,
+        game_time: u64,
+        overworld_time: u64,
+        sky_light: u8,
         phase: SimulationPhase,
         micro_step: &'a mut MicroStep,
         next_sub_tick_order: &'a mut i64,
@@ -147,6 +153,9 @@ impl<'a> EventContext<'a> {
             world,
             mode,
             tick,
+            game_time,
+            overworld_time,
+            sky_light,
             phase,
             micro_step,
             next_sub_tick_order,
@@ -160,6 +169,18 @@ impl<'a> EventContext<'a> {
             neighbor_tasks,
             touched_block_entities: Vec::new(),
         }
+    }
+
+    pub const fn game_time(&self) -> u64 {
+        self.game_time
+    }
+
+    pub const fn overworld_time(&self) -> u64 {
+        self.overworld_time
+    }
+
+    pub const fn sky_light(&self) -> u8 {
+        self.sky_light
     }
 
     pub fn set_block(

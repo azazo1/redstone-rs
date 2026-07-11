@@ -90,6 +90,12 @@ seed = 42
 max_ticks = 20
 strict = true
 
+[environment]
+game_time = 0
+overworld_time = 0
+advance_time = true
+sky_light = 15
+
 [source]
 path = "machine.litematic"
 initialization = "notify"
@@ -111,6 +117,8 @@ tick = 2
 probe = "output"
 equals = 15
 ```
+
+环境字段可固定游戏时间, Overworld 时钟和日光探测器位置的原始天空光. tick 1 使用初始时间加 1, 暂停 Overworld 时钟不会暂停 `game_time`. Java oracle 当前只支持 `sky_light = 15`.
 
 严格模式会拒绝已识别但未实现的主动方块. `--allow-static-fallback` 可以保留其静态状态并继续执行.
 

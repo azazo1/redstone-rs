@@ -1,3 +1,4 @@
+mod environment;
 mod event;
 mod rules;
 mod simulation;
@@ -5,6 +6,7 @@ mod trace;
 mod types;
 mod world;
 
+pub use environment::SimulationEnvironment;
 pub use event::{
     BlockEvent, DeferredBlockChange, DeferredBlockEntityUpdate, DeferredRuleTask, NeighborTask,
     NeighborUpdate, ScheduledTick, TickPriority,

@@ -1,9 +1,14 @@
 version = "26.1.2"
 mode = "default"
 seed = 0
-max_ticks = 160
+max_ticks = 1600
 strict = true
-oracle_micro_trace = true
+
+[environment]
+game_time = 8
+overworld_time = 148
+advance_time = true
+sky_light = 15
 
 [source]
 path = "../schematics/head.litematic"
@@ -182,3 +187,33 @@ equals = "true"
 tick = 69
 probe = "left_eye_right_actuator"
 equals = "true"
+
+[[expectations]]
+tick = 129
+probe = "bottom_left_tooth_open_slot"
+equals = { state = 2317 }
+
+[[expectations]]
+tick = 129
+probe = "top_left_tooth_open_slot"
+equals = { state = 2319 }
+
+[[expectations]]
+tick = 131
+probe = "bottom_left_tooth_open_slot"
+equals = { state = 14849 }
+
+[[expectations]]
+tick = 131
+probe = "bottom_left_tooth_closed_slot"
+equals = { state = 0 }
+
+[[expectations]]
+tick = 131
+probe = "top_left_tooth_open_slot"
+equals = { state = 14849 }
+
+[[expectations]]
+tick = 131
+probe = "top_left_tooth_closed_slot"
+equals = { state = 0 }

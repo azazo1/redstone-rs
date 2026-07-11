@@ -37,6 +37,7 @@ import net.minecraft.world.level.levelgen.structure.templatesystem.StructurePlac
 import net.minecraft.world.level.levelgen.structure.templatesystem.BlockIgnoreProcessor;
 import net.minecraft.world.level.levelgen.structure.templatesystem.StructureTemplate;
 import net.minecraft.world.level.storage.ServerLevelData;
+import net.minecraft.world.clock.WorldClocks;
 import net.minecraft.world.flag.FeatureFlags;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.phys.BlockHitResult;
@@ -151,6 +152,7 @@ final class ScenarioTest {
         int tick = Math.toIntExact(helper.getTick());
         try {
             if (tick == 0) {
+                configureEnvironment(helper);
                 if (scenario.oracleMicroTrace) {
                     microTrace = new OracleTraceRecorder(scenario, frame, helper);
                     microTrace.setTick(0);
@@ -373,9 +375,7 @@ final class ScenarioTest {
     }
 
     private static void withNextGameTime(GameTestHelper helper, Runnable action) throws Exception {
-        Field field = helper.getLevel().getClass().getDeclaredField("serverLevelData");
-        field.setAccessible(true);
-        ServerLevelData levelData = (ServerLevelData)field.get(helper.getLevel());
+        ServerLevelData levelData = levelData(helper);
         long current = levelData.getGameTime();
         levelData.setGameTime(Math.addExact(current, 1L));
         try {
@@ -383,6 +383,25 @@ final class ScenarioTest {
         } finally {
             levelData.setGameTime(current);
         }
+    }
+
+    private void configureEnvironment(GameTestHelper helper) throws Exception {
+        ServerLevelData levelData = levelData(helper);
+        levelData.setGameTime(scenario.environment.gameTime());
+        var server = helper.getLevel().getServer();
+        var overworldClock = server
+            .registryAccess()
+            .lookupOrThrow(Registries.WORLD_CLOCK)
+            .getOrThrow(WorldClocks.OVERWORLD);
+        server.clockManager().setTotalTicks(overworldClock, scenario.environment.overworldTime());
+        server.clockManager().setPaused(overworldClock, !scenario.environment.advanceTime());
+        server.setWeatherParameters(100_000, 0, false, false);
+    }
+
+    private static ServerLevelData levelData(GameTestHelper helper) throws Exception {
+        Field field = helper.getLevel().getClass().getDeclaredField("serverLevelData");
+        field.setAccessible(true);
+        return (ServerLevelData)field.get(helper.getLevel());
     }
 
     private static BlockState resolveBlockState(GameTestHelper helper, Scenario.Action action) {

@@ -28,6 +28,7 @@ final class Scenario {
     final long seed;
     final int maxTicks;
     final boolean oracleMicroTrace;
+    final Environment environment;
     final Source source;
     final List<Action> actions;
     final List<Probe> probes;
@@ -38,6 +39,7 @@ final class Scenario {
         long seed,
         int maxTicks,
         boolean oracleMicroTrace,
+        Environment environment,
         Source source,
         List<Action> actions,
         List<Probe> probes
@@ -47,6 +49,7 @@ final class Scenario {
         this.seed = seed;
         this.maxTicks = maxTicks;
         this.oracleMicroTrace = oracleMicroTrace;
+        this.environment = environment;
         this.source = source;
         this.actions = actions;
         this.probes = probes;
@@ -69,6 +72,21 @@ final class Scenario {
         long seed = optionalLong(document, "seed", 0L);
         int maxTicks = Math.toIntExact(optionalLong(document, "max_ticks", 100L));
         boolean oracleMicroTrace = optionalBoolean(document, "oracle_micro_trace", false);
+        TomlTable environmentTable = document.getTable("environment");
+        Environment environment = environmentTable == null
+            ? Environment.DEFAULT
+            : new Environment(
+                optionalLong(environmentTable, "game_time", 0L),
+                optionalLong(environmentTable, "overworld_time", 0L),
+                optionalBoolean(environmentTable, "advance_time", true),
+                Math.toIntExact(optionalLong(environmentTable, "sky_light", 15L))
+            );
+        if (environment.gameTime < 0L || environment.overworldTime < 0L) {
+            throw new IllegalArgumentException("环境时间不能为负数");
+        }
+        if (environment.skyLight < 0 || environment.skyLight > 15) {
+            throw new IllegalArgumentException("sky_light 必须在 0..=15 范围内: " + environment.skyLight);
+        }
         if (maxTicks <= 0) {
             throw new IllegalArgumentException("max_ticks 必须大于 0");
         }
@@ -266,6 +284,7 @@ final class Scenario {
             seed,
             maxTicks,
             oracleMicroTrace,
+            environment,
             source,
             List.copyOf(actions),
             List.copyOf(probes)
@@ -273,6 +292,11 @@ final class Scenario {
     }
 
     void validateSupported() {
+        if (environment.skyLight != 15) {
+            throw new IllegalArgumentException(
+                "Java oracle 仅支持 sky_light = 15, 收到 " + environment.skyLight
+            );
+        }
         if (!Files.isRegularFile(source.path)) {
             throw new IllegalArgumentException("结构文件不存在: " + source.path);
         }
@@ -503,6 +527,10 @@ final class Scenario {
             };
         }
 
+    }
+
+    record Environment(long gameTime, long overworldTime, boolean advanceTime, int skyLight) {
+        static final Environment DEFAULT = new Environment(0L, 0L, true, 15);
     }
 
     record Paste(

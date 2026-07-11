@@ -9,8 +9,8 @@ use tracing_indicatif::{span_ext::IndicatifSpanExt, style::ProgressStyle};
 use crate::{
     Action, BlockEvent, BlockKindId, BlockPos, BlockRules, DeferredBlockEntityUpdate, Direction,
     EventContext, GameTick, MicroStep, NeighborTask, NeighborUpdate, Probe, ProbeSample,
-    RedstoneMode, RulesError, ScheduledTick, SimulationPhase, SparseWorld, TraceEvent, TraceKind,
-    TraceLog, WorldDelta, WorldEvent,
+    RedstoneMode, RulesError, ScheduledTick, SimulationEnvironment, SimulationPhase, SparseWorld,
+    TraceEvent, TraceKind, TraceLog, WorldDelta, WorldEvent,
 };
 use crate::rules::NeighborTasks;
 
@@ -30,6 +30,7 @@ fn region_update_progress_style() -> ProgressStyle {
 pub struct SimulationConfig {
     pub mode: RedstoneMode,
     pub seed: u64,
+    pub environment: SimulationEnvironment,
     pub strict: bool,
     pub trace: bool,
     pub record_events: bool,
@@ -42,6 +43,7 @@ impl Default for SimulationConfig {
         Self {
             mode: RedstoneMode::Default,
             seed: 0,
+            environment: SimulationEnvironment::default(),
             strict: true,
             trace: false,
             record_events: true,
@@ -55,6 +57,7 @@ impl Default for SimulationConfig {
 pub struct Snapshot {
     pub tick: GameTick,
     pub world: SparseWorld,
+    pub environment: SimulationEnvironment,
 }
 
 #[derive(Clone, Copy)]
@@ -72,6 +75,8 @@ pub struct Simulation<R: BlockRules> {
     world: SparseWorld,
     config: SimulationConfig,
     tick: GameTick,
+    game_time: u64,
+    overworld_time: u64,
     micro_step: MicroStep,
     next_sub_tick_order: i64,
     random_state: u64,
@@ -113,11 +118,15 @@ impl<R: BlockRules> Simulation<R> {
             .collect();
         let (delta_tx, _) = broadcast::channel(256);
         let random_state = (config.seed ^ 0x5deece66d) & ((1 << 48) - 1);
+        let game_time = config.environment.game_time;
+        let overworld_time = config.environment.overworld_time;
         Ok(Self {
             rules,
             world,
             config,
             tick: GameTick(0),
+            game_time,
+            overworld_time,
             micro_step: MicroStep(0),
             next_sub_tick_order: 0,
             random_state,
@@ -142,6 +151,15 @@ impl<R: BlockRules> Simulation<R> {
 
     pub fn current_tick(&self) -> GameTick {
         self.tick
+    }
+
+    pub fn environment(&self) -> SimulationEnvironment {
+        SimulationEnvironment {
+            game_time: self.game_time,
+            overworld_time: self.overworld_time,
+            advance_time: self.config.environment.advance_time,
+            sky_light: self.config.environment.sky_light,
+        }
     }
 
     pub fn set_trace_enabled(&mut self, enabled: bool) {
@@ -325,7 +343,25 @@ impl<R: BlockRules> Simulation<R> {
         pastes: &[WorldPaste<'_>],
         actions: &[Action],
     ) -> Result<WorldDelta, SimulationError> {
-        self.tick.0 += 1;
+        let next_tick = self
+            .tick
+            .0
+            .checked_add(1)
+            .ok_or(SimulationError::EnvironmentTimeOverflow("simulation tick"))?;
+        let next_game_time = self
+            .game_time
+            .checked_add(1)
+            .ok_or(SimulationError::EnvironmentTimeOverflow("game_time"))?;
+        let next_overworld_time = if self.config.environment.advance_time {
+            self.overworld_time
+                .checked_add(1)
+                .ok_or(SimulationError::EnvironmentTimeOverflow("overworld_time"))?
+        } else {
+            self.overworld_time
+        };
+        self.tick = GameTick(next_tick);
+        self.game_time = next_game_time;
+        self.overworld_time = next_overworld_time;
         self.micro_step = MicroStep(0);
         self.rules.begin_tick(self.tick);
         let mut changes = Vec::new();
@@ -399,6 +435,7 @@ impl<R: BlockRules> Simulation<R> {
         Snapshot {
             tick: self.tick,
             world: self.world.clone(),
+            environment: self.environment(),
         }
     }
 
@@ -765,6 +802,9 @@ impl<R: BlockRules> Simulation<R> {
             &mut self.world,
             self.config.mode,
             self.tick,
+            self.game_time,
+            self.overworld_time,
+            self.config.environment.sky_light,
             phase,
             &mut self.micro_step,
             &mut self.next_sub_tick_order,
@@ -847,4 +887,6 @@ pub enum SimulationError {
     AirStateMismatch,
     #[error("严格模式发现未支持方块: {0:?}")]
     UnsupportedBlocks(Vec<(BlockPos, String)>),
+    #[error("环境时间溢出: {0}")]
+    EnvironmentTimeOverflow(&'static str),
 }

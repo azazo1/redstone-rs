@@ -1,4 +1,4 @@
-use redstone_core::BlockPos;
+use redstone_core::{BlockPos, SimulationEnvironment};
 
 use crate::camera::Camera;
 use super::buf::PacketBuf;
@@ -103,10 +103,14 @@ pub(crate) fn default_spawn(camera: Camera) -> Vec<u8> {
     output.into_inner()
 }
 
-pub(crate) fn set_time() -> Vec<u8> {
+pub(crate) fn set_time(environment: SimulationEnvironment) -> Vec<u8> {
     let mut output = PacketBuf::new();
-    output.write_i64(6_000);
+    output.write_i64(environment.game_time as i64);
+    output.write_len(1);
     output.write_var_i32(0);
+    output.write_var_i64(environment.overworld_time as i64);
+    output.write_f32(0.0);
+    output.write_f32(if environment.advance_time { 1.0 } else { 0.0 });
     output.into_inner()
 }
 
@@ -156,5 +160,20 @@ mod tests {
             target: BlockPos::ZERO,
         });
         assert_eq!(&encoded[encoded.len() - 4..], &[0, 0, 0, 0]);
+    }
+
+    #[test]
+    fn set_time_encodes_game_time_and_overworld_clock_state() {
+        let packet = set_time(SimulationEnvironment {
+            game_time: 8,
+            overworld_time: 148,
+            advance_time: true,
+            sky_light: 15,
+        });
+
+        assert_eq!(&packet[..8], &8i64.to_be_bytes());
+        assert_eq!(&packet[8..12], &[1, 0, 0x94, 0x01]);
+        assert_eq!(&packet[12..16], &0.0f32.to_be_bytes());
+        assert_eq!(&packet[16..20], &1.0f32.to_be_bytes());
     }
 }

@@ -41,6 +41,7 @@ equals = "true"
 | `max_ticks` | 非负整数 | 否 | `100` | 仿真运行到的最终游戏刻 |
 | `strict` | 布尔值 | 否 | `true` | 是否拒绝包含未实现主动行为的结构 |
 | `oracle_micro_trace` | 布尔值 | 否 | `false` | 仅供 Java oracle 使用, 开启微时序采样 |
+| `environment` | 表 | 否 | 默认 Overworld 环境 | 初始时间和基础天空光设置 |
 | `replay` | 表 | 否 | 自动配置 | Replay Mod 初始摄像头设置 |
 | `source` | 表 | 是 | 无 | 输入结构和装载方式 |
 | `actions` | 表数组 | 否 | 空 | 定时执行的操作 |
@@ -50,6 +51,27 @@ equals = "true"
 `max_ticks = 0` 不会执行任何游戏刻. 动作 tick 应从 `1` 开始. 超过 `max_ticks` 的动作不会执行, 对应的断言也会因为没有样本而失败.
 
 同一 tick 的动作按 TOML 中的声明顺序执行. 动作发生在该 tick 的 `pre_tick` 阶段, 然后才执行计划方块刻, 方块事件, 实体刻和方块实体刻. 探针在 `post_tick` 阶段采样.
+
+## 环境时间和天空光
+
+```toml
+[environment]
+game_time = 8
+overworld_time = 148
+advance_time = true
+sky_light = 15
+```
+
+| 字段 | 类型 | 默认值 | 说明 |
+| --- | --- | --- | --- |
+| `game_time` | 非负整数 | `0` | 计划刻和绝对刷新周期使用的游戏时间 |
+| `overworld_time` | 非负整数 | `0` | Overworld 的 24000 tick 天空时间线位置 |
+| `advance_time` | 布尔值 | `true` | 是否在每个场景 tick 推进 Overworld 时钟 |
+| `sky_light` | `0..=15` 整数 | `15` | 日光探测器位置的原始天空光 |
+
+时间在每个场景 tick 开始时推进. tick 1 使用初始 `game_time + 1`, 并在 `advance_time = true` 时使用初始 `overworld_time + 1`. `game_time` 始终推进, 因此日光探测器只在绝对 `game_time % 20 == 0` 时刷新. 时间溢出会终止仿真并返回错误.
+
+`sky_light` 是基础环境值, 不包含方块遮挡和光照传播. 日光探测器方块实体中的 `sky_signal` 是单个探测器的原始天空光覆盖值, 存在时优先于环境值. 当前 Java oracle 只支持 `sky_light = 15`; 其他值使用 `--oracle` 时会明确报错.
 
 ## Replay 初始摄像头
 

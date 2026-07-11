@@ -11,6 +11,7 @@ use tracing::debug;
 
 use crate::orientation::{Orientation, SideBias};
 use crate::{BlockBehavior, JAVA_VERSION, Java26Registry, PushReaction, StateDefinition};
+use crate::environment::daylight_detector_power;
 
 mod comparator;
 mod consumer;
@@ -1456,15 +1457,18 @@ impl BlockRules for Java26Rules {
         match state.behavior {
             BlockBehavior::Hopper => self.tick_container(ctx, pos, &state)?,
             BlockBehavior::DaylightDetector => {
-                let sky = block_entity_i64(ctx.world, pos, "sky_signal")
-                    .unwrap_or_else(|| state.int_property("power").unwrap_or(0).into())
-                    .clamp(0, 15);
-                let power = if state.bool_property("inverted") {
-                    15 - sky
-                } else {
-                    sky
-                };
-                if state.int_property("power") != Some(power as i32) {
+                if ctx.game_time() % 20 != 0 {
+                    return Ok(());
+                }
+                let raw_sky_light = block_entity_i64(ctx.world, pos, "sky_signal")
+                    .unwrap_or_else(|| i64::from(ctx.sky_light()))
+                    .clamp(0, 15) as u8;
+                let power = daylight_detector_power(
+                    ctx.overworld_time(),
+                    raw_sky_light,
+                    state.bool_property("inverted"),
+                );
+                if state.int_property("power") != Some(i32::from(power)) {
                     let next = self.changed_state(state.id, "power", power.to_string())?;
                     self.set_state_and_notify(ctx, pos, next, "daylight_detector", None)?;
                 }

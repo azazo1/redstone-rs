@@ -462,6 +462,7 @@ fn execute_scenario(
         SimulationConfig {
             mode: scenario.mode,
             seed: scenario.seed,
+            environment: scenario.environment.into(),
             strict: scenario.strict && !allow_static_fallback,
             trace: trace_path.is_some() || vcd_path.is_some(),
             record_events: replay_path.is_some(),
@@ -510,6 +511,7 @@ fn execute_scenario(
                     scenario.mode == RedstoneMode::Experimental,
                     replay_region,
                 )
+                .with_environment(scenario.environment.into())
                 .with_piston_animation(replay_anim)
                 .with_camera(camera)
                 .with_camera_hints(camera_hints),

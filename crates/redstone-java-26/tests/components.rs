@@ -2,8 +2,8 @@ use std::collections::BTreeMap;
 
 use redstone_core::{
     Action, BlockEntityChange, BlockEntityData, BlockPos, BlockStateId, Direction, EntityData,
-    Probe, ProbeValue, RedstoneMode, Simulation, SimulationConfig, SparseWorld, TraceKind,
-    WorldEvent,
+    Probe, ProbeValue, RedstoneMode, Simulation, SimulationConfig, SimulationEnvironment,
+    SparseWorld, TraceKind, WorldEvent,
 };
 use redstone_java_26::{Java26Registry, Java26Rules, StateResolver};
 
@@ -2283,6 +2283,159 @@ fn weak_only_sources_and_lit_copper_bulbs_do_not_power_through_a_conductor() {
             Some("false")
         );
     }
+}
+
+#[test]
+fn daylight_detector_updates_only_on_absolute_twenty_tick_boundaries() {
+    let mut registry = Java26Registry::new();
+    let detector = state(
+        &mut registry,
+        "minecraft:daylight_detector",
+        &[("inverted", "false"), ("power", "14")],
+    );
+    let mut world = SparseWorld::new(registry.air_state());
+    world.set_block(BlockPos::ZERO, detector).unwrap();
+    world.set_block_entity(
+        BlockPos::ZERO,
+        BlockEntityData {
+            kind: "minecraft:daylight_detector".to_owned(),
+            fields: BTreeMap::new(),
+        },
+    );
+    let rules = Java26Rules::new(registry);
+    let mut simulation = Simulation::load(
+        rules,
+        world,
+        SimulationConfig {
+            environment: SimulationEnvironment {
+                game_time: 0,
+                overworld_time: 140,
+                advance_time: true,
+                sky_light: 15,
+            },
+            ..SimulationConfig::default()
+        },
+    )
+    .unwrap();
+
+    simulation.run_until(redstone_core::GameTick(19)).unwrap();
+    let before_boundary = simulation.world().get_block(BlockPos::ZERO);
+    assert_eq!(
+        simulation
+            .rules()
+            .registry()
+            .state(before_boundary)
+            .unwrap()
+            .property("power"),
+        Some("14")
+    );
+
+    simulation.step().unwrap();
+    let first_boundary = simulation.world().get_block(BlockPos::ZERO);
+    assert_eq!(
+        simulation
+            .rules()
+            .registry()
+            .state(first_boundary)
+            .unwrap()
+            .property("power"),
+        Some("7")
+    );
+
+    simulation.run_until(redstone_core::GameTick(40)).unwrap();
+    let second_boundary = simulation.world().get_block(BlockPos::ZERO);
+    assert_eq!(
+        simulation
+            .rules()
+            .registry()
+            .state(second_boundary)
+            .unwrap()
+            .property("power"),
+        Some("8")
+    );
+}
+
+#[test]
+fn daylight_detector_uses_sky_signal_override() {
+    let mut registry = Java26Registry::new();
+    let detector = state(
+        &mut registry,
+        "minecraft:daylight_detector",
+        &[("inverted", "false"), ("power", "0")],
+    );
+    let mut world = SparseWorld::new(registry.air_state());
+    world.set_block(BlockPos::ZERO, detector).unwrap();
+    world.set_block_entity(
+        BlockPos::ZERO,
+        BlockEntityData {
+            kind: "minecraft:daylight_detector".to_owned(),
+            fields: BTreeMap::from([("sky_signal".to_owned(), serde_json::Value::from(10))]),
+        },
+    );
+    let rules = Java26Rules::new(registry);
+    let mut simulation = Simulation::load(
+        rules,
+        world,
+        SimulationConfig {
+            environment: SimulationEnvironment {
+                game_time: 19,
+                overworld_time: 5_999,
+                advance_time: true,
+                sky_light: 2,
+            },
+            ..SimulationConfig::default()
+        },
+    )
+    .unwrap();
+
+    simulation.step().unwrap();
+    let updated = simulation.world().get_block(BlockPos::ZERO);
+    assert_eq!(
+        simulation
+            .rules()
+            .registry()
+            .state(updated)
+            .unwrap()
+            .property("power"),
+        Some("10")
+    );
+
+    simulation.run_until(redstone_core::GameTick(39)).unwrap();
+    assert_eq!(simulation.world().get_block(BlockPos::ZERO), updated);
+}
+
+#[test]
+fn inverted_daylight_detector_does_not_oscillate_each_tick() {
+    let mut registry = Java26Registry::new();
+    let detector = state(
+        &mut registry,
+        "minecraft:daylight_detector",
+        &[("inverted", "true"), ("power", "0")],
+    );
+    let mut world = SparseWorld::new(registry.air_state());
+    world.set_block(BlockPos::ZERO, detector).unwrap();
+    world.set_block_entity(
+        BlockPos::ZERO,
+        BlockEntityData {
+            kind: "minecraft:daylight_detector".to_owned(),
+            fields: BTreeMap::new(),
+        },
+    );
+    let rules = Java26Rules::new(registry);
+    let mut simulation = Simulation::load(rules, world, SimulationConfig::default()).unwrap();
+
+    simulation.run_until(redstone_core::GameTick(39)).unwrap();
+
+    let state = simulation.world().get_block(BlockPos::ZERO);
+    assert_eq!(
+        simulation
+            .rules()
+            .registry()
+            .state(state)
+            .unwrap()
+            .property("power"),
+        Some("0")
+    );
 }
 
 #[test]

@@ -4,7 +4,7 @@ use redstone_core::{
     Action, BlockEntityChange, BlockEntityData, BlockEvent, BlockKindId, BlockPos, BlockRules,
     BlockStateId, DeferredBlockChange, DeferredBlockEntityUpdate, EventContext, NeighborUpdate,
     Probe, ProbeValue, RedstoneMode, RulesError, ScheduledTick, Simulation, SimulationConfig,
-    SparseWorld, TickPriority, TraceKind, WorldEvent,
+    SimulationEnvironment, SimulationError, SparseWorld, TickPriority, TraceKind, WorldEvent,
 };
 
 const AIR: BlockStateId = BlockStateId(0);
@@ -18,6 +18,7 @@ struct MockRules {
     block_entity_order: Vec<(&'static str, BlockPos)>,
     execute_block_events: bool,
     side_effect_order: Vec<(&'static str, BlockPos)>,
+    environment_samples: Vec<(u64, u64, u8)>,
 }
 
 impl BlockRules for MockRules {
@@ -106,6 +107,12 @@ impl BlockRules for MockRules {
                 param_b: 5,
             });
         }
+        Ok(())
+    }
+
+    fn tick_entities(&mut self, ctx: &mut EventContext<'_>) -> Result<(), RulesError> {
+        self.environment_samples
+            .push((ctx.game_time(), ctx.overworld_time(), ctx.sky_light()));
         Ok(())
     }
 
@@ -555,4 +562,75 @@ fn identical_runs_produce_byte_identical_jsonl_and_vcd() {
     let first = run();
     let second = run();
     assert_eq!(first, second);
+}
+
+#[test]
+fn environment_time_advances_before_tick_callbacks() {
+    let mut simulation = Simulation::load(
+        MockRules::default(),
+        SparseWorld::new(AIR),
+        SimulationConfig {
+            environment: SimulationEnvironment {
+                game_time: 10,
+                overworld_time: 20,
+                advance_time: true,
+                sky_light: 7,
+            },
+            ..SimulationConfig::default()
+        },
+    )
+    .unwrap();
+
+    simulation.step().unwrap();
+    simulation.step().unwrap();
+
+    assert_eq!(
+        simulation.rules().environment_samples,
+        [(11, 21, 7), (12, 22, 7)]
+    );
+    assert_eq!(simulation.snapshot().environment, simulation.environment());
+}
+
+#[test]
+fn paused_overworld_clock_does_not_advance() {
+    let mut simulation = Simulation::load(
+        MockRules::default(),
+        SparseWorld::new(AIR),
+        SimulationConfig {
+            environment: SimulationEnvironment {
+                game_time: 4,
+                overworld_time: 30,
+                advance_time: false,
+                sky_light: 15,
+            },
+            ..SimulationConfig::default()
+        },
+    )
+    .unwrap();
+
+    simulation.step().unwrap();
+
+    assert_eq!(simulation.rules().environment_samples, [(5, 30, 15)]);
+}
+
+#[test]
+fn environment_time_overflow_fails_before_advancing_the_simulation() {
+    let mut simulation = Simulation::load(
+        MockRules::default(),
+        SparseWorld::new(AIR),
+        SimulationConfig {
+            environment: SimulationEnvironment {
+                game_time: u64::MAX,
+                ..SimulationEnvironment::default()
+            },
+            ..SimulationConfig::default()
+        },
+    )
+    .unwrap();
+
+    assert!(matches!(
+        simulation.step(),
+        Err(SimulationError::EnvironmentTimeOverflow("game_time"))
+    ));
+    assert_eq!(simulation.current_tick().0, 0);
 }

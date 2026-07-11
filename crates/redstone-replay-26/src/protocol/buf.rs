@@ -66,7 +66,6 @@ impl PacketBuf {
         }
     }
 
-    #[cfg(test)]
     pub(crate) fn write_var_i64(&mut self, value: i64) {
         let mut remaining = value as u64;
         loop {

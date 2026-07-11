@@ -5,7 +5,10 @@ use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use crc32fast::Hasher;
-use redstone_core::{BlockEntityChange, BlockEvent, BlockPos, SparseWorld, WorldDelta, WorldEvent};
+use redstone_core::{
+    BlockEntityChange, BlockEvent, BlockPos, SimulationEnvironment, SparseWorld, WorldDelta,
+    WorldEvent,
+};
 use serde::Serialize;
 use thiserror::Error;
 use zip::ZipWriter;
@@ -64,6 +67,7 @@ pub struct ReplayOptions {
     pub name: String,
     pub seed: u64,
     pub experimental: bool,
+    pub environment: SimulationEnvironment,
     pub recorded_at: SystemTime,
     pub region: ReplayRegion,
     pub piston_animation: bool,
@@ -82,6 +86,7 @@ impl ReplayOptions {
             name: name.into(),
             seed,
             experimental,
+            environment: SimulationEnvironment::default(),
             recorded_at: SystemTime::now(),
             region,
             piston_animation: false,
@@ -92,6 +97,11 @@ impl ReplayOptions {
 
     pub fn with_piston_animation(mut self, enabled: bool) -> Self {
         self.piston_animation = enabled;
+        self
+    }
+
+    pub fn with_environment(mut self, environment: SimulationEnvironment) -> Self {
+        self.environment = environment;
         self
     }
 
@@ -142,6 +152,18 @@ impl ReplayWriter {
         initial_world: &SparseWorld,
     ) -> Result<Self, ReplayError> {
         options.camera.validate()?;
+        i64::try_from(options.environment.game_time).map_err(|_| {
+            ReplayError::EnvironmentTimeOutOfRange {
+                name: "game_time",
+                value: options.environment.game_time,
+            }
+        })?;
+        i64::try_from(options.environment.overworld_time).map_err(|_| {
+            ReplayError::EnvironmentTimeOutOfRange {
+                name: "overworld_time",
+                value: options.environment.overworld_time,
+            }
+        })?;
         let initial_chunk_radius = options.camera.view_distance;
         let output_path = output_path.as_ref().to_path_buf();
         let file_name = output_path
@@ -429,7 +451,12 @@ impl ReplayWriter {
             PLAY_SET_DEFAULT_SPAWN,
             &default_spawn(camera),
         )?;
-        self.write_packet(0, PacketState::Play, PLAY_SET_TIME, &set_time())?;
+        self.write_packet(
+            0,
+            PacketState::Play,
+            PLAY_SET_TIME,
+            &set_time(self.options.environment),
+        )?;
         self.write_packet(
             0,
             PacketState::Play,
@@ -736,6 +763,8 @@ pub enum ReplayError {
     TimestampOrder { previous: i32, next: i32 },
     #[error("录像 tick 倒退: {previous} -> {next}")]
     TickOrder { previous: u64, next: u64 },
+    #[error("Replay 环境时间超出 Java long 范围: {name}={value}")]
+    EnvironmentTimeOutOfRange { name: &'static str, value: u64 },
     #[error("协议状态错误: 需要 {expected:?}, 收到 {actual:?}")]
     ProtocolState {
         expected: &'static str,
@@ -795,6 +824,7 @@ mod tests {
                 name: "sample.toml".to_owned(),
                 seed: 7,
                 experimental: false,
+                environment: SimulationEnvironment::default(),
                 recorded_at: UNIX_EPOCH + Duration::from_millis(1234),
                 region: ReplayRegion::new(BlockPos::new(-1, -64, 16), BlockPos::new(-1, -64, 16)),
                 piston_animation: false,

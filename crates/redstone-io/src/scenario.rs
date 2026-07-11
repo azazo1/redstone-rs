@@ -4,7 +4,7 @@ use std::collections::BTreeMap;
 
 use redstone_core::{
     BlockEntityData, BlockPos, BlockStateId, EntityData, EntityId, Expectation, GameTick, Probe,
-    ProbeValue, RedstoneMode,
+    ProbeValue, RedstoneMode, SimulationEnvironment,
 };
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
@@ -22,6 +22,8 @@ pub struct Scenario {
     #[serde(default = "default_strict")]
     pub strict: bool,
     #[serde(default)]
+    pub environment: ScenarioEnvironment,
+    #[serde(default)]
     pub oracle_micro_trace: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub replay: Option<ScenarioReplay>,
@@ -32,6 +34,40 @@ pub struct Scenario {
     pub probes: Vec<ScenarioProbe>,
     #[serde(default)]
     pub expectations: Vec<ScenarioExpectation>,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct ScenarioEnvironment {
+    #[serde(default)]
+    pub game_time: u64,
+    #[serde(default)]
+    pub overworld_time: u64,
+    #[serde(default = "default_advance_time")]
+    pub advance_time: bool,
+    #[serde(default = "default_sky_light")]
+    pub sky_light: u8,
+}
+
+impl Default for ScenarioEnvironment {
+    fn default() -> Self {
+        Self {
+            game_time: 0,
+            overworld_time: 0,
+            advance_time: default_advance_time(),
+            sky_light: default_sky_light(),
+        }
+    }
+}
+
+impl From<ScenarioEnvironment> for SimulationEnvironment {
+    fn from(environment: ScenarioEnvironment) -> Self {
+        Self {
+            game_time: environment.game_time,
+            overworld_time: environment.overworld_time,
+            advance_time: environment.advance_time,
+            sky_light: environment.sky_light,
+        }
+    }
 }
 
 #[derive(Clone, Debug, Default, Deserialize, Serialize)]
@@ -235,6 +271,7 @@ impl Scenario {
         let path = path.as_ref();
         let text = std::fs::read_to_string(path)?;
         let mut scenario: Self = toml::from_str(&text)?;
+        validate_environment(scenario.environment)?;
         let parent = path.parent().unwrap_or_else(|| Path::new("."));
         if scenario.source.path.is_relative() {
             scenario.source.path = parent.join(&scenario.source.path);
@@ -267,6 +304,24 @@ fn default_strict() -> bool {
     true
 }
 
+fn default_advance_time() -> bool {
+    true
+}
+
+fn default_sky_light() -> u8 {
+    15
+}
+
+fn validate_environment(environment: ScenarioEnvironment) -> Result<(), ScenarioError> {
+    if environment.sky_light > 15 {
+        return Err(ScenarioError::InvalidEnvironment(format!(
+            "sky_light 必须在 0..=15 范围内, 收到 {}",
+            environment.sky_light
+        )));
+    }
+    Ok(())
+}
+
 fn default_replay_view_distance() -> i32 {
     8
 }
@@ -277,11 +332,70 @@ pub enum ScenarioError {
     Io(#[from] std::io::Error),
     #[error(transparent)]
     Toml(#[from] toml::de::Error),
+    #[error("场景环境无效: {0}")]
+    InvalidEnvironment(String),
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn environment_uses_vanilla_defaults() {
+        let scenario = toml::from_str::<Scenario>(
+            r#"
+version = "26.1.2"
+mode = "default"
+
+[source]
+path = "machine.nbt"
+"#,
+        )
+        .unwrap();
+
+        assert_eq!(scenario.environment, ScenarioEnvironment::default());
+    }
+
+    #[test]
+    fn environment_parses_explicit_time_and_sky_light() {
+        let scenario = toml::from_str::<Scenario>(
+            r#"
+version = "26.1.2"
+mode = "default"
+
+[environment]
+game_time = 8
+overworld_time = 148
+advance_time = false
+sky_light = 9
+
+[source]
+path = "machine.nbt"
+"#,
+        )
+        .unwrap();
+
+        assert_eq!(
+            scenario.environment,
+            ScenarioEnvironment {
+                game_time: 8,
+                overworld_time: 148,
+                advance_time: false,
+                sky_light: 9,
+            }
+        );
+    }
+
+    #[test]
+    fn environment_rejects_sky_light_above_fifteen() {
+        assert!(matches!(
+            validate_environment(ScenarioEnvironment {
+                sky_light: 16,
+                ..ScenarioEnvironment::default()
+            }),
+            Err(ScenarioError::InvalidEnvironment(_))
+        ));
+    }
 
     #[test]
     fn property_probe_uses_a_distinct_property_key() {
