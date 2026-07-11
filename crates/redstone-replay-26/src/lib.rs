@@ -14,7 +14,7 @@ use thiserror::Error;
 use zip::ZipWriter;
 use zip::write::SimpleFileOptions;
 
-use crate::camera::{camera_for_region, floor_to_i32};
+use crate::camera::{Camera, camera_for_region, floor_to_i32};
 use crate::protocol::PacketState;
 use crate::protocol::block_entity::{BlockEntityEncodeError, block_entity_data};
 use crate::protocol::chunk::{ChunkSnapshot, MAX_BLOCK_STATE_ID, MAX_Y, MIN_Y, encode_chunk};
@@ -43,7 +43,7 @@ pub const TICK_MILLIS: u64 = 50;
 pub struct ReplayTimeline {
     start_tick: u64,
     end_tick: u64,
-    duration_ms: i32,
+    duration_ms: i64,
 }
 
 impl ReplayTimeline {
@@ -71,7 +71,9 @@ impl ReplayTimeline {
                 duration_ms,
             });
         }
-        let duration_ms = i32::try_from(duration_ms)
+        timestamp_for_tick(start_tick)?;
+        timestamp_for_tick(end_tick)?;
+        let duration_ms = i64::try_from(duration_ms)
             .map_err(|_| ReplayError::TimelineDurationOverflow { duration_ms })?;
         Ok(Self {
             start_tick,
@@ -92,26 +94,8 @@ impl ReplayTimeline {
         self.end_tick - self.start_tick
     }
 
-    pub fn duration_ms(self) -> i32 {
+    pub fn duration_ms(self) -> i64 {
         self.duration_ms
-    }
-
-    fn timestamp_for_tick(self, tick: u64) -> Result<i32, ReplayError> {
-        if !(self.start_tick..=self.end_tick).contains(&tick) {
-            return Err(ReplayError::TimelineTickOutOfRange {
-                tick,
-                start_tick: self.start_tick,
-                end_tick: self.end_tick,
-            });
-        }
-        let source_ticks = self.source_ticks();
-        if source_ticks == 0 {
-            return Ok(0);
-        }
-        let elapsed_ticks = tick - self.start_tick;
-        let numerator = u128::from(elapsed_ticks) * u128::from(self.duration_ms as u32);
-        let rounded = (numerator + u128::from(source_ticks / 2)) / u128::from(source_ticks);
-        Ok(i32::try_from(rounded).expect("validated timeline duration must fit i32"))
     }
 }
 
@@ -200,7 +184,7 @@ pub struct ReplayStats {
     pub ticks: u64,
     pub start_tick: u64,
     pub end_tick: u64,
-    pub duration_ms: i32,
+    pub duration_ms: i64,
     pub packets: u64,
     pub block_updates: u64,
     pub file_size: u64,
@@ -222,6 +206,7 @@ pub struct ReplayWriter {
     block_updates: u64,
     last_tick: u64,
     last_timestamp: i32,
+    initial_camera: Option<Camera>,
     options: ReplayOptions,
     started: Instant,
     finished: bool,
@@ -288,8 +273,9 @@ impl ReplayWriter {
             chunk_radius: initial_chunk_radius,
             packet_count: 0,
             block_updates: 0,
-            last_tick: options.timeline.start_tick(),
+            last_tick: 0,
             last_timestamp: 0,
+            initial_camera: None,
             options,
             started: Instant::now(),
             finished: false,
@@ -305,7 +291,7 @@ impl ReplayWriter {
                 next: delta.tick.0,
             });
         }
-        let timestamp = self.options.timeline.timestamp_for_tick(delta.tick.0)?;
+        let timestamp = timestamp_for_tick(delta.tick.0)?;
         for event in &delta.events {
             self.record_event(timestamp, event)?;
         }
@@ -418,8 +404,16 @@ impl ReplayWriter {
         archive.start_file("recording.tmcpr.crc32", options)?;
         write!(archive, "{}", self.crc.clone().finalize())?;
         archive.start_file("metaData.json", options)?;
-        let metadata = ReplayMetadata::new(&self.options, self.options.timeline.duration_ms())?;
+        let metadata = ReplayMetadata::new(&self.options, self.last_timestamp)?;
         serde_json::to_writer(&mut archive, &metadata)?;
+        archive.start_file("timelines.json", options)?;
+        let camera = self
+            .initial_camera
+            .expect("initial world encoding must determine the camera");
+        serde_json::to_writer(
+            &mut archive,
+            &serialized_timelines(self.options.timeline, camera)?,
+        )?;
         let archive_file = archive.finish()?;
         archive_file.sync_all()?;
         let file_size = archive_file.metadata()?.len();
@@ -429,7 +423,7 @@ impl ReplayWriter {
         let _ = std::fs::remove_file(&self.recording_path);
         self.finished = true;
         Ok(ReplayStats {
-            ticks: self.options.timeline.source_ticks(),
+            ticks: self.last_tick,
             start_tick: self.options.timeline.start_tick(),
             end_tick: self.options.timeline.end_tick(),
             duration_ms: self.options.timeline.duration_ms(),
@@ -482,6 +476,7 @@ impl ReplayWriter {
             self.options.camera,
             &self.options.camera_hints,
         )?;
+        self.initial_camera = Some(camera);
         let camera_chunk = (
             floor_to_i32(camera.position[0]).div_euclid(16),
             floor_to_i32(camera.position[2]).div_euclid(16),
@@ -733,6 +728,134 @@ impl<'a> ReplayMetadata<'a> {
     }
 }
 
+#[derive(Serialize)]
+#[serde(untagged)]
+enum SerializedTimelinePath {
+    Time(SerializedTimePath),
+    Position(SerializedPositionPath),
+}
+
+#[derive(Serialize)]
+struct SerializedTimePath {
+    keyframes: Vec<SerializedTimeKeyframe>,
+    segments: Vec<usize>,
+    interpolators: Vec<SerializedTimeInterpolator>,
+}
+
+#[derive(Serialize)]
+struct SerializedTimeKeyframe {
+    time: i64,
+    properties: SerializedTimeProperties,
+}
+
+#[derive(Serialize)]
+struct SerializedTimeProperties {
+    timestamp: i32,
+}
+
+#[derive(Serialize)]
+struct SerializedTimeInterpolator {
+    #[serde(rename = "type")]
+    kind: &'static str,
+    properties: [&'static str; 1],
+}
+
+#[derive(Serialize)]
+struct SerializedPositionPath {
+    keyframes: Vec<SerializedPositionKeyframe>,
+    segments: Vec<usize>,
+    interpolators: Vec<SerializedPositionInterpolator>,
+}
+
+#[derive(Clone, Copy, Serialize)]
+struct SerializedPositionKeyframe {
+    time: i64,
+    properties: SerializedCameraProperties,
+}
+
+#[derive(Clone, Copy, Serialize)]
+struct SerializedCameraProperties {
+    #[serde(rename = "camera:rotation")]
+    rotation: [f32; 3],
+    #[serde(rename = "camera:position")]
+    position: [f64; 3],
+}
+
+#[derive(Serialize)]
+struct SerializedPositionInterpolator {
+    #[serde(rename = "type")]
+    kind: SerializedPositionInterpolatorKind,
+    properties: [&'static str; 2],
+}
+
+#[derive(Serialize)]
+struct SerializedPositionInterpolatorKind {
+    #[serde(rename = "type")]
+    kind: &'static str,
+    alpha: f64,
+}
+
+fn serialized_timelines(
+    timeline: ReplayTimeline,
+    camera: Camera,
+) -> Result<BTreeMap<String, Vec<SerializedTimelinePath>>, ReplayError> {
+    let mut time_keyframes = vec![SerializedTimeKeyframe {
+        time: 0,
+        properties: SerializedTimeProperties {
+            timestamp: timestamp_for_tick(timeline.start_tick())?,
+        },
+    }];
+    let camera_properties = SerializedCameraProperties {
+        rotation: [camera.yaw, camera.pitch, 0.0],
+        position: camera.position,
+    };
+    let mut position_keyframes = vec![SerializedPositionKeyframe {
+        time: 0,
+        properties: camera_properties,
+    }];
+    let has_segment = timeline.duration_ms() > 0;
+    if has_segment {
+        time_keyframes.push(SerializedTimeKeyframe {
+            time: timeline.duration_ms(),
+            properties: SerializedTimeProperties {
+                timestamp: timestamp_for_tick(timeline.end_tick())?,
+            },
+        });
+        position_keyframes.push(SerializedPositionKeyframe {
+            time: timeline.duration_ms(),
+            properties: camera_properties,
+        });
+    }
+    let paths = vec![
+        SerializedTimelinePath::Time(SerializedTimePath {
+            keyframes: time_keyframes,
+            segments: has_segment.then_some(0).into_iter().collect(),
+            interpolators: has_segment
+                .then_some(SerializedTimeInterpolator {
+                    kind: "linear",
+                    properties: ["timestamp"],
+                })
+                .into_iter()
+                .collect(),
+        }),
+        SerializedTimelinePath::Position(SerializedPositionPath {
+            keyframes: position_keyframes,
+            segments: has_segment.then_some(0).into_iter().collect(),
+            interpolators: has_segment
+                .then_some(SerializedPositionInterpolator {
+                    kind: SerializedPositionInterpolatorKind {
+                        kind: "catmull-rom-spline",
+                        alpha: 0.5,
+                    },
+                    properties: ["camera:rotation", "camera:position"],
+                })
+                .into_iter()
+                .collect(),
+        }),
+    ];
+    Ok(BTreeMap::from([(String::new(), paths)]))
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 struct ChunkArea {
     min_x: i32,
@@ -822,6 +945,13 @@ fn validate_position(pos: BlockPos) -> Result<(), ReplayError> {
     Ok(())
 }
 
+fn timestamp_for_tick(tick: u64) -> Result<i32, ReplayError> {
+    let timestamp = tick
+        .checked_mul(TICK_MILLIS)
+        .ok_or(ReplayError::TimestampOverflow { tick })?;
+    i32::try_from(timestamp).map_err(|_| ReplayError::TimestampOverflow { tick })
+}
+
 fn state_name(state: PacketState) -> &'static str {
     match state {
         PacketState::Login => "login",
@@ -860,14 +990,10 @@ pub enum ReplayError {
     ZeroTimelineDuration { start_tick: u64, end_tick: u64 },
     #[error("Replay 静态快照的 duration_ms 必须为 0: tick={tick}, duration_ms={duration_ms}")]
     StaticTimelineDuration { tick: u64, duration_ms: u64 },
-    #[error("Replay duration_ms 超出 MCPR 时间戳范围: {duration_ms}")]
+    #[error("Replay duration_ms 超出编辑时间轴范围: {duration_ms}")]
     TimelineDurationOverflow { duration_ms: u64 },
-    #[error("Replay tick 超出导出区间: tick={tick}, 允许 {start_tick}..={end_tick}")]
-    TimelineTickOutOfRange {
-        tick: u64,
-        start_tick: u64,
-        end_tick: u64,
-    },
+    #[error("tick {tick} 无法转换为 MCPR 毫秒时间戳")]
+    TimestampOverflow { tick: u64 },
     #[error("录像时间戳倒退: {previous} -> {next}")]
     TimestampOrder { previous: i32, next: i32 },
     #[error("录像 tick 倒退: {previous} -> {next}")]
@@ -913,33 +1039,55 @@ mod tests {
     use super::*;
 
     #[test]
-    fn timeline_maps_source_range_to_target_duration() {
-        let original_speed = ReplayTimeline::new(0, 20, 1_000).unwrap();
-        assert_eq!(original_speed.timestamp_for_tick(0).unwrap(), 0);
-        assert_eq!(original_speed.timestamp_for_tick(1).unwrap(), 50);
-        assert_eq!(original_speed.timestamp_for_tick(20).unwrap(), 1_000);
+    fn timeline_serializes_replay_mod_time_and_position_paths() {
+        let timeline = ReplayTimeline::new(2, 6, 100).unwrap();
+        let camera = Camera {
+            position: [1.25, 2.5, 3.75],
+            yaw: -45.0,
+            pitch: 30.0,
+            target: BlockPos::ZERO,
+        };
 
-        let faster = ReplayTimeline::new(2, 6, 100).unwrap();
-        assert_eq!(faster.timestamp_for_tick(2).unwrap(), 0);
-        assert_eq!(faster.timestamp_for_tick(3).unwrap(), 25);
-        assert_eq!(faster.timestamp_for_tick(4).unwrap(), 50);
-        assert_eq!(faster.timestamp_for_tick(5).unwrap(), 75);
-        assert_eq!(faster.timestamp_for_tick(6).unwrap(), 100);
-
-        let slower = ReplayTimeline::new(2, 4, 400).unwrap();
-        assert_eq!(slower.timestamp_for_tick(2).unwrap(), 0);
-        assert_eq!(slower.timestamp_for_tick(3).unwrap(), 200);
-        assert_eq!(slower.timestamp_for_tick(4).unwrap(), 400);
-    }
-
-    #[test]
-    fn timeline_rounds_each_absolute_position_to_milliseconds() {
-        let timeline = ReplayTimeline::new(10, 13, 100).unwrap();
-
-        assert_eq!(timeline.timestamp_for_tick(10).unwrap(), 0);
-        assert_eq!(timeline.timestamp_for_tick(11).unwrap(), 33);
-        assert_eq!(timeline.timestamp_for_tick(12).unwrap(), 67);
-        assert_eq!(timeline.timestamp_for_tick(13).unwrap(), 100);
+        assert_eq!(
+            serde_json::to_value(serialized_timelines(timeline, camera).unwrap()).unwrap(),
+            serde_json::json!({
+                "": [
+                    {
+                        "keyframes": [
+                            {"time": 0, "properties": {"timestamp": 100}},
+                            {"time": 100, "properties": {"timestamp": 300}}
+                        ],
+                        "segments": [0],
+                        "interpolators": [
+                            {"type": "linear", "properties": ["timestamp"]}
+                        ]
+                    },
+                    {
+                        "keyframes": [
+                            {
+                                "time": 0,
+                                "properties": {
+                                    "camera:rotation": [-45.0, 30.0, 0.0],
+                                    "camera:position": [1.25, 2.5, 3.75]
+                                }
+                            },
+                            {
+                                "time": 100,
+                                "properties": {
+                                    "camera:rotation": [-45.0, 30.0, 0.0],
+                                    "camera:position": [1.25, 2.5, 3.75]
+                                }
+                            }
+                        ],
+                        "segments": [0],
+                        "interpolators": [{
+                            "type": {"type": "catmull-rom-spline", "alpha": 0.5},
+                            "properties": ["camera:rotation", "camera:position"]
+                        }]
+                    }
+                ]
+            })
+        );
     }
 
     #[test]
@@ -957,8 +1105,12 @@ mod tests {
             Err(ReplayError::StaticTimelineDuration { .. })
         ));
         assert!(matches!(
-            ReplayTimeline::new(0, 1, i32::MAX as u64 + 1),
+            ReplayTimeline::new(0, 1, u64::MAX),
             Err(ReplayError::TimelineDurationOverflow { .. })
+        ));
+        assert!(matches!(
+            ReplayTimeline::new(0, i32::MAX as u64 / TICK_MILLIS + 1, 1),
+            Err(ReplayError::TimestampOverflow { .. })
         ));
     }
 
@@ -1024,6 +1176,7 @@ mod tests {
         let mut archive = ZipArchive::new(File::open(output).unwrap()).unwrap();
         assert!(archive.by_name("recording.tmcpr").is_ok());
         assert!(archive.by_name("recording.tmcpr.crc32").is_ok());
+        assert!(archive.by_name("timelines.json").is_ok());
         let metadata = {
             let mut entry = archive.by_name("metaData.json").unwrap();
             let mut bytes = Vec::new();
@@ -1048,7 +1201,7 @@ mod tests {
     }
 
     #[test]
-    fn compressed_timeline_preserves_packet_order_at_equal_timestamps() {
+    fn editing_timeline_does_not_rewrite_recording_timestamps() {
         let directory = TestDirectory::new();
         let output = directory.path.join("compressed.mcpr");
         let world = SparseWorld::new(BlockStateId(0));
@@ -1093,8 +1246,8 @@ mod tests {
             .filter(|packet| packet.id == PLAY_BLOCK_UPDATE)
             .collect::<Vec<_>>();
         assert_eq!(updates.len(), 2);
-        assert_eq!(updates[0].timestamp, 1);
-        assert_eq!(updates[1].timestamp, 1);
+        assert_eq!(updates[0].timestamp, 50);
+        assert_eq!(updates[1].timestamp, 100);
         assert_eq!(updates[0].payload, block_update(first_pos, 1));
         assert_eq!(updates[1].payload, block_update(second_pos, 2));
     }

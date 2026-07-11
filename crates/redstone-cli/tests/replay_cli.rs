@@ -91,7 +91,7 @@ fn single_scenario_test_exports_replay() {
 }
 
 #[test]
-fn replay_timeline_exports_post_tick_snapshot_and_remaps_included_deltas() {
+fn replay_timeline_keeps_recording_time_and_writes_editing_paths() {
     let directory = TestDirectory::new("replay-timeline");
     let structure_path = directory.path().join("machine.nbt");
     let scenario_path = directory.path().join("timeline.toml");
@@ -110,7 +110,7 @@ fn replay_timeline_exports_post_tick_snapshot_and_remaps_included_deltas() {
         .map(|packet| decode_chunk(packet.payload))
         .find(|(chunk, _)| *chunk == (0, 0))
         .unwrap();
-    assert_eq!(initial_chunk.1[section_index(0, 0, 0)], 0);
+    assert_ne!(initial_chunk.1[section_index(0, 0, 0)], 0);
 
     let updates = packets
         .iter()
@@ -118,15 +118,65 @@ fn replay_timeline_exports_post_tick_snapshot_and_remaps_included_deltas() {
         .map(|packet| decode_block_update(packet.timestamp, packet.payload))
         .filter(|(_, pos, _)| *pos == (0, 0, 0))
         .collect::<Vec<_>>();
-    assert_eq!(updates.len(), 2);
-    assert_eq!(updates[0].0, 25);
-    assert_eq!(updates[1].0, 50);
-    assert_ne!(updates[0].2, 0);
+    assert_eq!(updates.len(), 4);
+    assert_eq!(
+        updates.iter().map(|update| update.0).collect::<Vec<_>>(),
+        [50, 100, 150, 200]
+    );
+    assert_eq!(updates[0].2, 0);
     assert_ne!(updates[1].2, 0);
-    assert_ne!(updates[0].2, updates[1].2);
+    assert_ne!(updates[2].2, 0);
+    assert_ne!(updates[1].2, updates[2].2);
+    assert_eq!(updates[3].2, 0);
 
     let metadata = read_metadata(&replay);
-    assert_eq!(metadata["duration"], 50);
+    assert_eq!(metadata["duration"], 200);
+
+    let timelines = read_timelines(&replay);
+    let paths = timelines[""].as_array().unwrap();
+    assert_eq!(paths.len(), 2);
+    assert_eq!(
+        paths[0]["keyframes"],
+        serde_json::json!([
+            {"time": 0, "properties": {"timestamp": 50}},
+            {"time": 50, "properties": {"timestamp": 150}}
+        ])
+    );
+    assert_eq!(paths[0]["segments"], serde_json::json!([0]));
+    assert_eq!(
+        paths[0]["interpolators"],
+        serde_json::json!([{"type": "linear", "properties": ["timestamp"]}])
+    );
+
+    let pose = packets
+        .iter()
+        .find(|packet| packet.id == PLAYER_POSITION)
+        .map(|packet| decode_player_position(packet.payload))
+        .unwrap();
+    let position_keyframes = paths[1]["keyframes"].as_array().unwrap();
+    assert_eq!(position_keyframes.len(), 2);
+    assert_eq!(position_keyframes[0]["time"], 0);
+    assert_eq!(position_keyframes[1]["time"], 50);
+    for keyframe in position_keyframes {
+        assert_eq!(
+            keyframe["properties"]["camera:position"],
+            serde_json::json!(pose.position)
+        );
+        let rotation = keyframe["properties"]["camera:rotation"]
+            .as_array()
+            .unwrap();
+        assert!((rotation[0].as_f64().unwrap() - f64::from(pose.yaw)).abs() < 0.0001);
+        assert!((rotation[1].as_f64().unwrap() - f64::from(pose.pitch)).abs() < 0.0001);
+        assert_eq!(rotation[2], 0.0);
+    }
+    assert_eq!(paths[1]["segments"], serde_json::json!([0]));
+    assert_eq!(
+        paths[1]["interpolators"],
+        serde_json::json!([{
+            "type": {"type": "catmull-rom-spline", "alpha": 0.5},
+            "properties": ["camera:rotation", "camera:position"]
+        }])
+    );
 }
 
 #[test]
@@ -134,14 +184,17 @@ fn replay_timeline_rejects_invalid_scenario_ranges_and_durations() {
     let directory = TestDirectory::new("replay-timeline-invalid");
     fs::write(directory.path().join("machine.nbt"), structure()).unwrap();
     let invalid_replays = [
-        "start_tick = 3\nend_tick = 2",
-        "start_tick = 0\nend_tick = 5",
-        "start_tick = 1\nend_tick = 2\nduration_ms = 0",
-        "start_tick = 2\nend_tick = 2\nduration_ms = 1",
-        "start_tick = 0\nend_tick = 4\nduration_ms = 2147483648",
+        (4, "start_tick = 3\nend_tick = 2"),
+        (4, "start_tick = 0\nend_tick = 5"),
+        (4, "start_tick = 1\nend_tick = 2\nduration_ms = 0"),
+        (4, "start_tick = 2\nend_tick = 2\nduration_ms = 1"),
+        (
+            42_949_673,
+            "start_tick = 0\nend_tick = 42949673\nduration_ms = 1",
+        ),
     ];
 
-    for (index, replay_config) in invalid_replays.into_iter().enumerate() {
+    for (index, (max_ticks, replay_config)) in invalid_replays.into_iter().enumerate() {
         let scenario = directory.path().join(format!("invalid-{index}.toml"));
         let replay = directory.path().join(format!("invalid-{index}.mcpr"));
         fs::write(
@@ -149,7 +202,7 @@ fn replay_timeline_rejects_invalid_scenario_ranges_and_durations() {
             format!(
                 r#"version = "26.1.2"
 mode = "default"
-max_ticks = 4
+max_ticks = {max_ticks}
 
 [replay]
 {replay_config}
@@ -648,6 +701,14 @@ fn read_metadata(path: &Path) -> serde_json::Value {
     let mut metadata = archive.by_name("metaData.json").unwrap();
     let mut bytes = Vec::new();
     metadata.read_to_end(&mut bytes).unwrap();
+    serde_json::from_slice(&bytes).unwrap()
+}
+
+fn read_timelines(path: &Path) -> serde_json::Value {
+    let mut archive = ZipArchive::new(File::open(path).unwrap()).unwrap();
+    let mut timelines = archive.by_name("timelines.json").unwrap();
+    let mut bytes = Vec::new();
+    timelines.read_to_end(&mut bytes).unwrap();
     serde_json::from_slice(&bytes).unwrap()
 }
 

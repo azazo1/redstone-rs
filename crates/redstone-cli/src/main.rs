@@ -543,11 +543,8 @@ fn execute_scenario(
         );
     }
 
-    let mut replay = None;
-    if let (Some(path), Some(timeline)) = (replay_path, replay_timeline)
-        && timeline.start_tick() == 0
-    {
-        replay = Some(create_replay_writer(
+    let mut replay = if let (Some(path), Some(timeline)) = (replay_path, replay_timeline) {
+        Some(create_replay_writer(
             path,
             scenario_path,
             &scenario,
@@ -555,8 +552,10 @@ fn execute_scenario(
             replay_region,
             timeline,
             &simulation,
-        )?);
-    }
+        )?)
+    } else {
+        None
+    };
 
     let mut action_index = 0;
     let mut samples = BTreeMap::<(GameTick, String), ProbeValue>::new();
@@ -634,24 +633,7 @@ fn execute_scenario(
         }
         let delta = simulation.step_with_pastes_and_actions(&current_pastes, &current_actions)?;
         let completed_tick = delta.tick.0;
-        if replay.is_none()
-            && let (Some(path), Some(timeline)) = (replay_path, replay_timeline)
-            && completed_tick == timeline.start_tick()
-        {
-            replay = Some(create_replay_writer(
-                path,
-                scenario_path,
-                &scenario,
-                replay_anim,
-                replay_region,
-                timeline,
-                &simulation,
-            )?);
-        }
-        if let (Some(replay), Some(timeline)) = (replay.as_mut(), replay_timeline)
-            && completed_tick > timeline.start_tick()
-            && completed_tick <= timeline.end_tick()
-        {
+        if let Some(replay) = replay.as_mut() {
             replay.record_delta(&delta).with_context(|| {
                 format!(
                     "编码 Replay Mod tick {} 失败: {}",
