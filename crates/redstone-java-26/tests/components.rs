@@ -111,6 +111,154 @@ fn comparator_output_for_source_with_data(
 }
 
 #[test]
+fn raw_world_load_restores_comparator_output_signal() {
+    let mut registry = Java26Registry::new();
+    let comparator = state(
+        &mut registry,
+        "minecraft:comparator",
+        &[
+            ("facing", "east"),
+            ("mode", "compare"),
+            ("powered", "true"),
+        ],
+    );
+    let mut world = SparseWorld::new(registry.air_state());
+    world.set_block(BlockPos::ZERO, comparator).unwrap();
+    world.set_block_entity(
+        BlockPos::ZERO,
+        BlockEntityData {
+            kind: "minecraft:comparator".to_owned(),
+            fields: BTreeMap::from([(
+                "OutputSignal".to_owned(),
+                serde_json::Value::from(9),
+            )]),
+        },
+    );
+    let rules = Java26Rules::new(registry);
+    let mut simulation = Simulation::load(rules, world, SimulationConfig::default()).unwrap();
+    simulation.add_probe(
+        "output",
+        Probe::Signal {
+            pos: BlockPos::ZERO,
+            direction: Some(Direction::East),
+        },
+    );
+
+    let delta = simulation.step().unwrap();
+
+    assert_eq!(delta.probes[0].value, ProbeValue::Integer(9));
+}
+
+#[test]
+fn comparator_prioritizes_a_tick_when_its_output_faces_another_diode() {
+    let mut registry = Java26Registry::new();
+    let comparator = state(
+        &mut registry,
+        "minecraft:comparator",
+        &[
+            ("facing", "north"),
+            ("mode", "compare"),
+            ("powered", "false"),
+        ],
+    );
+    let output_comparator = state(
+        &mut registry,
+        "minecraft:comparator",
+        &[
+            ("facing", "east"),
+            ("mode", "compare"),
+            ("powered", "false"),
+        ],
+    );
+    let source = state(&mut registry, "minecraft:redstone_block", &[]);
+    let mut world = SparseWorld::new(registry.air_state());
+    world.set_block(BlockPos::ZERO, comparator).unwrap();
+    world
+        .set_block(BlockPos::new(0, 0, -1), source)
+        .unwrap();
+    world
+        .set_block(BlockPos::new(0, 0, 1), output_comparator)
+        .unwrap();
+    let rules = Java26Rules::new(registry);
+    let mut simulation = Simulation::load(rules, world, SimulationConfig::default()).unwrap();
+    simulation.set_trace_enabled(true);
+
+    simulation.initialize().unwrap();
+
+    assert!(simulation.trace().events().iter().any(|event| {
+        matches!(
+            event.kind,
+            TraceKind::ScheduledTickQueued {
+                pos: BlockPos::ZERO,
+                priority: -1,
+                ..
+            }
+        )
+    }));
+}
+
+#[test]
+fn comparator_side_input_ignores_a_strongly_powered_conductor() {
+    let mut registry = Java26Registry::new();
+    let comparator = state(
+        &mut registry,
+        "minecraft:comparator",
+        &[
+            ("facing", "north"),
+            ("mode", "subtract"),
+            ("powered", "false"),
+        ],
+    );
+    let repeater = state(
+        &mut registry,
+        "minecraft:repeater",
+        &[
+            ("delay", "1"),
+            ("facing", "north"),
+            ("locked", "false"),
+            ("powered", "true"),
+        ],
+    );
+    let redstone_block = state(&mut registry, "minecraft:redstone_block", &[]);
+    let copper_block = state(&mut registry, "minecraft:waxed_copper_block", &[]);
+    let mut world = SparseWorld::new(registry.air_state());
+    world.set_block(BlockPos::ZERO, comparator).unwrap();
+    world
+        .set_block(BlockPos::new(0, 0, -1), redstone_block)
+        .unwrap();
+    world
+        .set_block(BlockPos::new(1, 0, -1), repeater)
+        .unwrap();
+    world
+        .set_block(BlockPos::new(1, 0, 0), copper_block)
+        .unwrap();
+    world.set_block_entity(
+        BlockPos::ZERO,
+        BlockEntityData {
+            kind: "minecraft:comparator".to_owned(),
+            fields: BTreeMap::from([(
+                "OutputSignal".to_owned(),
+                serde_json::Value::from(0),
+            )]),
+        },
+    );
+    let rules = Java26Rules::new(registry);
+    let mut simulation = Simulation::load(rules, world, SimulationConfig::default()).unwrap();
+    simulation.add_probe(
+        "output",
+        Probe::Signal {
+            pos: BlockPos::ZERO,
+            direction: Some(Direction::North),
+        },
+    );
+    simulation.initialize().unwrap();
+
+    let deltas = simulation.run_until(redstone_core::GameTick(2)).unwrap();
+
+    assert_eq!(deltas.last().unwrap().probes[0].value, ProbeValue::Integer(15));
+}
+
+#[test]
 fn redstone_block_powers_a_wire_in_both_modes() {
     for mode in [RedstoneMode::Default, RedstoneMode::Experimental] {
         let mut registry = Java26Registry::new();

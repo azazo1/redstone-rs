@@ -17,6 +17,14 @@ struct ItemStack {
     components: Option<Value>,
 }
 
+struct ItemInsertion<'a> {
+    item_id: &'a str,
+    count: i64,
+    face: Option<Direction>,
+    components: Option<&'a Value>,
+    source: Option<BlockPos>,
+}
+
 impl Java26Rules {
     pub(super) fn tick_container(
         &mut self,
@@ -26,32 +34,40 @@ impl Java26Rules {
     ) -> Result<(), RulesError> {
         let powered = self.is_powered(ctx.world, pos);
         if matches!(state.behavior, BlockBehavior::Hopper) {
+            self.ticked_hoppers.insert(pos);
+            self.active_hopper = Some(pos);
             let enabled = !powered;
             if state.bool_property("enabled") != enabled {
                 let next = self.changed_state(state.id, "enabled", enabled.to_string())?;
                 self.set_state_and_notify(ctx, pos, next, "hopper_enabled", None)?;
             }
             if !enabled {
+                self.active_hopper = None;
                 return Ok(());
             }
-            let cooldown = block_entity_i64(ctx.world, pos, "cooldown").unwrap_or(0);
+            let previous_cooldown = block_entity_i64(ctx.world, pos, "cooldown").unwrap_or(0);
+            let cooldown = previous_cooldown - 1;
             if cooldown > 0 {
-                set_block_entity_i64(ctx, pos, "cooldown", cooldown - 1);
+                set_block_entity_i64(ctx, pos, "cooldown", cooldown);
+                self.active_hopper = None;
                 return Ok(());
+            }
+            if previous_cooldown > 0 {
+                set_block_entity_i64(ctx, pos, "cooldown", 0);
             }
             let facing = state
                 .direction_property("facing")
                 .unwrap_or(Direction::Down);
             let target = pos.relative(facing);
-            let moved = transfer_one_item(ctx, pos, target, None, Some(facing.opposite()))
-                || transfer_one_item(
+            let moved = self.transfer_one_item(ctx, pos, target, None, Some(facing.opposite()))
+                || self.transfer_one_item(
                     ctx,
                     pos.relative(Direction::Up),
                     pos,
                     Some(Direction::Down),
                     None,
                 )
-                || absorb_item_entity(ctx, pos);
+                || self.absorb_item_entity(ctx, pos);
             if moved {
                 set_block_entity_i64(ctx, pos, "cooldown", 8);
                 self.refresh_comparators_near(ctx, pos)?;
@@ -62,6 +78,7 @@ impl Java26Rules {
                     .entry("hopper_transfer".to_owned())
                     .or_default() += 1;
             }
+            self.active_hopper = None;
         }
         Ok(())
     }
@@ -95,7 +112,18 @@ impl Java26Rules {
             .unwrap_or(Direction::North);
         let target = pos.relative(facing);
         let item = inventory(ctx.world, pos)[index].item_id.clone();
-        if insert_item(ctx, target, &item, 1, Some(facing.opposite())) == 1 {
+        if self.insert_item(
+            ctx,
+            target,
+            ItemInsertion {
+                item_id: &item,
+                count: 1,
+                face: Some(facing.opposite()),
+                components: None,
+                source: Some(pos),
+            },
+        ) == 1
+        {
             take_item_at(ctx, pos, index, 1);
             *self
                 .event_counts
@@ -234,12 +262,16 @@ impl Java26Rules {
             .max(1);
         let front = crafter_front(state);
         let target = pos.relative(front);
-        let inserted = insert_item(
+        let inserted = self.insert_item(
             ctx,
             target,
-            &output_item,
-            output_count,
-            Some(front.opposite()),
+            ItemInsertion {
+                item_id: &output_item,
+                count: output_count,
+                face: Some(front.opposite()),
+                components: None,
+                source: Some(pos),
+            },
         );
         if inserted < output_count {
             spawn_item(ctx.world, target, output_item, output_count - inserted);
@@ -359,104 +391,128 @@ fn container_signal_from_fill(fill: f32, slot_count: u32) -> u8 {
     }
 }
 
-fn transfer_one_item(
-    ctx: &mut EventContext<'_>,
-    source: BlockPos,
-    target: BlockPos,
-    source_face: Option<Direction>,
-    target_face: Option<Direction>,
-) -> bool {
-    let stacks = inventory(ctx.world, source);
-    for slot in slots_for_face(ctx.world, source, source_face) {
-        let Some(stack) = stacks.iter().find(|stack| stack.slot == slot) else {
-            continue;
-        };
-        if !can_take_from_slot(ctx.world, source, stack, source_face) {
-            continue;
+impl Java26Rules {
+    fn transfer_one_item(
+        &mut self,
+        ctx: &mut EventContext<'_>,
+        source: BlockPos,
+        target: BlockPos,
+        source_face: Option<Direction>,
+        target_face: Option<Direction>,
+    ) -> bool {
+        let stacks = inventory(ctx.world, source);
+        for slot in slots_for_face(ctx.world, source, source_face) {
+            let Some(stack) = stacks.iter().find(|stack| stack.slot == slot) else {
+                continue;
+            };
+            if !can_take_from_slot(ctx.world, source, stack, source_face) {
+                continue;
+            }
+            if self.insert_item_with_components(
+                ctx,
+                target,
+                ItemInsertion {
+                    item_id: &stack.item_id,
+                    count: 1,
+                    face: target_face,
+                    components: stack.components.as_ref(),
+                    source: Some(source),
+                },
+            ) != 1
+            {
+                continue;
+            }
+            return take_item_from_slot(ctx, source, stack.slot, 1).is_some();
         }
-        if insert_item_with_components(
-            ctx,
-            target,
-            &stack.item_id,
-            1,
-            target_face,
-            stack.components.as_ref(),
-        ) != 1
+        false
+    }
+
+    fn insert_item(
+        &mut self,
+        ctx: &mut EventContext<'_>,
+        target: BlockPos,
+        insertion: ItemInsertion<'_>,
+    ) -> i64 {
+        self.insert_item_with_components(ctx, target, insertion)
+    }
+
+    fn insert_item_with_components(
+        &mut self,
+        ctx: &mut EventContext<'_>,
+        target: BlockPos,
+        insertion: ItemInsertion<'_>,
+    ) -> i64 {
+        if insertion.count <= 0 || !is_container(ctx.world, target) {
+            return 0;
+        }
+        let mut stacks = inventory(ctx.world, target);
+        let was_empty = stacks.is_empty();
+        let slots = slots_for_face(ctx.world, target, insertion.face);
+        let capacity = block_entity_i64(ctx.world, target, "capacity")
+            .unwrap_or(DEFAULT_STACK_SIZE)
+            .max(1);
+        let current = stacks.iter().map(|stack| stack.count).sum::<i64>();
+        let mut remaining = insertion.count.min(capacity.saturating_sub(current));
+        let insertable = remaining;
+        for stack in stacks.iter_mut().filter(|stack| {
+            stack.item_id == insertion.item_id
+                && stack.components.as_ref() == insertion.components
+                && slots.contains(&stack.slot)
+                && can_place_in_slot(ctx.world, target, stack.slot, insertion.item_id)
+        }) {
+            let available = slot_stack_limit(ctx.world, target, stack.slot, insertion.item_id)
+                .saturating_sub(stack.count)
+                .max(0);
+            let moved = remaining.min(available);
+            stack.count += moved;
+            remaining -= moved;
+            if remaining == 0 {
+                break;
+            }
+        }
+        let mut used = stacks
+            .iter()
+            .map(|stack| stack.slot)
+            .collect::<BTreeSet<_>>();
+        while remaining > 0 {
+            let Some(slot) = slots.iter().copied().find(|slot| {
+                !used.contains(slot)
+                    && can_place_in_slot(ctx.world, target, *slot, insertion.item_id)
+            }) else {
+                break;
+            };
+            let moved = remaining.min(slot_stack_limit(
+                ctx.world,
+                target,
+                slot,
+                insertion.item_id,
+            ));
+            stacks.push(ItemStack {
+                slot,
+                item_id: insertion.item_id.to_owned(),
+                count: moved,
+                components: insertion.components.cloned(),
+            });
+            used.insert(slot);
+            remaining -= moved;
+        }
+        let inserted = insertable - remaining;
+        write_inventory(ctx, target, stacks);
+        if inserted > 0
+            && was_empty
+            && self.active_hopper != Some(target)
+            && container_kind(ctx.world, target) == Some("minecraft:hopper")
+            && block_entity_i64(ctx.world, target, "cooldown").unwrap_or(-1) <= 8
         {
-            continue;
+            let source_is_hopper = insertion
+                .source
+                .and_then(|source| container_kind(ctx.world, source))
+                == Some("minecraft:hopper");
+            let skip_tick = source_is_hopper && self.ticked_hoppers.contains(&target);
+            set_block_entity_i64(ctx, target, "cooldown", 8 - i64::from(skip_tick));
         }
-        return take_item_from_slot(ctx, source, stack.slot, 1).is_some();
+        inserted
     }
-    false
-}
-
-fn insert_item(
-    ctx: &mut EventContext<'_>,
-    target: BlockPos,
-    item_id: &str,
-    count: i64,
-    face: Option<Direction>,
-) -> i64 {
-    insert_item_with_components(ctx, target, item_id, count, face, None)
-}
-
-fn insert_item_with_components(
-    ctx: &mut EventContext<'_>,
-    target: BlockPos,
-    item_id: &str,
-    count: i64,
-    face: Option<Direction>,
-    components: Option<&Value>,
-) -> i64 {
-    if count <= 0 || !is_container(ctx.world, target) {
-        return 0;
-    }
-    let mut stacks = inventory(ctx.world, target);
-    let slots = slots_for_face(ctx.world, target, face);
-    let capacity = block_entity_i64(ctx.world, target, "capacity")
-        .unwrap_or(DEFAULT_STACK_SIZE)
-        .max(1);
-    let current = stacks.iter().map(|stack| stack.count).sum::<i64>();
-    let mut remaining = count.min(capacity.saturating_sub(current));
-    let inserted = remaining;
-    for stack in stacks.iter_mut().filter(|stack| {
-        stack.item_id == item_id
-            && stack.components.as_ref() == components
-            && slots.contains(&stack.slot)
-            && can_place_in_slot(ctx.world, target, stack.slot, item_id)
-    }) {
-        let available = slot_stack_limit(ctx.world, target, stack.slot, item_id)
-            .saturating_sub(stack.count)
-            .max(0);
-        let moved = remaining.min(available);
-        stack.count += moved;
-        remaining -= moved;
-        if remaining == 0 {
-            break;
-        }
-    }
-    let mut used = stacks
-        .iter()
-        .map(|stack| stack.slot)
-        .collect::<BTreeSet<_>>();
-    while remaining > 0 {
-        let Some(slot) = slots.iter().copied().find(|slot| {
-            !used.contains(slot) && can_place_in_slot(ctx.world, target, *slot, item_id)
-        }) else {
-            break;
-        };
-        let moved = remaining.min(slot_stack_limit(ctx.world, target, slot, item_id));
-        stacks.push(ItemStack {
-            slot,
-            item_id: item_id.to_owned(),
-            count: moved,
-            components: components.cloned(),
-        });
-        used.insert(slot);
-        remaining -= moved;
-    }
-    write_inventory(ctx, target, stacks);
-    inserted - remaining
 }
 
 fn random_stack_index(ctx: &mut EventContext<'_>, pos: BlockPos) -> Option<usize> {
@@ -917,9 +973,10 @@ fn spawn_item(world: &mut SparseWorld, pos: BlockPos, item_id: String, count: i6
     });
 }
 
-fn absorb_item_entity(ctx: &mut EventContext<'_>, hopper: BlockPos) -> bool {
-    let candidate = ctx
-        .world
+impl Java26Rules {
+    fn absorb_item_entity(&mut self, ctx: &mut EventContext<'_>, hopper: BlockPos) -> bool {
+        let candidate = ctx
+            .world
         .entity_ids_in_aabb(
             [
                 hopper.x as f64 - 0.25,
@@ -951,18 +1008,30 @@ fn absorb_item_entity(ctx: &mut EventContext<'_>, hopper: BlockPos) -> bool {
                 )
             })
         });
-    let Some((entity_id, Some(item_id), entity_count)) = candidate else {
-        return false;
-    };
-    if insert_item(ctx, hopper, &item_id, 1, None) != 1 {
-        return false;
+        let Some((entity_id, Some(item_id), entity_count)) = candidate else {
+            return false;
+        };
+        if self.insert_item(
+            ctx,
+            hopper,
+            ItemInsertion {
+                item_id: &item_id,
+                count: 1,
+                face: None,
+                components: None,
+                source: None,
+            },
+        ) != 1
+        {
+            return false;
+        }
+        if entity_count <= 1 {
+            ctx.world.remove_entity(entity_id);
+        } else if let Some(fields) = ctx.world.entity_fields_mut(entity_id) {
+            fields.insert("item_count".to_owned(), Value::from(entity_count - 1));
+        }
+        true
     }
-    if entity_count <= 1 {
-        ctx.world.remove_entity(entity_id);
-    } else if let Some(fields) = ctx.world.entity_fields_mut(entity_id) {
-        fields.insert("item_count".to_owned(), Value::from(entity_count - 1));
-    }
-    true
 }
 
 fn block_center(pos: BlockPos) -> [f64; 3] {

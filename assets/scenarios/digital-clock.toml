@@ -271,7 +271,73 @@ type = "property"
 pos = { x = 26, y = 6, z = 14 }
 property = "lit"
 
+[[probes]]
+name = "seconds_dropper_count"
+type = "container_count"
+pos = { x = 27, y = 1, z = 13 }
+
+[[probes]]
+name = "seconds_hopper_count"
+type = "container_count"
+pos = { x = 27, y = 2, z = 13 }
+
+[[probes]]
+name = "seconds_counter_wire"
+type = "property"
+pos = { x = 25, y = 1, z = 13 }
+property = "power"
+
 [[expectations]]
 tick = 1
 probe = "clock_enabled"
+equals = "false"
+
+[[expectations]]
+tick = 27
+probe = "seconds_dropper_count"
+equals = 575
+
+[[expectations]]
+tick = 27
+probe = "seconds_hopper_count"
+equals = 1
+
+[[expectations]]
+tick = 29
+probe = "seconds_counter_wire"
+equals = "14"
+
+[[expectations]]
+tick = 51
+probe = "seconds_ones_a"
+equals = "false"
+
+[[expectations]]
+tick = 51
+probe = "seconds_ones_b"
+equals = "true"
+
+[[expectations]]
+tick = 51
+probe = "seconds_ones_c"
+equals = "true"
+
+[[expectations]]
+tick = 51
+probe = "seconds_ones_d"
+equals = "false"
+
+[[expectations]]
+tick = 51
+probe = "seconds_ones_e"
+equals = "false"
+
+[[expectations]]
+tick = 51
+probe = "seconds_ones_f"
+equals = "false"
+
+[[expectations]]
+tick = 51
+probe = "seconds_ones_g"
 equals = "false"

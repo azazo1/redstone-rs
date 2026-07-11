@@ -568,7 +568,9 @@ fn classify(name: &str, properties: &BTreeMap<String, String>) -> BlockTraits {
                 | "moving_piston"
                 | "piston_head"
                 | "hopper"
-        );
+        )
+        && !path.ends_with("_grate")
+        && !path.ends_with("_bulb");
     let sturdy = (!non_solid
         || path == "hopper"
         || matches!(behavior, BlockBehavior::Observer | BlockBehavior::NoteBlock))
@@ -716,6 +718,53 @@ mod tests {
             piston_push_reaction("sticky_piston", true),
             PushReaction::Block
         );
+    }
+
+    #[test]
+    fn copper_grates_do_not_conduct_redstone() {
+        let properties = BTreeMap::new();
+
+        for name in [
+            "minecraft:copper_grate",
+            "minecraft:exposed_copper_grate",
+            "minecraft:weathered_copper_grate",
+            "minecraft:oxidized_copper_grate",
+            "minecraft:waxed_copper_grate",
+            "minecraft:waxed_exposed_copper_grate",
+            "minecraft:waxed_weathered_copper_grate",
+            "minecraft:waxed_oxidized_copper_grate",
+        ] {
+            let traits = classify(name, &properties);
+            assert!(!traits.redstone_conductor, "{name}");
+            assert!(traits.sturdy_faces.into_iter().all(|sturdy| sturdy), "{name}");
+        }
+
+        assert!(
+            classify("minecraft:waxed_copper_block", &properties).redstone_conductor
+        );
+    }
+
+    #[test]
+    fn copper_bulbs_do_not_conduct_redstone() {
+        let properties = BTreeMap::from([
+            ("lit".to_owned(), "false".to_owned()),
+            ("powered".to_owned(), "false".to_owned()),
+        ]);
+
+        for name in [
+            "minecraft:copper_bulb",
+            "minecraft:exposed_copper_bulb",
+            "minecraft:weathered_copper_bulb",
+            "minecraft:oxidized_copper_bulb",
+            "minecraft:waxed_copper_bulb",
+            "minecraft:waxed_exposed_copper_bulb",
+            "minecraft:waxed_weathered_copper_bulb",
+            "minecraft:waxed_oxidized_copper_bulb",
+        ] {
+            let traits = classify(name, &properties);
+            assert!(!traits.redstone_conductor, "{name}");
+            assert!(traits.sturdy_faces.into_iter().all(|sturdy| sturdy), "{name}");
+        }
     }
 }
 

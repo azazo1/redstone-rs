@@ -30,6 +30,8 @@ pub struct Java26Rules {
     wire_kind: Option<BlockKindId>,
     torch_toggles: VecDeque<(u64, BlockPos)>,
     event_counts: BTreeMap<String, i64>,
+    ticked_hoppers: BTreeSet<BlockPos>,
+    active_hopper: Option<BlockPos>,
 }
 
 impl Java26Rules {
@@ -45,6 +47,8 @@ impl Java26Rules {
             wire_kind,
             torch_toggles: VecDeque::new(),
             event_counts: BTreeMap::new(),
+            ticked_hoppers: BTreeSet::new(),
+            active_hopper: None,
         }
     }
 
@@ -666,10 +670,39 @@ impl Java26Rules {
             .into_iter()
             .map(|direction| {
                 let source = pos.relative(direction);
-                self.signal(world, source, direction)
+                self.control_input_signal(world, source, direction)
             })
             .max()
             .unwrap_or(0)
+    }
+
+    fn control_input_signal(
+        &self,
+        world: &SparseWorld,
+        pos: BlockPos,
+        direction: Direction,
+    ) -> u8 {
+        let Ok(state) = self.state(world.get_block(pos)) else {
+            return 0;
+        };
+        match state.behavior {
+            BlockBehavior::RedstoneBlock => 15,
+            BlockBehavior::Wire => state.power,
+            BlockBehavior::Lever
+            | BlockBehavior::Button { .. }
+            | BlockBehavior::Torch { .. }
+            | BlockBehavior::Repeater
+            | BlockBehavior::Comparator
+            | BlockBehavior::Observer
+            | BlockBehavior::Target
+            | BlockBehavior::PressurePlate { .. }
+            | BlockBehavior::TripwireHook
+            | BlockBehavior::DetectorRail
+            | BlockBehavior::DaylightDetector
+            | BlockBehavior::Lectern
+            | BlockBehavior::TrappedChest => self.direct_signal(world, pos, direction),
+            _ => 0,
+        }
     }
 
     fn repeater_locked(&self, world: &SparseWorld, pos: BlockPos, state: &StateDefinition) -> bool {
@@ -759,9 +792,33 @@ impl Java26Rules {
         if (old != output || state.bool_property("powered") != should_power)
             && !ctx.has_scheduled_tick(pos, state.kind)
         {
-            ctx.schedule_tick(pos, state.kind, 2, TickPriority::Normal);
+            let priority = if self.diode_should_prioritize(ctx.world, pos, &state) {
+                TickPriority::High
+            } else {
+                TickPriority::Normal
+            };
+            ctx.schedule_tick(pos, state.kind, 2, priority);
         }
         Ok(())
+    }
+
+    fn diode_should_prioritize(
+        &self,
+        world: &SparseWorld,
+        pos: BlockPos,
+        state: &StateDefinition,
+    ) -> bool {
+        let output_direction = state
+            .direction_property("facing")
+            .unwrap_or(Direction::North)
+            .opposite();
+        let output_state = self.state(world.get_block(pos.relative(output_direction)));
+        output_state.is_ok_and(|output_state| {
+            matches!(
+                output_state.behavior,
+                BlockBehavior::Repeater | BlockBehavior::Comparator
+            ) && output_state.direction_property("facing") != Some(output_direction)
+        })
     }
 
     fn refresh_triggered_container(
@@ -987,13 +1044,29 @@ impl BlockRules for Java26Rules {
     }
 
     fn load_world(&mut self, world: &SparseWorld) -> Result<(), RulesError> {
-        let _ = world;
         self.block_signal_cache.clear();
+        self.comparator_outputs.clear();
+        for (pos, data) in world.block_entities() {
+            let state = self.state(world.get_block(*pos))?;
+            if !matches!(state.behavior, BlockBehavior::Comparator) {
+                continue;
+            }
+            let output = data
+                .fields
+                .get("comparator_output")
+                .or_else(|| data.fields.get("OutputSignal"))
+                .and_then(serde_json::Value::as_i64)
+                .unwrap_or(0)
+                .clamp(0, 15) as u8;
+            self.comparator_outputs.insert(*pos, output);
+        }
         Ok(())
     }
 
     fn begin_tick(&mut self, _tick: redstone_core::GameTick) {
         self.block_signal_cache.clear();
+        self.ticked_hoppers.clear();
+        self.active_hopper = None;
     }
 
     fn initialize(
