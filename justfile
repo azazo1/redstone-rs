@@ -179,8 +179,8 @@ test-schematic-scenarios parallel="1": oracle-build
     if [ {{ parallel }} -le 1 ]; then
       for scenario in assets/scenarios/*.toml; do
         echo "测试原理图场景: $scenario"
-        cargo run -p redstone-cli -- test "$scenario" --oracle
+        cargo run --release -p redstone-cli -- test "$scenario" --oracle
       done
     else
-      cargo run -p redstone-cli -- test "assets/scenarios" --oracle # todo 限制并发上限
+      cargo run --release -p redstone-cli -- test "assets/scenarios" --oracle # todo 限制并发上限
     fi
