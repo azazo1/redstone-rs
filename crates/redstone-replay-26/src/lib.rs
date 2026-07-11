@@ -206,6 +206,7 @@ pub struct ReplayWriter {
     block_updates: u64,
     last_tick: u64,
     last_timestamp: i32,
+    last_packet_timestamp: i32,
     initial_camera: Option<Camera>,
     options: ReplayOptions,
     started: Instant,
@@ -275,6 +276,7 @@ impl ReplayWriter {
             block_updates: 0,
             last_tick: 0,
             last_timestamp: 0,
+            last_packet_timestamp: 0,
             initial_camera: None,
             options,
             started: Instant::now(),
@@ -376,6 +378,7 @@ impl ReplayWriter {
         mut self,
         mut report_progress: impl FnMut(u64, u64),
     ) -> Result<ReplayStats, ReplayError> {
+        self.write_terminal_timestamp_anchor()?;
         let mut recording = self.recording.take().ok_or(ReplayError::AlreadyFinished)?;
         recording.flush()?;
         let recording_file = recording.into_inner().map_err(|error| error.into_error())?;
@@ -635,6 +638,18 @@ impl ReplayWriter {
         Ok(())
     }
 
+    fn write_terminal_timestamp_anchor(&mut self) -> Result<(), ReplayError> {
+        if self.last_packet_timestamp == self.last_timestamp {
+            return Ok(());
+        }
+        self.write_packet(
+            self.last_timestamp,
+            PacketState::Play,
+            PLAY_SET_CHUNK_CACHE_RADIUS,
+            &single_var_int(self.chunk_radius),
+        )
+    }
+
     fn write_packet(
         &mut self,
         timestamp: i32,
@@ -673,6 +688,7 @@ impl ReplayWriter {
         self.crc.update(&packet);
         self.packet_count += 1;
         self.last_timestamp = timestamp;
+        self.last_packet_timestamp = timestamp;
         Ok(())
     }
 }
@@ -1196,8 +1212,8 @@ mod tests {
         assert_eq!(packets[1].1, CONFIG_SELECT_KNOWN_PACKS);
         assert!(packets.iter().any(|packet| packet.1 == CONFIG_FINISH));
         assert!(packets.iter().any(|packet| packet.1 == PLAY_LOGIN));
-        assert_eq!(packets.last().unwrap().0, 100);
-        assert_eq!(packets.last().unwrap().1, PLAY_BLOCK_UPDATE);
+        assert_eq!(packets.last().unwrap().0, metadata["duration"]);
+        assert_eq!(packets.last().unwrap().1, PLAY_SET_CHUNK_CACHE_RADIUS);
     }
 
     #[test]

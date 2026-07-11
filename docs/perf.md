@@ -204,6 +204,12 @@ Java 规则的 80 个测试再次全部通过. 普通 release 连续运行 10 �
 
 CPU+DVD 的完整 Java oracle 对比使用临时的 60 tick 场景运行, 共比较 7937630 条微轨迹事件, 结果通过. 这覆盖了当前 CPU 活动阶段的 wire, repeater, comparator 和 neighbor 顺序, 证明最大值早停和任务栈复用没有改变 oracle 可见行为.
 
+### Replay 稳定尾部时间锚点
+
+Replay exporter 原先只在世界事件发生时写入 packet. 当机器提前进入稳定状态时, `metaData.json` 和 Time Path 仍结束于场景配置时间, 但 `recording.tmcpr` 会提前在最后一次方块更新处结束. 例如 20 秒样本的 metadata 为 20000 ms, 实际最后 packet 却在 18250 ms. Replay Mod 的 `FullReplaySender` 在同步渲染时遇到 EOF 会清空输入流, 下一帧再从录像开头打开并扫描到目标时间. 稳定尾部因此可能逐帧重复扫描整段录像, 表现为越接近末尾越慢或卡住.
+
+Exporter 现在分别跟踪逻辑结束时间和实际 packet 结束时间. 如果两者不同, finish 阶段会写入一个不改变世界内容的 chunk radius packet 作为时间锚点. 这不会按 tick 增加录像体积, 也不需要重复完整 chunk snapshot. 回归测试要求最后 packet 时间戳与 metadata duration 完全一致.
+
 ### 最终验证
 
 当前 release 同时通过 tracing 的 `release_max_level_info` 移除 debug 和 trace 级别 callsite, 因此热路径中的 `debug!` 不进入 release 二进制执行路径.
