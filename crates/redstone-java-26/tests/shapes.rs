@@ -64,6 +64,50 @@ fn isolated_pair_of_wires_becomes_an_east_west_line() {
 }
 
 #[test]
+fn wire_connects_to_the_side_input_of_a_comparator() {
+    let mut registry = Java26Registry::new();
+    let wire = state(
+        &mut registry,
+        "minecraft:redstone_wire",
+        &[
+            ("power", "0"),
+            ("north", "side"),
+            ("east", "none"),
+            ("south", "side"),
+            ("west", "none"),
+        ],
+    );
+    let comparator = state(
+        &mut registry,
+        "minecraft:comparator",
+        &[
+            ("facing", "west"),
+            ("mode", "subtract"),
+            ("powered", "false"),
+        ],
+    );
+    let mut world = SparseWorld::new(registry.air_state());
+    world.set_block(BlockPos::ZERO, wire).unwrap();
+    world
+        .set_block(BlockPos::new(0, 0, -1), comparator)
+        .unwrap();
+    let rules = Java26Rules::new(registry);
+    let mut simulation = Simulation::load(rules, world, SimulationConfig::default()).unwrap();
+
+    simulation.initialize().unwrap();
+
+    let state = simulation
+        .rules()
+        .registry()
+        .state(simulation.world().get_block(BlockPos::ZERO))
+        .unwrap();
+    assert_eq!(state.property("north"), Some("side"));
+    assert_eq!(state.property("east"), Some("none"));
+    assert_eq!(state.property("south"), Some("side"));
+    assert_eq!(state.property("west"), Some("none"));
+}
+
+#[test]
 fn wire_climbs_a_sturdy_block_to_reach_an_upper_wire() {
     let mut registry = Java26Registry::new();
     let wire = wire(&mut registry);

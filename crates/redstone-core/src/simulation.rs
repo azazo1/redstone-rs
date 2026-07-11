@@ -472,15 +472,12 @@ impl<R: BlockRules> Simulation<R> {
             .take(self.config.max_scheduled_ticks_per_tick)
             .copied()
             .collect::<Vec<_>>();
-        for tick in &due {
-            self.scheduled_ticks.remove(tick);
-            self.scheduled_keys.remove(&(tick.pos, tick.block));
-        }
-        if self
+        let has_more_due = self
             .scheduled_ticks
-            .first()
-            .is_some_and(|tick| tick.trigger_tick <= self.tick)
-        {
+            .iter()
+            .nth(due.len())
+            .is_some_and(|tick| tick.trigger_tick <= self.tick);
+        if has_more_due {
             warn!(
                 tick = self.tick.0,
                 limit = self.config.max_scheduled_ticks_per_tick,
@@ -488,6 +485,8 @@ impl<R: BlockRules> Simulation<R> {
             );
         }
         for tick in due {
+            self.scheduled_ticks.remove(&tick);
+            self.scheduled_keys.remove(&(tick.pos, tick.block));
             self.push_trace(
                 SimulationPhase::ScheduledTicks,
                 TraceKind::ScheduledTickExecuted {

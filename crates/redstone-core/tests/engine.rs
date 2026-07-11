@@ -14,6 +14,7 @@ const KIND: BlockKindId = BlockKindId(1);
 #[derive(Default)]
 struct MockRules {
     scheduled_executions: usize,
+    scheduled_results: Vec<bool>,
     neighbor_positions: Vec<BlockPos>,
     block_entity_order: Vec<(&'static str, BlockPos)>,
     execute_block_events: bool,
@@ -133,6 +134,14 @@ impl BlockRules for MockRules {
                 moved_by_piston: false,
             });
         }
+        if update.source_pos == BlockPos::new(99, 0, 0) {
+            self.scheduled_results.push(ctx.schedule_tick(
+                update.pos,
+                KIND,
+                2,
+                TickPriority::Normal,
+            ));
+        }
         Ok(())
     }
 
@@ -175,6 +184,16 @@ impl BlockRules for MockRules {
         self.scheduled_executions += 1;
         if self.scheduled_executions == 1 {
             ctx.schedule_tick(tick.pos, tick.block, 0, TickPriority::Normal);
+            let neighbor = tick.pos.relative(redstone_core::Direction::East);
+            if ctx.world.get_block(neighbor) == BLOCK {
+                ctx.neighbor_changed(NeighborUpdate {
+                    pos: neighbor,
+                    source_pos: BlockPos::new(99, 0, 0),
+                    source_block: KIND,
+                    orientation: None,
+                    moved_by_piston: false,
+                });
+            }
         }
         Ok(())
     }
@@ -375,6 +394,33 @@ fn scheduled_ticks_added_during_execution_wait_for_next_game_tick() {
         })
         .collect::<Vec<_>>();
     assert_eq!(executed_ticks, vec![1, 2]);
+}
+
+#[test]
+fn scheduled_tick_remains_deduplicated_until_its_execution_starts() {
+    let neighbor = BlockPos::ZERO.relative(redstone_core::Direction::East);
+    let mut world = SparseWorld::new(AIR);
+    world.set_block(BlockPos::ZERO, BLOCK).unwrap();
+    world.set_block(neighbor, BLOCK).unwrap();
+    let mut simulation = Simulation::load(
+        MockRules::default(),
+        world,
+        SimulationConfig::default(),
+    )
+    .unwrap();
+
+    simulation
+        .step_with_actions(&[
+            Action::UseBlock {
+                pos: BlockPos::ZERO,
+            },
+            Action::UseBlock { pos: neighbor },
+        ])
+        .unwrap();
+
+    assert_eq!(simulation.rules().scheduled_executions, 2);
+    assert_eq!(simulation.rules().scheduled_results, vec![false]);
+    assert_eq!(simulation.pending_scheduled_ticks(), 1);
 }
 
 #[test]

@@ -198,6 +198,56 @@ fn comparator_prioritizes_a_tick_when_its_output_faces_another_diode() {
 }
 
 #[test]
+fn repeater_uses_extremely_high_priority_before_a_crossed_diode() {
+    let mut registry = Java26Registry::new();
+    let repeater = state(
+        &mut registry,
+        "minecraft:repeater",
+        &[
+            ("delay", "1"),
+            ("facing", "north"),
+            ("locked", "false"),
+            ("powered", "false"),
+        ],
+    );
+    let output_repeater = state(
+        &mut registry,
+        "minecraft:repeater",
+        &[
+            ("delay", "1"),
+            ("facing", "east"),
+            ("locked", "false"),
+            ("powered", "false"),
+        ],
+    );
+    let source = state(&mut registry, "minecraft:redstone_block", &[]);
+    let mut world = SparseWorld::new(registry.air_state());
+    world.set_block(BlockPos::ZERO, repeater).unwrap();
+    world
+        .set_block(BlockPos::new(0, 0, -1), source)
+        .unwrap();
+    world
+        .set_block(BlockPos::new(0, 0, 1), output_repeater)
+        .unwrap();
+    let rules = Java26Rules::new(registry);
+    let mut simulation = Simulation::load(rules, world, SimulationConfig::default()).unwrap();
+    simulation.set_trace_enabled(true);
+
+    simulation.initialize().unwrap();
+
+    assert!(simulation.trace().events().iter().any(|event| {
+        matches!(
+            event.kind,
+            TraceKind::ScheduledTickQueued {
+                pos: BlockPos::ZERO,
+                priority: -3,
+                ..
+            }
+        )
+    }));
+}
+
+#[test]
 fn comparator_side_input_ignores_a_strongly_powered_conductor() {
     let mut registry = Java26Registry::new();
     let comparator = state(

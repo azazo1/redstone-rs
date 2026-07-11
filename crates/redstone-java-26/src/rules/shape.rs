@@ -614,7 +614,7 @@ impl Java26Rules {
     fn wire_connects_to(&self, state: &StateDefinition, direction: Option<Direction>) -> bool {
         match state.behavior {
             BlockBehavior::Wire => true,
-            BlockBehavior::Repeater | BlockBehavior::Comparator => {
+            BlockBehavior::Repeater => {
                 direction.is_some_and(|direction| {
                     let facing = state
                         .direction_property("facing")
@@ -622,6 +622,7 @@ impl Java26Rules {
                     facing == direction || facing.opposite() == direction
                 })
             }
+            BlockBehavior::Comparator => direction.is_some(),
             BlockBehavior::Observer => direction
                 .is_some_and(|direction| state.direction_property("facing") == Some(direction)),
             _ => direction.is_some() && is_signal_source(&state.behavior),

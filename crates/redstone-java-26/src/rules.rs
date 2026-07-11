@@ -644,7 +644,9 @@ impl Java26Rules {
         if should_power != state.bool_property("powered")
             && !ctx.has_scheduled_tick(pos, state.kind)
         {
-            let priority = if state.bool_property("powered") {
+            let priority = if self.diode_should_prioritize(ctx.world, pos, &state) {
+                TickPriority::ExtremelyHigh
+            } else if state.bool_property("powered") {
                 TickPriority::VeryHigh
             } else {
                 TickPriority::High
