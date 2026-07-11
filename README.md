@@ -168,4 +168,4 @@ equals = 15
 - [dvdprogram.schem](assets/schematics/dvdprogram.schem): <https://github.com/mattbatwings/BatPU-2>
 - [digital-clock.litematic](assets/schematics/digital-clock.litematic): <https://www.planetminecraft.com/project/digital-clock-v2/>
 - [head.litematic](assets/schematics/head.litematic): <https://www.planetminecraft.com/project/redstone-automaton-5932751/>
-- [CPU_22_08_2025.zip](assets/worlds/CPU_22_08_2025.zip): <https://www.planetminecraft.com/project/frostbyte-a-16-bit-minecraft-cpu-with-just-redstone/>
+- [CPU_22_08_2025.zip](assets/worlds/CPU_22_08_2025.zip): <https://www.planetminecraft.com/project/frostbyte-a-16-bit-minecraft-cpu-with-just-redstone/> (<https://github.com/IceWizard7/frostbyte-cpu>)

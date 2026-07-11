@@ -1,0 +1,1663 @@
+version = "26.1.2"
+mode = "default"
+seed = 0
+max_ticks = 210000
+strict = true
+skip_oracle = true
+
+[monitor]
+skip_ticks = 209999
+
+[replay.camera]
+view_distance = 8
+position = [275.79, 86.0, 202.74]
+yaw = 89.56
+pitch = -14.10
+
+[source]
+path = "../worlds/CPU_22_08_2025.zip"
+initialization = "raw"
+region = { min = { x = 9, y = 52, z = -1 }, max = { x = 287, y = 157, z = 397 } }
+
+[[source.pastes]]
+path = "../schematics/frostbyte-line-drawing.schem"
+origin = { x = 64, y = 152, z = 389 }
+rotation = "none"
+mirror = "none"
+ignore_air = true
+paste_entities = false
+update = true
+
+[[actions]]
+tick = 100
+type = "press_button"
+pos = { x = 274, y = 88, z = 197 }
+
+[[probes]]
+name = "screen_y80_z179"
+type = "property"
+pos = { x = 215, y = 80, z = 179 }
+property = "lit"
+
+[[probes]]
+name = "screen_y80_z180"
+type = "property"
+pos = { x = 215, y = 80, z = 180 }
+property = "lit"
+
+[[probes]]
+name = "screen_y80_z181"
+type = "property"
+pos = { x = 215, y = 80, z = 181 }
+property = "lit"
+
+[[probes]]
+name = "screen_y80_z182"
+type = "property"
+pos = { x = 215, y = 80, z = 182 }
+property = "lit"
+
+[[probes]]
+name = "screen_y80_z183"
+type = "property"
+pos = { x = 215, y = 80, z = 183 }
+property = "lit"
+
+[[probes]]
+name = "screen_y80_z184"
+type = "property"
+pos = { x = 215, y = 80, z = 184 }
+property = "lit"
+
+[[probes]]
+name = "screen_y80_z185"
+type = "property"
+pos = { x = 215, y = 80, z = 185 }
+property = "lit"
+
+[[probes]]
+name = "screen_y80_z186"
+type = "property"
+pos = { x = 215, y = 80, z = 186 }
+property = "lit"
+
+[[probes]]
+name = "screen_y80_z187"
+type = "property"
+pos = { x = 215, y = 80, z = 187 }
+property = "lit"
+
+[[probes]]
+name = "screen_y80_z188"
+type = "property"
+pos = { x = 215, y = 80, z = 188 }
+property = "lit"
+
+[[probes]]
+name = "screen_y80_z189"
+type = "property"
+pos = { x = 215, y = 80, z = 189 }
+property = "lit"
+
+[[probes]]
+name = "screen_y80_z190"
+type = "property"
+pos = { x = 215, y = 80, z = 190 }
+property = "lit"
+
+[[probes]]
+name = "screen_y80_z191"
+type = "property"
+pos = { x = 215, y = 80, z = 191 }
+property = "lit"
+
+[[probes]]
+name = "screen_y80_z192"
+type = "property"
+pos = { x = 215, y = 80, z = 192 }
+property = "lit"
+
+[[probes]]
+name = "screen_y80_z193"
+type = "property"
+pos = { x = 215, y = 80, z = 193 }
+property = "lit"
+
+[[probes]]
+name = "screen_y80_z194"
+type = "property"
+pos = { x = 215, y = 80, z = 194 }
+property = "lit"
+
+[[probes]]
+name = "screen_y80_z195"
+type = "property"
+pos = { x = 215, y = 80, z = 195 }
+property = "lit"
+
+[[probes]]
+name = "screen_y80_z196"
+type = "property"
+pos = { x = 215, y = 80, z = 196 }
+property = "lit"
+
+[[probes]]
+name = "screen_y80_z197"
+type = "property"
+pos = { x = 215, y = 80, z = 197 }
+property = "lit"
+
+[[probes]]
+name = "screen_y80_z198"
+type = "property"
+pos = { x = 215, y = 80, z = 198 }
+property = "lit"
+
+[[probes]]
+name = "screen_y80_z199"
+type = "property"
+pos = { x = 215, y = 80, z = 199 }
+property = "lit"
+
+[[probes]]
+name = "screen_y80_z200"
+type = "property"
+pos = { x = 215, y = 80, z = 200 }
+property = "lit"
+
+[[probes]]
+name = "screen_y80_z201"
+type = "property"
+pos = { x = 215, y = 80, z = 201 }
+property = "lit"
+
+[[probes]]
+name = "screen_y80_z202"
+type = "property"
+pos = { x = 215, y = 80, z = 202 }
+property = "lit"
+
+[[probes]]
+name = "screen_y80_z203"
+type = "property"
+pos = { x = 215, y = 80, z = 203 }
+property = "lit"
+
+[[probes]]
+name = "screen_y80_z204"
+type = "property"
+pos = { x = 215, y = 80, z = 204 }
+property = "lit"
+
+[[probes]]
+name = "screen_y80_z205"
+type = "property"
+pos = { x = 215, y = 80, z = 205 }
+property = "lit"
+
+[[probes]]
+name = "screen_y80_z206"
+type = "property"
+pos = { x = 215, y = 80, z = 206 }
+property = "lit"
+
+[[probes]]
+name = "screen_y80_z207"
+type = "property"
+pos = { x = 215, y = 80, z = 207 }
+property = "lit"
+
+[[probes]]
+name = "screen_y80_z208"
+type = "property"
+pos = { x = 215, y = 80, z = 208 }
+property = "lit"
+
+[[probes]]
+name = "screen_y80_z209"
+type = "property"
+pos = { x = 215, y = 80, z = 209 }
+property = "lit"
+
+[[probes]]
+name = "screen_y80_z210"
+type = "property"
+pos = { x = 215, y = 80, z = 210 }
+property = "lit"
+
+[[probes]]
+name = "screen_y80_z211"
+type = "property"
+pos = { x = 215, y = 80, z = 211 }
+property = "lit"
+
+[[probes]]
+name = "screen_y80_z212"
+type = "property"
+pos = { x = 215, y = 80, z = 212 }
+property = "lit"
+
+[[probes]]
+name = "screen_y80_z213"
+type = "property"
+pos = { x = 215, y = 80, z = 213 }
+property = "lit"
+
+[[probes]]
+name = "screen_y80_z214"
+type = "property"
+pos = { x = 215, y = 80, z = 214 }
+property = "lit"
+
+[[probes]]
+name = "screen_y80_z215"
+type = "property"
+pos = { x = 215, y = 80, z = 215 }
+property = "lit"
+
+[[probes]]
+name = "screen_y80_z216"
+type = "property"
+pos = { x = 215, y = 80, z = 216 }
+property = "lit"
+
+[[probes]]
+name = "screen_y80_z217"
+type = "property"
+pos = { x = 215, y = 80, z = 217 }
+property = "lit"
+
+[[probes]]
+name = "screen_y80_z218"
+type = "property"
+pos = { x = 215, y = 80, z = 218 }
+property = "lit"
+
+[[probes]]
+name = "screen_y80_z219"
+type = "property"
+pos = { x = 215, y = 80, z = 219 }
+property = "lit"
+
+[[probes]]
+name = "screen_y80_z220"
+type = "property"
+pos = { x = 215, y = 80, z = 220 }
+property = "lit"
+
+[[probes]]
+name = "screen_y80_z221"
+type = "property"
+pos = { x = 215, y = 80, z = 221 }
+property = "lit"
+
+[[probes]]
+name = "screen_y80_z222"
+type = "property"
+pos = { x = 215, y = 80, z = 222 }
+property = "lit"
+
+[[probes]]
+name = "screen_y80_z223"
+type = "property"
+pos = { x = 215, y = 80, z = 223 }
+property = "lit"
+
+[[probes]]
+name = "screen_y80_z224"
+type = "property"
+pos = { x = 215, y = 80, z = 224 }
+property = "lit"
+
+[[probes]]
+name = "screen_y80_z225"
+type = "property"
+pos = { x = 215, y = 80, z = 225 }
+property = "lit"
+
+[[probes]]
+name = "screen_y80_z226"
+type = "property"
+pos = { x = 215, y = 80, z = 226 }
+property = "lit"
+
+[[probes]]
+name = "screen_y80_z227"
+type = "property"
+pos = { x = 215, y = 80, z = 227 }
+property = "lit"
+
+[[probes]]
+name = "screen_y80_z228"
+type = "property"
+pos = { x = 215, y = 80, z = 228 }
+property = "lit"
+
+[[probes]]
+name = "screen_y81_z179"
+type = "property"
+pos = { x = 215, y = 81, z = 179 }
+property = "lit"
+
+[[probes]]
+name = "screen_y81_z180"
+type = "property"
+pos = { x = 215, y = 81, z = 180 }
+property = "lit"
+
+[[probes]]
+name = "screen_y81_z181"
+type = "property"
+pos = { x = 215, y = 81, z = 181 }
+property = "lit"
+
+[[probes]]
+name = "screen_y81_z182"
+type = "property"
+pos = { x = 215, y = 81, z = 182 }
+property = "lit"
+
+[[probes]]
+name = "screen_y81_z183"
+type = "property"
+pos = { x = 215, y = 81, z = 183 }
+property = "lit"
+
+[[probes]]
+name = "screen_y81_z184"
+type = "property"
+pos = { x = 215, y = 81, z = 184 }
+property = "lit"
+
+[[probes]]
+name = "screen_y81_z185"
+type = "property"
+pos = { x = 215, y = 81, z = 185 }
+property = "lit"
+
+[[probes]]
+name = "screen_y81_z186"
+type = "property"
+pos = { x = 215, y = 81, z = 186 }
+property = "lit"
+
+[[probes]]
+name = "screen_y81_z187"
+type = "property"
+pos = { x = 215, y = 81, z = 187 }
+property = "lit"
+
+[[probes]]
+name = "screen_y81_z188"
+type = "property"
+pos = { x = 215, y = 81, z = 188 }
+property = "lit"
+
+[[probes]]
+name = "screen_y81_z189"
+type = "property"
+pos = { x = 215, y = 81, z = 189 }
+property = "lit"
+
+[[probes]]
+name = "screen_y81_z190"
+type = "property"
+pos = { x = 215, y = 81, z = 190 }
+property = "lit"
+
+[[probes]]
+name = "screen_y81_z191"
+type = "property"
+pos = { x = 215, y = 81, z = 191 }
+property = "lit"
+
+[[probes]]
+name = "screen_y81_z192"
+type = "property"
+pos = { x = 215, y = 81, z = 192 }
+property = "lit"
+
+[[probes]]
+name = "screen_y81_z193"
+type = "property"
+pos = { x = 215, y = 81, z = 193 }
+property = "lit"
+
+[[probes]]
+name = "screen_y81_z194"
+type = "property"
+pos = { x = 215, y = 81, z = 194 }
+property = "lit"
+
+[[probes]]
+name = "screen_y81_z195"
+type = "property"
+pos = { x = 215, y = 81, z = 195 }
+property = "lit"
+
+[[probes]]
+name = "screen_y81_z196"
+type = "property"
+pos = { x = 215, y = 81, z = 196 }
+property = "lit"
+
+[[probes]]
+name = "screen_y81_z197"
+type = "property"
+pos = { x = 215, y = 81, z = 197 }
+property = "lit"
+
+[[probes]]
+name = "screen_y81_z198"
+type = "property"
+pos = { x = 215, y = 81, z = 198 }
+property = "lit"
+
+[[probes]]
+name = "screen_y81_z199"
+type = "property"
+pos = { x = 215, y = 81, z = 199 }
+property = "lit"
+
+[[probes]]
+name = "screen_y81_z200"
+type = "property"
+pos = { x = 215, y = 81, z = 200 }
+property = "lit"
+
+[[probes]]
+name = "screen_y81_z201"
+type = "property"
+pos = { x = 215, y = 81, z = 201 }
+property = "lit"
+
+[[probes]]
+name = "screen_y81_z202"
+type = "property"
+pos = { x = 215, y = 81, z = 202 }
+property = "lit"
+
+[[probes]]
+name = "screen_y81_z203"
+type = "property"
+pos = { x = 215, y = 81, z = 203 }
+property = "lit"
+
+[[probes]]
+name = "screen_y81_z204"
+type = "property"
+pos = { x = 215, y = 81, z = 204 }
+property = "lit"
+
+[[probes]]
+name = "screen_y81_z205"
+type = "property"
+pos = { x = 215, y = 81, z = 205 }
+property = "lit"
+
+[[probes]]
+name = "screen_y81_z206"
+type = "property"
+pos = { x = 215, y = 81, z = 206 }
+property = "lit"
+
+[[probes]]
+name = "screen_y81_z207"
+type = "property"
+pos = { x = 215, y = 81, z = 207 }
+property = "lit"
+
+[[probes]]
+name = "screen_y81_z208"
+type = "property"
+pos = { x = 215, y = 81, z = 208 }
+property = "lit"
+
+[[probes]]
+name = "screen_y81_z209"
+type = "property"
+pos = { x = 215, y = 81, z = 209 }
+property = "lit"
+
+[[probes]]
+name = "screen_y81_z210"
+type = "property"
+pos = { x = 215, y = 81, z = 210 }
+property = "lit"
+
+[[probes]]
+name = "screen_y81_z211"
+type = "property"
+pos = { x = 215, y = 81, z = 211 }
+property = "lit"
+
+[[probes]]
+name = "screen_y81_z212"
+type = "property"
+pos = { x = 215, y = 81, z = 212 }
+property = "lit"
+
+[[probes]]
+name = "screen_y81_z213"
+type = "property"
+pos = { x = 215, y = 81, z = 213 }
+property = "lit"
+
+[[probes]]
+name = "screen_y81_z214"
+type = "property"
+pos = { x = 215, y = 81, z = 214 }
+property = "lit"
+
+[[probes]]
+name = "screen_y81_z215"
+type = "property"
+pos = { x = 215, y = 81, z = 215 }
+property = "lit"
+
+[[probes]]
+name = "screen_y81_z216"
+type = "property"
+pos = { x = 215, y = 81, z = 216 }
+property = "lit"
+
+[[probes]]
+name = "screen_y81_z217"
+type = "property"
+pos = { x = 215, y = 81, z = 217 }
+property = "lit"
+
+[[probes]]
+name = "screen_y81_z218"
+type = "property"
+pos = { x = 215, y = 81, z = 218 }
+property = "lit"
+
+[[probes]]
+name = "screen_y81_z219"
+type = "property"
+pos = { x = 215, y = 81, z = 219 }
+property = "lit"
+
+[[probes]]
+name = "screen_y81_z220"
+type = "property"
+pos = { x = 215, y = 81, z = 220 }
+property = "lit"
+
+[[probes]]
+name = "screen_y81_z221"
+type = "property"
+pos = { x = 215, y = 81, z = 221 }
+property = "lit"
+
+[[probes]]
+name = "screen_y81_z222"
+type = "property"
+pos = { x = 215, y = 81, z = 222 }
+property = "lit"
+
+[[probes]]
+name = "screen_y81_z223"
+type = "property"
+pos = { x = 215, y = 81, z = 223 }
+property = "lit"
+
+[[probes]]
+name = "screen_y81_z224"
+type = "property"
+pos = { x = 215, y = 81, z = 224 }
+property = "lit"
+
+[[probes]]
+name = "screen_y81_z225"
+type = "property"
+pos = { x = 215, y = 81, z = 225 }
+property = "lit"
+
+[[probes]]
+name = "screen_y81_z226"
+type = "property"
+pos = { x = 215, y = 81, z = 226 }
+property = "lit"
+
+[[probes]]
+name = "screen_y81_z227"
+type = "property"
+pos = { x = 215, y = 81, z = 227 }
+property = "lit"
+
+[[probes]]
+name = "screen_y81_z228"
+type = "property"
+pos = { x = 215, y = 81, z = 228 }
+property = "lit"
+
+[[probes]]
+name = "screen_y82_z180"
+type = "property"
+pos = { x = 215, y = 82, z = 180 }
+property = "lit"
+
+[[probes]]
+name = "screen_y82_z181"
+type = "property"
+pos = { x = 215, y = 82, z = 181 }
+property = "lit"
+
+[[probes]]
+name = "screen_y82_z182"
+type = "property"
+pos = { x = 215, y = 82, z = 182 }
+property = "lit"
+
+[[probes]]
+name = "screen_y82_z183"
+type = "property"
+pos = { x = 215, y = 82, z = 183 }
+property = "lit"
+
+[[probes]]
+name = "screen_y82_z184"
+type = "property"
+pos = { x = 215, y = 82, z = 184 }
+property = "lit"
+
+[[probes]]
+name = "screen_y82_z185"
+type = "property"
+pos = { x = 215, y = 82, z = 185 }
+property = "lit"
+
+[[probes]]
+name = "screen_y82_z186"
+type = "property"
+pos = { x = 215, y = 82, z = 186 }
+property = "lit"
+
+[[probes]]
+name = "screen_y82_z187"
+type = "property"
+pos = { x = 215, y = 82, z = 187 }
+property = "lit"
+
+[[probes]]
+name = "screen_y82_z188"
+type = "property"
+pos = { x = 215, y = 82, z = 188 }
+property = "lit"
+
+[[probes]]
+name = "screen_y82_z189"
+type = "property"
+pos = { x = 215, y = 82, z = 189 }
+property = "lit"
+
+[[probes]]
+name = "screen_y82_z190"
+type = "property"
+pos = { x = 215, y = 82, z = 190 }
+property = "lit"
+
+[[probes]]
+name = "screen_y82_z191"
+type = "property"
+pos = { x = 215, y = 82, z = 191 }
+property = "lit"
+
+[[probes]]
+name = "screen_y82_z192"
+type = "property"
+pos = { x = 215, y = 82, z = 192 }
+property = "lit"
+
+[[probes]]
+name = "screen_y82_z193"
+type = "property"
+pos = { x = 215, y = 82, z = 193 }
+property = "lit"
+
+[[probes]]
+name = "screen_y82_z194"
+type = "property"
+pos = { x = 215, y = 82, z = 194 }
+property = "lit"
+
+[[probes]]
+name = "screen_y82_z195"
+type = "property"
+pos = { x = 215, y = 82, z = 195 }
+property = "lit"
+
+[[probes]]
+name = "screen_y82_z196"
+type = "property"
+pos = { x = 215, y = 82, z = 196 }
+property = "lit"
+
+[[probes]]
+name = "screen_y82_z197"
+type = "property"
+pos = { x = 215, y = 82, z = 197 }
+property = "lit"
+
+[[probes]]
+name = "screen_y82_z198"
+type = "property"
+pos = { x = 215, y = 82, z = 198 }
+property = "lit"
+
+[[probes]]
+name = "screen_y82_z199"
+type = "property"
+pos = { x = 215, y = 82, z = 199 }
+property = "lit"
+
+[[probes]]
+name = "screen_y82_z200"
+type = "property"
+pos = { x = 215, y = 82, z = 200 }
+property = "lit"
+
+[[probes]]
+name = "screen_y82_z201"
+type = "property"
+pos = { x = 215, y = 82, z = 201 }
+property = "lit"
+
+[[probes]]
+name = "screen_y82_z202"
+type = "property"
+pos = { x = 215, y = 82, z = 202 }
+property = "lit"
+
+[[probes]]
+name = "screen_y82_z203"
+type = "property"
+pos = { x = 215, y = 82, z = 203 }
+property = "lit"
+
+[[probes]]
+name = "screen_y82_z204"
+type = "property"
+pos = { x = 215, y = 82, z = 204 }
+property = "lit"
+
+[[probes]]
+name = "screen_y82_z205"
+type = "property"
+pos = { x = 215, y = 82, z = 205 }
+property = "lit"
+
+[[probes]]
+name = "screen_y82_z206"
+type = "property"
+pos = { x = 215, y = 82, z = 206 }
+property = "lit"
+
+[[probes]]
+name = "screen_y82_z207"
+type = "property"
+pos = { x = 215, y = 82, z = 207 }
+property = "lit"
+
+[[probes]]
+name = "screen_y82_z208"
+type = "property"
+pos = { x = 215, y = 82, z = 208 }
+property = "lit"
+
+[[probes]]
+name = "screen_y82_z209"
+type = "property"
+pos = { x = 215, y = 82, z = 209 }
+property = "lit"
+
+[[probes]]
+name = "screen_y82_z210"
+type = "property"
+pos = { x = 215, y = 82, z = 210 }
+property = "lit"
+
+[[probes]]
+name = "screen_y82_z211"
+type = "property"
+pos = { x = 215, y = 82, z = 211 }
+property = "lit"
+
+[[probes]]
+name = "screen_y82_z212"
+type = "property"
+pos = { x = 215, y = 82, z = 212 }
+property = "lit"
+
+[[probes]]
+name = "screen_y82_z213"
+type = "property"
+pos = { x = 215, y = 82, z = 213 }
+property = "lit"
+
+[[probes]]
+name = "screen_y82_z214"
+type = "property"
+pos = { x = 215, y = 82, z = 214 }
+property = "lit"
+
+[[probes]]
+name = "screen_y82_z215"
+type = "property"
+pos = { x = 215, y = 82, z = 215 }
+property = "lit"
+
+[[probes]]
+name = "screen_y82_z216"
+type = "property"
+pos = { x = 215, y = 82, z = 216 }
+property = "lit"
+
+[[probes]]
+name = "screen_y82_z217"
+type = "property"
+pos = { x = 215, y = 82, z = 217 }
+property = "lit"
+
+[[probes]]
+name = "screen_y82_z218"
+type = "property"
+pos = { x = 215, y = 82, z = 218 }
+property = "lit"
+
+[[probes]]
+name = "screen_y82_z219"
+type = "property"
+pos = { x = 215, y = 82, z = 219 }
+property = "lit"
+
+[[probes]]
+name = "screen_y82_z220"
+type = "property"
+pos = { x = 215, y = 82, z = 220 }
+property = "lit"
+
+[[probes]]
+name = "screen_y82_z221"
+type = "property"
+pos = { x = 215, y = 82, z = 221 }
+property = "lit"
+
+[[probes]]
+name = "screen_y82_z222"
+type = "property"
+pos = { x = 215, y = 82, z = 222 }
+property = "lit"
+
+[[probes]]
+name = "screen_y82_z223"
+type = "property"
+pos = { x = 215, y = 82, z = 223 }
+property = "lit"
+
+[[probes]]
+name = "screen_y82_z224"
+type = "property"
+pos = { x = 215, y = 82, z = 224 }
+property = "lit"
+
+[[probes]]
+name = "screen_y82_z225"
+type = "property"
+pos = { x = 215, y = 82, z = 225 }
+property = "lit"
+
+[[probes]]
+name = "screen_y82_z226"
+type = "property"
+pos = { x = 215, y = 82, z = 226 }
+property = "lit"
+
+[[probes]]
+name = "screen_y82_z227"
+type = "property"
+pos = { x = 215, y = 82, z = 227 }
+property = "lit"
+
+[[expectations]]
+tick = 210000
+probe = "screen_y80_z179"
+equals = "false"
+
+[[expectations]]
+tick = 210000
+probe = "screen_y80_z180"
+equals = "true"
+
+[[expectations]]
+tick = 210000
+probe = "screen_y80_z181"
+equals = "true"
+
+[[expectations]]
+tick = 210000
+probe = "screen_y80_z182"
+equals = "true"
+
+[[expectations]]
+tick = 210000
+probe = "screen_y80_z183"
+equals = "true"
+
+[[expectations]]
+tick = 210000
+probe = "screen_y80_z184"
+equals = "true"
+
+[[expectations]]
+tick = 210000
+probe = "screen_y80_z185"
+equals = "true"
+
+[[expectations]]
+tick = 210000
+probe = "screen_y80_z186"
+equals = "true"
+
+[[expectations]]
+tick = 210000
+probe = "screen_y80_z187"
+equals = "true"
+
+[[expectations]]
+tick = 210000
+probe = "screen_y80_z188"
+equals = "true"
+
+[[expectations]]
+tick = 210000
+probe = "screen_y80_z189"
+equals = "true"
+
+[[expectations]]
+tick = 210000
+probe = "screen_y80_z190"
+equals = "true"
+
+[[expectations]]
+tick = 210000
+probe = "screen_y80_z191"
+equals = "true"
+
+[[expectations]]
+tick = 210000
+probe = "screen_y80_z192"
+equals = "true"
+
+[[expectations]]
+tick = 210000
+probe = "screen_y80_z193"
+equals = "true"
+
+[[expectations]]
+tick = 210000
+probe = "screen_y80_z194"
+equals = "true"
+
+[[expectations]]
+tick = 210000
+probe = "screen_y80_z195"
+equals = "true"
+
+[[expectations]]
+tick = 210000
+probe = "screen_y80_z196"
+equals = "true"
+
+[[expectations]]
+tick = 210000
+probe = "screen_y80_z197"
+equals = "true"
+
+[[expectations]]
+tick = 210000
+probe = "screen_y80_z198"
+equals = "true"
+
+[[expectations]]
+tick = 210000
+probe = "screen_y80_z199"
+equals = "true"
+
+[[expectations]]
+tick = 210000
+probe = "screen_y80_z200"
+equals = "true"
+
+[[expectations]]
+tick = 210000
+probe = "screen_y80_z201"
+equals = "true"
+
+[[expectations]]
+tick = 210000
+probe = "screen_y80_z202"
+equals = "true"
+
+[[expectations]]
+tick = 210000
+probe = "screen_y80_z203"
+equals = "true"
+
+[[expectations]]
+tick = 210000
+probe = "screen_y80_z204"
+equals = "true"
+
+[[expectations]]
+tick = 210000
+probe = "screen_y80_z205"
+equals = "true"
+
+[[expectations]]
+tick = 210000
+probe = "screen_y80_z206"
+equals = "true"
+
+[[expectations]]
+tick = 210000
+probe = "screen_y80_z207"
+equals = "true"
+
+[[expectations]]
+tick = 210000
+probe = "screen_y80_z208"
+equals = "true"
+
+[[expectations]]
+tick = 210000
+probe = "screen_y80_z209"
+equals = "true"
+
+[[expectations]]
+tick = 210000
+probe = "screen_y80_z210"
+equals = "true"
+
+[[expectations]]
+tick = 210000
+probe = "screen_y80_z211"
+equals = "true"
+
+[[expectations]]
+tick = 210000
+probe = "screen_y80_z212"
+equals = "true"
+
+[[expectations]]
+tick = 210000
+probe = "screen_y80_z213"
+equals = "true"
+
+[[expectations]]
+tick = 210000
+probe = "screen_y80_z214"
+equals = "true"
+
+[[expectations]]
+tick = 210000
+probe = "screen_y80_z215"
+equals = "true"
+
+[[expectations]]
+tick = 210000
+probe = "screen_y80_z216"
+equals = "true"
+
+[[expectations]]
+tick = 210000
+probe = "screen_y80_z217"
+equals = "true"
+
+[[expectations]]
+tick = 210000
+probe = "screen_y80_z218"
+equals = "true"
+
+[[expectations]]
+tick = 210000
+probe = "screen_y80_z219"
+equals = "true"
+
+[[expectations]]
+tick = 210000
+probe = "screen_y80_z220"
+equals = "true"
+
+[[expectations]]
+tick = 210000
+probe = "screen_y80_z221"
+equals = "true"
+
+[[expectations]]
+tick = 210000
+probe = "screen_y80_z222"
+equals = "true"
+
+[[expectations]]
+tick = 210000
+probe = "screen_y80_z223"
+equals = "true"
+
+[[expectations]]
+tick = 210000
+probe = "screen_y80_z224"
+equals = "true"
+
+[[expectations]]
+tick = 210000
+probe = "screen_y80_z225"
+equals = "true"
+
+[[expectations]]
+tick = 210000
+probe = "screen_y80_z226"
+equals = "true"
+
+[[expectations]]
+tick = 210000
+probe = "screen_y80_z227"
+equals = "true"
+
+[[expectations]]
+tick = 210000
+probe = "screen_y80_z228"
+equals = "false"
+
+[[expectations]]
+tick = 210000
+probe = "screen_y81_z179"
+equals = "false"
+
+[[expectations]]
+tick = 210000
+probe = "screen_y81_z180"
+equals = "true"
+
+[[expectations]]
+tick = 210000
+probe = "screen_y81_z181"
+equals = "true"
+
+[[expectations]]
+tick = 210000
+probe = "screen_y81_z182"
+equals = "true"
+
+[[expectations]]
+tick = 210000
+probe = "screen_y81_z183"
+equals = "true"
+
+[[expectations]]
+tick = 210000
+probe = "screen_y81_z184"
+equals = "true"
+
+[[expectations]]
+tick = 210000
+probe = "screen_y81_z185"
+equals = "true"
+
+[[expectations]]
+tick = 210000
+probe = "screen_y81_z186"
+equals = "true"
+
+[[expectations]]
+tick = 210000
+probe = "screen_y81_z187"
+equals = "true"
+
+[[expectations]]
+tick = 210000
+probe = "screen_y81_z188"
+equals = "true"
+
+[[expectations]]
+tick = 210000
+probe = "screen_y81_z189"
+equals = "true"
+
+[[expectations]]
+tick = 210000
+probe = "screen_y81_z190"
+equals = "true"
+
+[[expectations]]
+tick = 210000
+probe = "screen_y81_z191"
+equals = "true"
+
+[[expectations]]
+tick = 210000
+probe = "screen_y81_z192"
+equals = "true"
+
+[[expectations]]
+tick = 210000
+probe = "screen_y81_z193"
+equals = "true"
+
+[[expectations]]
+tick = 210000
+probe = "screen_y81_z194"
+equals = "true"
+
+[[expectations]]
+tick = 210000
+probe = "screen_y81_z195"
+equals = "true"
+
+[[expectations]]
+tick = 210000
+probe = "screen_y81_z196"
+equals = "true"
+
+[[expectations]]
+tick = 210000
+probe = "screen_y81_z197"
+equals = "true"
+
+[[expectations]]
+tick = 210000
+probe = "screen_y81_z198"
+equals = "true"
+
+[[expectations]]
+tick = 210000
+probe = "screen_y81_z199"
+equals = "true"
+
+[[expectations]]
+tick = 210000
+probe = "screen_y81_z200"
+equals = "true"
+
+[[expectations]]
+tick = 210000
+probe = "screen_y81_z201"
+equals = "true"
+
+[[expectations]]
+tick = 210000
+probe = "screen_y81_z202"
+equals = "true"
+
+[[expectations]]
+tick = 210000
+probe = "screen_y81_z203"
+equals = "true"
+
+[[expectations]]
+tick = 210000
+probe = "screen_y81_z204"
+equals = "true"
+
+[[expectations]]
+tick = 210000
+probe = "screen_y81_z205"
+equals = "true"
+
+[[expectations]]
+tick = 210000
+probe = "screen_y81_z206"
+equals = "true"
+
+[[expectations]]
+tick = 210000
+probe = "screen_y81_z207"
+equals = "true"
+
+[[expectations]]
+tick = 210000
+probe = "screen_y81_z208"
+equals = "true"
+
+[[expectations]]
+tick = 210000
+probe = "screen_y81_z209"
+equals = "true"
+
+[[expectations]]
+tick = 210000
+probe = "screen_y81_z210"
+equals = "true"
+
+[[expectations]]
+tick = 210000
+probe = "screen_y81_z211"
+equals = "true"
+
+[[expectations]]
+tick = 210000
+probe = "screen_y81_z212"
+equals = "true"
+
+[[expectations]]
+tick = 210000
+probe = "screen_y81_z213"
+equals = "true"
+
+[[expectations]]
+tick = 210000
+probe = "screen_y81_z214"
+equals = "true"
+
+[[expectations]]
+tick = 210000
+probe = "screen_y81_z215"
+equals = "true"
+
+[[expectations]]
+tick = 210000
+probe = "screen_y81_z216"
+equals = "true"
+
+[[expectations]]
+tick = 210000
+probe = "screen_y81_z217"
+equals = "true"
+
+[[expectations]]
+tick = 210000
+probe = "screen_y81_z218"
+equals = "true"
+
+[[expectations]]
+tick = 210000
+probe = "screen_y81_z219"
+equals = "true"
+
+[[expectations]]
+tick = 210000
+probe = "screen_y81_z220"
+equals = "true"
+
+[[expectations]]
+tick = 210000
+probe = "screen_y81_z221"
+equals = "true"
+
+[[expectations]]
+tick = 210000
+probe = "screen_y81_z222"
+equals = "true"
+
+[[expectations]]
+tick = 210000
+probe = "screen_y81_z223"
+equals = "true"
+
+[[expectations]]
+tick = 210000
+probe = "screen_y81_z224"
+equals = "true"
+
+[[expectations]]
+tick = 210000
+probe = "screen_y81_z225"
+equals = "true"
+
+[[expectations]]
+tick = 210000
+probe = "screen_y81_z226"
+equals = "true"
+
+[[expectations]]
+tick = 210000
+probe = "screen_y81_z227"
+equals = "true"
+
+[[expectations]]
+tick = 210000
+probe = "screen_y81_z228"
+equals = "false"
+
+[[expectations]]
+tick = 210000
+probe = "screen_y82_z180"
+equals = "false"
+
+[[expectations]]
+tick = 210000
+probe = "screen_y82_z181"
+equals = "false"
+
+[[expectations]]
+tick = 210000
+probe = "screen_y82_z182"
+equals = "false"
+
+[[expectations]]
+tick = 210000
+probe = "screen_y82_z183"
+equals = "false"
+
+[[expectations]]
+tick = 210000
+probe = "screen_y82_z184"
+equals = "false"
+
+[[expectations]]
+tick = 210000
+probe = "screen_y82_z185"
+equals = "false"
+
+[[expectations]]
+tick = 210000
+probe = "screen_y82_z186"
+equals = "false"
+
+[[expectations]]
+tick = 210000
+probe = "screen_y82_z187"
+equals = "false"
+
+[[expectations]]
+tick = 210000
+probe = "screen_y82_z188"
+equals = "false"
+
+[[expectations]]
+tick = 210000
+probe = "screen_y82_z189"
+equals = "false"
+
+[[expectations]]
+tick = 210000
+probe = "screen_y82_z190"
+equals = "false"
+
+[[expectations]]
+tick = 210000
+probe = "screen_y82_z191"
+equals = "false"
+
+[[expectations]]
+tick = 210000
+probe = "screen_y82_z192"
+equals = "false"
+
+[[expectations]]
+tick = 210000
+probe = "screen_y82_z193"
+equals = "false"
+
+[[expectations]]
+tick = 210000
+probe = "screen_y82_z194"
+equals = "false"
+
+[[expectations]]
+tick = 210000
+probe = "screen_y82_z195"
+equals = "false"
+
+[[expectations]]
+tick = 210000
+probe = "screen_y82_z196"
+equals = "false"
+
+[[expectations]]
+tick = 210000
+probe = "screen_y82_z197"
+equals = "false"
+
+[[expectations]]
+tick = 210000
+probe = "screen_y82_z198"
+equals = "false"
+
+[[expectations]]
+tick = 210000
+probe = "screen_y82_z199"
+equals = "false"
+
+[[expectations]]
+tick = 210000
+probe = "screen_y82_z200"
+equals = "false"
+
+[[expectations]]
+tick = 210000
+probe = "screen_y82_z201"
+equals = "false"
+
+[[expectations]]
+tick = 210000
+probe = "screen_y82_z202"
+equals = "false"
+
+[[expectations]]
+tick = 210000
+probe = "screen_y82_z203"
+equals = "false"
+
+[[expectations]]
+tick = 210000
+probe = "screen_y82_z204"
+equals = "false"
+
+[[expectations]]
+tick = 210000
+probe = "screen_y82_z205"
+equals = "false"
+
+[[expectations]]
+tick = 210000
+probe = "screen_y82_z206"
+equals = "false"
+
+[[expectations]]
+tick = 210000
+probe = "screen_y82_z207"
+equals = "false"
+
+[[expectations]]
+tick = 210000
+probe = "screen_y82_z208"
+equals = "false"
+
+[[expectations]]
+tick = 210000
+probe = "screen_y82_z209"
+equals = "false"
+
+[[expectations]]
+tick = 210000
+probe = "screen_y82_z210"
+equals = "false"
+
+[[expectations]]
+tick = 210000
+probe = "screen_y82_z211"
+equals = "false"
+
+[[expectations]]
+tick = 210000
+probe = "screen_y82_z212"
+equals = "false"
+
+[[expectations]]
+tick = 210000
+probe = "screen_y82_z213"
+equals = "false"
+
+[[expectations]]
+tick = 210000
+probe = "screen_y82_z214"
+equals = "false"
+
+[[expectations]]
+tick = 210000
+probe = "screen_y82_z215"
+equals = "false"
+
+[[expectations]]
+tick = 210000
+probe = "screen_y82_z216"
+equals = "false"
+
+[[expectations]]
+tick = 210000
+probe = "screen_y82_z217"
+equals = "false"
+
+[[expectations]]
+tick = 210000
+probe = "screen_y82_z218"
+equals = "false"
+
+[[expectations]]
+tick = 210000
+probe = "screen_y82_z219"
+equals = "false"
+
+[[expectations]]
+tick = 210000
+probe = "screen_y82_z220"
+equals = "false"
+
+[[expectations]]
+tick = 210000
+probe = "screen_y82_z221"
+equals = "false"
+
+[[expectations]]
+tick = 210000
+probe = "screen_y82_z222"
+equals = "false"
+
+[[expectations]]
+tick = 210000
+probe = "screen_y82_z223"
+equals = "false"
+
+[[expectations]]
+tick = 210000
+probe = "screen_y82_z224"
+equals = "false"
+
+[[expectations]]
+tick = 210000
+probe = "screen_y82_z225"
+equals = "false"
+
+[[expectations]]
+tick = 210000
+probe = "screen_y82_z226"
+equals = "false"
+
+[[expectations]]
+tick = 210000
+probe = "screen_y82_z227"
+equals = "false"
+
