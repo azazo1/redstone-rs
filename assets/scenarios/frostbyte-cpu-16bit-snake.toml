@@ -1,0 +1,84 @@
+version = "26.1.2"
+mode = "default"
+seed = 0
+max_ticks = 260000
+strict = true
+skip_oracle = true
+
+[monitor]
+skip_ticks = 259999
+
+[replay]
+duration_ms = 20000
+
+[replay.camera]
+view_distance = 8
+position = [275.79, 86.0, 202.74]
+yaw = 89.56
+pitch = -14.10
+
+[source]
+path = "../worlds/CPU_22_08_2025.zip"
+initialization = "raw"
+region = { min = { x = 9, y = 52, z = -1 }, max = { x = 287, y = 157, z = 397 } }
+
+[[source.pastes]]
+path = "../schematics/frostbyte-snake.schem"
+origin = { x = 64, y = 152, z = 389 }
+rotation = "none"
+mirror = "none"
+ignore_air = true
+paste_entities = false
+update = true
+
+[[actions]]
+tick = 100
+type = "press_button"
+pos = { x = 274, y = 88, z = 197 }
+
+# 控制实体初始停在控制器外侧.
+[[actions]]
+tick = 1000
+type = "spawn_entity"
+id = 100
+kind = "minecraft:generic_collision"
+position = [280.5, 86.1, 206.5]
+
+# 踩住上方向压力板.
+[[actions]]
+tick = 105000
+type = "move_entity"
+id = 100
+position = [275.5, 86.1, 207.5]
+
+[[actions]]
+tick = 145000
+type = "move_entity"
+id = 100
+position = [280.5, 86.1, 206.5]
+
+# 踩住左方向压力板.
+[[actions]]
+tick = 175000
+type = "move_entity"
+id = 100
+position = [274.5, 86.1, 208.5]
+
+[[actions]]
+tick = 215000
+type = "move_entity"
+id = 100
+position = [280.5, 86.1, 206.5]
+
+# 最后踩住下方向压力板.
+[[actions]]
+tick = 225000
+type = "move_entity"
+id = 100
+position = [275.5, 86.1, 209.5]
+
+[[actions]]
+tick = 255000
+type = "move_entity"
+id = 100
+position = [280.5, 86.1, 206.5]

@@ -1,0 +1,264 @@
+# FrostByte CPU 贪吃蛇.
+# 方向值复用控制器位: 上 1, 右 2, 下 4, 左 8.
+
+jmp .main
+
+.init
+adi r1 r0 1
+adi r2 r0 4
+adi r3 r0 528
+adi r4 r0 2
+adi r5 r0 656
+adi r7 r0 0
+adi r8 r0 31
+adi r12 r0 32
+
+# 蛇身存放在 D1 开始的连续内存中.
+adi r9 r0 1
+st r3 r9 0
+adi r10 r0 496
+adi r9 r0 2
+st r10 r9 0
+adi r10 r0 464
+adi r9 r0 3
+st r10 r9 0
+adi r10 r0 432
+adi r9 r0 4
+st r10 r9 0
+
+# 清屏并绘制初始蛇身和苹果.
+pt-st r0 p5
+pt-st r0 p6
+cal .draw-body
+cal .draw-apple
+pt-st r0 p7
+ret
+
+.draw-body
+pt-st r1 p5
+adi r15 r0 1
+.draw-body-loop
+ld r16 r15 0
+pt-st r16 p3
+pt-st r0 p4
+adi r15 r15 1
+sub r0 r2 r15
+bgt .draw-body-loop
+beq .draw-body-loop
+ret
+
+.draw-apple
+pt-st r1 p5
+pt-st r5 p3
+pt-st r0 p4
+ret
+
+.read-input
+pt-ld r6 p0
+
+# 上.
+adi r11 r0 1
+and r13 r6 r11
+sub r0 r13 r0
+beq .check-right
+adi r13 r0 4
+sub r0 r4 r13
+beq .check-right
+adi r4 r0 1
+ret
+
+.check-right
+adi r11 r0 2
+and r13 r6 r11
+sub r0 r13 r0
+beq .check-down
+adi r13 r0 8
+sub r0 r4 r13
+beq .check-down
+adi r4 r0 2
+ret
+
+.check-down
+adi r11 r0 4
+and r13 r6 r11
+sub r0 r13 r0
+beq .check-left
+adi r13 r0 1
+sub r0 r4 r13
+beq .check-left
+adi r4 r0 4
+ret
+
+.check-left
+adi r11 r0 8
+and r13 r6 r11
+sub r0 r13 r0
+beq .read-input-return
+adi r13 r0 2
+sub r0 r4 r13
+beq .read-input-return
+adi r4 r0 8
+
+.read-input-return
+ret
+
+.move-head
+# 上.
+sub r0 r4 r1
+bne .move-right
+and r13 r3 r8
+adi r11 r0 30
+sub r0 r13 r11
+beq .game-over
+adi r3 r3 1
+ret
+
+.move-right
+adi r11 r0 2
+sub r0 r4 r11
+bne .move-down
+adi r13 r3 0
+rsh r13 r13
+rsh r13 r13
+rsh r13 r13
+rsh r13 r13
+rsh r13 r13
+adi r11 r0 30
+sub r0 r13 r11
+beq .game-over
+add r3 r3 r12
+ret
+
+.move-down
+adi r11 r0 4
+sub r0 r4 r11
+bne .move-left
+and r13 r3 r8
+sub r0 r13 r1
+beq .game-over
+adi r3 r3 65535
+ret
+
+.move-left
+adi r13 r3 0
+rsh r13 r13
+rsh r13 r13
+rsh r13 r13
+rsh r13 r13
+rsh r13 r13
+sub r0 r13 r1
+beq .game-over
+sub r3 r3 r12
+ret
+
+.check-self
+adi r15 r0 1
+.check-self-loop
+ld r16 r15 0
+sub r0 r3 r16
+beq .game-over
+adi r15 r15 1
+sub r0 r2 r15
+bgt .check-self-loop
+beq .check-self-loop
+ret
+
+.check-apple
+adi r17 r0 0
+sub r0 r3 r5
+bne .check-apple-return
+adi r17 r0 1
+adi r2 r2 1
+cal .next-apple
+.check-apple-return
+ret
+
+# 苹果按固定路线循环生成.
+.next-apple
+adi r7 r7 1
+sub r0 r7 r1
+bne .apple-two
+adi r5 r0 660
+ret
+
+.apple-two
+adi r11 r0 2
+sub r0 r7 r11
+bne .apple-three
+adi r5 r0 468
+ret
+
+.apple-three
+adi r11 r0 3
+sub r0 r7 r11
+bne .apple-reset
+adi r5 r0 460
+ret
+
+.apple-reset
+adi r7 r0 0
+adi r5 r0 656
+ret
+
+.update-body
+# 未吃到苹果时先擦除尾部.
+sub r0 r17 r0
+bne .shift-body
+ld r14 r2 0
+pt-st r0 p5
+pt-st r14 p3
+pt-st r0 p4
+
+.shift-body
+adi r15 r2 0
+.shift-body-loop
+adi r18 r15 65535
+ld r16 r18 0
+st r16 r15 0
+adi r15 r15 65535
+sub r0 r15 r1
+bgt .shift-body-loop
+st r3 r1 0
+
+# 绘制新蛇头和当前苹果后刷新屏幕.
+pt-st r1 p5
+pt-st r3 p3
+pt-st r0 p4
+cal .draw-apple
+pt-st r0 p7
+ret
+
+.main
+cal .init
+.game-loop
+cal .read-input
+cal .move-head
+cal .check-self
+cal .check-apple
+cal .update-body
+jmp .game-loop
+
+.game-over
+adi r19 r0 2
+pt-st r19 p0
+adi r19 r0 "G"
+pt-st r19 p1
+adi r19 r0 "A"
+pt-st r19 p1
+adi r19 r0 "M"
+pt-st r19 p1
+adi r19 r0 "E"
+pt-st r19 p1
+adi r19 r0 " "
+pt-st r19 p1
+adi r19 r0 "O"
+pt-st r19 p1
+adi r19 r0 "V"
+pt-st r19 p1
+adi r19 r0 "E"
+pt-st r19 p1
+adi r19 r0 "R"
+pt-st r19 p1
+adi r19 r0 1
+pt-st r19 p0
+hlt
