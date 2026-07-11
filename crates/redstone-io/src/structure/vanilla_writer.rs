@@ -5,19 +5,13 @@ use redstone_core::{BlockPos, BlockStateId};
 use thiserror::Error;
 use tracing::info;
 
-use super::LoadedStructure;
+use super::{LoadedStructure, writer::StructureState};
 
-#[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd)]
-pub struct VanillaState {
-    pub name: String,
-    pub properties: BTreeMap<String, String>,
-}
-
-pub fn encode_vanilla_structure(
+pub(super) fn encode_vanilla_structure(
     structure: &LoadedStructure,
     include_air: bool,
     data_version: i32,
-    mut describe_state: impl FnMut(BlockStateId) -> Result<VanillaState, String>,
+    mut describe_state: impl FnMut(BlockStateId) -> Result<StructureState, String>,
 ) -> Result<Vec<u8>, VanillaWriteError> {
     let min = structure.region_min;
     let max = structure.region_max;
@@ -26,7 +20,7 @@ pub fn encode_vanilla_structure(
         dimension(min.y, max.y)?,
         dimension(min.z, max.z)?,
     ];
-    let mut palette = BTreeMap::<VanillaState, usize>::new();
+    let mut palette = BTreeMap::<StructureState, usize>::new();
     let mut blocks = Vec::new();
     let total = size
         .iter()
@@ -144,9 +138,9 @@ fn push_block(
     structure: &LoadedStructure,
     pos: BlockPos,
     origin: BlockPos,
-    palette: &mut BTreeMap<VanillaState, usize>,
+    palette: &mut BTreeMap<StructureState, usize>,
     blocks: &mut Vec<Value>,
-    describe_state: &mut impl FnMut(BlockStateId) -> Result<VanillaState, String>,
+    describe_state: &mut impl FnMut(BlockStateId) -> Result<StructureState, String>,
 ) -> Result<(), VanillaWriteError> {
     let state = structure.world.get_block(pos);
     let description = describe_state(state).map_err(VanillaWriteError::State)?;

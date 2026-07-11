@@ -8,7 +8,7 @@ use fastnbt::{ByteArray, LongArray, Value};
 use redstone_io::{Scenario, StructureFormat, StructureLoader};
 
 #[test]
-fn oracle_prepare_converts_all_supported_structure_formats_to_vanilla_nbt() {
+fn convert_scenario_converts_all_supported_structure_formats_to_vanilla_nbt() {
     let directory = TestDirectory::new();
     let litematic = directory.path().join("source.litematic");
     let schematic = directory.path().join("first.schem");
@@ -21,7 +21,7 @@ fn oracle_prepare_converts_all_supported_structure_formats_to_vanilla_nbt() {
     fs::write(&scenario, scenario_text()).unwrap();
 
     let output = Command::new(env!("CARGO_BIN_EXE_redstone"))
-        .arg("oracle-prepare")
+        .arg("convert")
         .arg(&scenario)
         .arg(&prepared)
         .output()
@@ -176,7 +176,7 @@ impl TestDirectory {
             .unwrap()
             .as_nanos();
         let path = std::env::temp_dir().join(format!(
-            "redstone-oracle-prepare-{}-{nonce}",
+            "redstone-convert-scenario-{}-{nonce}",
             std::process::id()
         ));
         fs::create_dir_all(&path).unwrap();

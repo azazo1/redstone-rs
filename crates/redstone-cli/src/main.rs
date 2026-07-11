@@ -12,7 +12,8 @@ use redstone_core::{
     SimulationConfig, SparseWorld, TraceEvent, TraceKind, WorldPaste,
 };
 use redstone_io::{
-    InitializationMode, Scenario, ScenarioActionKind, StructureLoader, StructureStateResolver,
+    InitializationMode, Scenario, ScenarioActionKind, StructureLoader, StructureRegion,
+    StructureStateResolver,
 };
 use redstone_java_26::{
     JAVA_DATA_VERSION, JAVA_VERSION, Java26Registry, Java26Rules, StateResolveError, StateResolver,
@@ -27,8 +28,8 @@ use tracing_subscriber::EnvFilter;
 use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::util::SubscriberInitExt;
 
+mod convert;
 mod inspect;
-mod oracle_prepare;
 mod replay_camera;
 
 #[derive(Debug, Parser)]
@@ -43,6 +44,13 @@ enum Command {
     Inspect {
         #[arg(help = "要检查的 litematic, schem 或 structure NBT 文件")]
         structure: PathBuf,
+        #[arg(
+            long,
+            value_name = "X_RANGE,Y_RANGE,Z_RANGE",
+            value_parser = inspect::parse_finite_region,
+            help = "读取 Minecraft 世界目录时限制有限区域"
+        )]
+        region: Option<StructureRegion>,
         #[arg(
             long = "block",
             value_name = "X_OR_RANGE,Y_OR_RANGE,Z_OR_RANGE",
@@ -122,10 +130,16 @@ enum Command {
         #[arg(long, default_value_t = 100)]
         ticks: usize,
     },
-    #[command(hide = true)]
-    OraclePrepare {
-        scenario: PathBuf,
+    Convert {
+        input: PathBuf,
         output: PathBuf,
+        #[arg(
+            long,
+            value_name = "X_RANGE,Y_RANGE,Z_RANGE",
+            value_parser = inspect::parse_finite_region,
+            help = "读取 Minecraft 世界目录时限制有限区域"
+        )]
+        region: Option<StructureRegion>,
     },
 }
 
@@ -147,6 +161,7 @@ async fn main() -> Result<()> {
     match cli.command {
         Command::Inspect {
             structure,
+            region,
             blocks,
             all,
             block_types,
@@ -154,6 +169,7 @@ async fn main() -> Result<()> {
             json,
         } => inspect::run(
             &structure,
+            region,
             &blocks,
             all,
             &block_types,
@@ -204,7 +220,11 @@ async fn main() -> Result<()> {
             active,
             ticks,
         } => bench(blocks, active, ticks),
-        Command::OraclePrepare { scenario, output } => oracle_prepare::run(&scenario, &output),
+        Command::Convert {
+            input,
+            output,
+            region,
+        } => convert::run(&input, &output, region),
     }
 }
 
@@ -399,9 +419,9 @@ fn execute_scenario(
         bail!("场景版本必须是 {JAVA_VERSION}, 收到 {}", scenario.version);
     }
     let mut resolver = RegistryResolver(Java26Registry::new());
-    let loaded = StructureLoader::load_transformed(
+    let loaded = StructureLoader::load_with_options(
         &scenario.source.path,
-        scenario.source.transform(),
+        scenario.source.load_options(),
         &mut resolver,
     )?;
     reject_newer_data_version(loaded.data_version)?;
@@ -418,9 +438,9 @@ fn execute_scenario(
                 scenario.max_ticks
             );
         }
-        let structure = StructureLoader::load_transformed(
+        let structure = StructureLoader::load_with_options(
             &paste.path,
-            paste.transform(),
+            paste.load_options(),
             &mut resolver,
         )?;
         reject_newer_data_version(structure.data_version)?;
@@ -832,7 +852,7 @@ async fn compare_with_oracle(scenario: &Path, rust_trace: &Path) -> Result<()> {
             .arg(&oracle_trace)
             .env(
                 "REDSTONE_ORACLE_CONVERTER",
-                oracle_prepare::converter_executable()?,
+                convert::converter_executable()?,
             )
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())

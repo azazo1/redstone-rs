@@ -9,7 +9,7 @@ use redstone_core::{
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
-use crate::{Mirror, Rotation, StructureTransform};
+use crate::{Mirror, Rotation, StructureLoadOptions, StructureRegion, StructureTransform};
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct Scenario {
@@ -112,6 +112,8 @@ pub struct ScenarioSource {
     pub rotation: Rotation,
     #[serde(default)]
     pub mirror: Mirror,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub region: Option<StructureRegion>,
     #[serde(default)]
     pub pastes: Vec<ScenarioPaste>,
 }
@@ -122,6 +124,13 @@ impl ScenarioSource {
             origin: self.origin,
             rotation: self.rotation,
             mirror: self.mirror,
+        }
+    }
+
+    pub fn load_options(&self) -> StructureLoadOptions {
+        StructureLoadOptions {
+            transform: self.transform(),
+            region: self.region,
         }
     }
 }
@@ -137,6 +146,8 @@ pub struct ScenarioPaste {
     pub rotation: Rotation,
     #[serde(default)]
     pub mirror: Mirror,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub region: Option<StructureRegion>,
     #[serde(default)]
     pub ignore_air: bool,
     #[serde(default)]
@@ -151,6 +162,13 @@ impl ScenarioPaste {
             origin: self.origin,
             rotation: self.rotation,
             mirror: self.mirror,
+        }
+    }
+
+    pub fn load_options(&self) -> StructureLoadOptions {
+        StructureLoadOptions {
+            transform: self.transform(),
+            region: self.region,
         }
     }
 }

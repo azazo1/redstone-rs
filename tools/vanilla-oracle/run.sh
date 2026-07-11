@@ -22,9 +22,9 @@ work="$(mktemp -d)"
 trap 'rm -rf "$work"' EXIT
 prepared="$work/scenario.toml"
 if [ -n "${REDSTONE_ORACLE_CONVERTER:-}" ]; then
-  "$REDSTONE_ORACLE_CONVERTER" oracle-prepare "$1" "$prepared"
+  "$REDSTONE_ORACLE_CONVERTER" convert "$1" "$prepared"
 else
-  cargo run --quiet -p redstone-cli -- oracle-prepare "$1" "$prepared"
+  cargo run --quiet -p redstone-cli -- convert "$1" "$prepared"
 fi
 
 classpath="$oracle_jar:$client:$(find "$libraries" "$oracle_libraries" -name '*.jar' -type f | sort | paste -sd ':' -)"

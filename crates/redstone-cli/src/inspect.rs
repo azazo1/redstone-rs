@@ -5,7 +5,9 @@ use std::path::Path;
 use anyhow::{Context, Result, anyhow};
 use clap::ValueEnum;
 use redstone_core::{BlockPos, BlockStateId};
-use redstone_io::{LoadedStructure, StructureLoader};
+use redstone_io::{
+    LoadedStructure, StructureLoadOptions, StructureLoader, StructureRegion, StructureTransform,
+};
 use redstone_java_26::{Java26Registry, StateDefinition};
 use serde::Serialize;
 
@@ -101,6 +103,42 @@ pub(crate) fn parse_block_selector(value: &str) -> Result<BlockSelector, String>
     })
 }
 
+pub(crate) fn parse_finite_region(value: &str) -> Result<StructureRegion, String> {
+    let coordinates = value.split(',').map(str::trim).collect::<Vec<_>>();
+    if coordinates.len() != 3 {
+        return Err("region 必须使用 X_RANGE,Y_RANGE,Z_RANGE 格式".to_owned());
+    }
+    let x = finite_axis(coordinates[0])?;
+    let y = finite_axis(coordinates[1])?;
+    let z = finite_axis(coordinates[2])?;
+    Ok(StructureRegion::new(
+        BlockPos::new(x.0, y.0, z.0),
+        BlockPos::new(x.1, y.1, z.1),
+    ))
+}
+
+fn finite_axis(value: &str) -> Result<(i32, i32), String> {
+    let (axis, point) = parse_axis_range(value)?;
+    if let Some(point) = point {
+        return Ok((point, point));
+    }
+    let start = match axis.start {
+        Bound::Included(value) => value,
+        _ => return Err(format!("region 范围缺少有限下界: {value}")),
+    };
+    let end = match axis.end {
+        Bound::Included(value) => value,
+        Bound::Excluded(value) => value
+            .checked_sub(1)
+            .ok_or_else(|| format!("region 半开范围上界溢出: {value}"))?,
+        Bound::Unbounded => return Err(format!("region 范围缺少有限上界: {value}")),
+    };
+    if start > end {
+        return Err(format!("region 范围为空: {value}"));
+    }
+    Ok((start, end))
+}
+
 fn parse_axis_range(value: &str) -> Result<(AxisRange, Option<i32>), String> {
     if let Some((start, end)) = value.split_once("..=") {
         reject_additional_range_operator(start, end, value)?;
@@ -153,13 +191,21 @@ fn parse_coordinate(value: &str) -> Result<i32, String> {
 
 pub fn run(
     path: &Path,
+    region: Option<StructureRegion>,
     requested_blocks: &[BlockSelector],
     all: bool,
     requested_types: &[String],
     output_format: OutputFormat,
 ) -> Result<()> {
     let mut resolver = RegistryResolver(Java26Registry::new());
-    let structure = StructureLoader::load(path, BlockPos::ZERO, &mut resolver)?;
+    let structure = StructureLoader::load_with_options(
+        path,
+        StructureLoadOptions {
+            transform: StructureTransform::default(),
+            region,
+        },
+        &mut resolver,
+    )?;
     reject_newer_data_version(structure.data_version)?;
 
     let unsupported_active_blocks = resolver
@@ -187,6 +233,10 @@ pub fn run(
         bounds: InspectBounds {
             min: structure.min,
             max: structure.max,
+        },
+        region_bounds: InspectBounds {
+            min: structure.region_min,
+            max: structure.region_max,
         },
         non_air_blocks: structure.world.non_air_blocks(),
         sections: structure.world.section_count(),
@@ -311,6 +361,10 @@ fn write_text(report: &InspectReport<'_>) -> Result<()> {
     println!("format: {}", report.format);
     println!("data_version: {:?}", report.data_version);
     println!("bounds: {:?} .. {:?}", report.bounds.min, report.bounds.max);
+    println!(
+        "region_bounds: {:?} .. {:?}",
+        report.region_bounds.min, report.region_bounds.max
+    );
     println!("non_air_blocks: {}", report.non_air_blocks);
     println!("sections: {}", report.sections);
     println!("block_types:");
@@ -359,6 +413,7 @@ struct InspectReport<'a> {
     format: &'a str,
     data_version: Option<i32>,
     bounds: InspectBounds,
+    region_bounds: InspectBounds,
     non_air_blocks: usize,
     sections: usize,
     block_types: &'a BTreeMap<String, usize>,
@@ -431,5 +486,15 @@ mod tests {
         assert!(parse_block_selector("1,two,3").is_err());
         assert!(parse_block_selector("1..=,2,3").is_err());
         assert!(parse_block_selector("1..2..3,0,0").is_err());
+    }
+
+    #[test]
+    fn finite_region_requires_bounded_non_empty_axes() {
+        let region = parse_finite_region("-2..=3,0..16,5").unwrap();
+        assert_eq!(region.min, BlockPos::new(-2, 0, 5));
+        assert_eq!(region.max, BlockPos::new(3, 15, 5));
+        assert!(parse_finite_region("..3,0..1,0..1").is_err());
+        assert!(parse_finite_region("0..,0..1,0..1").is_err());
+        assert!(parse_finite_region("0..0,0..1,0..1").is_err());
     }
 }

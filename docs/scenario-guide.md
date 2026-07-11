@@ -118,6 +118,17 @@ mirror = "none"
 
 支持 `.litematic`, `.schem`, `.nbt` 和 `.structure` 文件.
 
+Java 26.1.2 世界目录也可以直接作为 `source.path` 或 paste 路径. 当前固定读取 `minecraft:overworld`. 普通世界必须声明有限 `region`, 严格虚空世界可以省略:
+
+```toml
+[source]
+path = "../worlds/redstone-lab"
+initialization = "raw"
+region = { min = { x = -128, y = -64, z = -128 }, max = { x = 127, y = 319, z = 127 } }
+```
+
+`region` 使用包含首尾坐标的闭区间. 它在 `origin`, rotation 和 mirror 之前应用于存档绝对坐标. 世界导入保留方块状态, 方块实体 NBT 和普通实体, 但不导入 scheduled ticks, POI, biome, lighting, 玩家数据或世界规则.
+
 ### 粘贴附加结构
 
 主结构加载完成后, 可以按顺序粘贴 ROM 或其他附加结构:
@@ -151,6 +162,7 @@ update = true
 | `initialization` | `"notify"`, `"raw"` | `"notify"` | 是否在装载后执行初始化更新 |
 | `rotation` | `"none"`, `"clockwise90"`, `"clockwise180"`, `"counterclockwise90"` | `"none"` | 绕 Y 轴旋转结构 |
 | `mirror` | `"none"`, `"left_right"`, `"front_back"` | `"none"` | 镜像结构 |
+| `region` | `{ min = { x, y, z }, max = { x, y, z } }` | 严格虚空世界自动确定 | 世界目录读取范围, 普通世界必须提供 |
 
 变换顺序为先镜像, 再旋转, 最后加上 `origin`. `left_right` 翻转 Z 轴, `front_back` 翻转 X 轴.
 

@@ -8,6 +8,7 @@ authors.workspace = true
 [dependencies]
 fastnbt.workspace = true
 flate2.workspace = true
+lz4-java-wrc = "0.2.0"
 redstone-core = { path = "../redstone-core" }
 serde.workspace = true
 serde_json.workspace = true

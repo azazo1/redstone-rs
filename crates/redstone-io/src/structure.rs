@@ -10,11 +10,18 @@ use thiserror::Error;
 use tracing::info;
 
 mod litematic;
+mod litematic_writer;
 mod sponge;
+mod sponge_writer;
 mod vanilla;
 mod vanilla_writer;
+mod world;
+mod writer;
 
-pub use vanilla_writer::{VanillaState, VanillaWriteError, encode_vanilla_structure};
+pub use vanilla_writer::VanillaWriteError;
+pub use writer::{
+    StructureState, StructureWriteError, StructureWriteOptions, StructureWriter,
+};
 
 pub trait StructureStateResolver {
     type Error: std::error::Error + Send + Sync + 'static;
@@ -41,6 +48,42 @@ pub enum StructureFormat {
     Litematic,
     SpongeSchematic,
     VanillaStructure,
+    MinecraftWorld,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, serde::Deserialize, serde::Serialize)]
+pub struct StructureRegion {
+    pub min: BlockPos,
+    pub max: BlockPos,
+}
+
+impl StructureRegion {
+    pub fn new(first: BlockPos, second: BlockPos) -> Self {
+        Self {
+            min: BlockPos::new(
+                first.x.min(second.x),
+                first.y.min(second.y),
+                first.z.min(second.z),
+            ),
+            max: BlockPos::new(
+                first.x.max(second.x),
+                first.y.max(second.y),
+                first.z.max(second.z),
+            ),
+        }
+    }
+
+    pub fn contains(self, pos: BlockPos) -> bool {
+        (self.min.x..=self.max.x).contains(&pos.x)
+            && (self.min.y..=self.max.y).contains(&pos.y)
+            && (self.min.z..=self.max.z).contains(&pos.z)
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct StructureLoadOptions {
+    pub transform: StructureTransform,
+    pub region: Option<StructureRegion>,
 }
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq, serde::Deserialize, serde::Serialize)]
@@ -122,6 +165,9 @@ pub struct StructureLoader;
 
 impl StructureLoader {
     pub fn detect(path: &Path) -> Result<StructureFormat, StructureError> {
+        if path.is_dir() {
+            return Ok(StructureFormat::MinecraftWorld);
+        }
         match path.extension().and_then(|extension| extension.to_str()) {
             Some("litematic") => Ok(StructureFormat::Litematic),
             Some("schem") => Ok(StructureFormat::SpongeSchematic),
@@ -135,11 +181,14 @@ impl StructureLoader {
         origin: BlockPos,
         resolver: &mut R,
     ) -> Result<LoadedStructure, StructureError> {
-        Self::load_transformed(
+        Self::load_with_options(
             path,
-            StructureTransform {
-                origin,
-                ..StructureTransform::default()
+            StructureLoadOptions {
+                transform: StructureTransform {
+                    origin,
+                    ..StructureTransform::default()
+                },
+                region: None,
             },
             resolver,
         )
@@ -150,14 +199,40 @@ impl StructureLoader {
         transform: StructureTransform,
         resolver: &mut R,
     ) -> Result<LoadedStructure, StructureError> {
+        Self::load_with_options(
+            path,
+            StructureLoadOptions {
+                transform,
+                region: None,
+            },
+            resolver,
+        )
+    }
+
+    pub fn load_with_options<R: StructureStateResolver>(
+        path: impl AsRef<Path>,
+        options: StructureLoadOptions,
+        resolver: &mut R,
+    ) -> Result<LoadedStructure, StructureError> {
         let path = path.as_ref();
         let format = Self::detect(path)?;
+        if format == StructureFormat::MinecraftWorld {
+            return world::load(path, options, resolver);
+        }
+        if options.region.is_some() {
+            return Err(StructureError::RegionOnlyForWorld);
+        }
         let root = read_nbt(path)?;
         info!(path = %path.display(), ?format, "读取结构文件");
         match format {
-            StructureFormat::VanillaStructure => vanilla::load(root, transform, resolver),
-            StructureFormat::Litematic => litematic::load(root, transform, resolver),
-            StructureFormat::SpongeSchematic => sponge::load(root, transform, resolver),
+            StructureFormat::VanillaStructure => {
+                vanilla::load(root, options.transform, resolver)
+            }
+            StructureFormat::Litematic => litematic::load(root, options.transform, resolver),
+            StructureFormat::SpongeSchematic => {
+                sponge::load(root, options.transform, resolver)
+            }
+            StructureFormat::MinecraftWorld => unreachable!(),
         }
     }
 }
@@ -770,6 +845,8 @@ pub enum StructureError {
     Nbt(fastnbt::error::Error),
     #[error("无法识别结构格式: {0}")]
     UnknownFormat(PathBuf),
+    #[error("只有 Minecraft 世界目录支持 region 读取范围")]
+    RegionOnlyForWorld,
     #[error("缺少字段: {0}")]
     MissingField(String),
     #[error("NBT 字段类型无效, 期望 {0}")]
@@ -780,6 +857,8 @@ pub enum StructureError {
     InvalidSpongeSchematic(String),
     #[error("方块状态解析失败: {0}")]
     Resolve(String),
+    #[error("Minecraft 世界读取失败: {0}")]
+    MinecraftWorld(String),
     #[error(transparent)]
     World(#[from] redstone_core::WorldError),
 }

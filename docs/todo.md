@@ -44,7 +44,7 @@
 - [x] 模拟过程能使用 Replay mod 格式兼容的录制导出.
 - [x] 为 Replay Mod 录像导出告示牌等方块实体, 包含 block entity type, `front_text`/`back_text` NBT 和运行中的方块实体更新包. 并且支持容器方块内容导出等信息.
 - [x] 编写 litematica, nbt 等文件的更详细的方块信息 inspect, 而不只是汇总信息, 要能查询包括方块自身 nbt / components 等标签的详细信息.
-- [ ] 子命令 oracle-prepare 改成通用的结构文件之间的转换.
+- [x] 将 oracle 场景准备提取为通用 convert, 支持结构格式互转和 Java 26.1.2 主世界范围导入.
 
 ## 真实游戏探针
 
@@ -60,7 +60,7 @@
 
 ## 暂不支持
 
-- 完整世界存档和区块 ticket.
+- 世界存档写回和区块 ticket.
 - 随机刻, 流体, 火和爆炸世界修改.
 - 世界生成, 生物 AI 和完整玩家物理.
 - 多版本兼容层.
