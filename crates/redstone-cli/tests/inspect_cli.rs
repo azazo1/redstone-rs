@@ -62,6 +62,48 @@ fn inspect_queries_real_litematic_block_entities_by_type() {
     }));
 }
 
+#[test]
+fn inspect_queries_sparse_ranges_with_types_and_stable_union() {
+    let directory = TestDirectory::new("inspect-range");
+    let structure_path = directory.path().join("range.nbt");
+    fs::write(&structure_path, range_structure()).unwrap();
+
+    let range_output = inspect(
+        &structure_path,
+        &[
+            "--block",
+            "4..=2,0,0",
+            "--block",
+            "0..2,0,0",
+            "--block",
+            "4,0,0",
+            "--json",
+        ],
+    );
+    assert_success(&range_output);
+    let range_report = serde_json::from_slice::<serde_json::Value>(&range_output.stdout).unwrap();
+    assert_eq!(block_x_positions(&range_report), vec![0, 2, 4]);
+
+    let typed_output = inspect(
+        &structure_path,
+        &["--block", "..,..,..", "--type", "stone", "--json"],
+    );
+    assert_success(&typed_output);
+    let typed_report = serde_json::from_slice::<serde_json::Value>(&typed_output.stdout).unwrap();
+    assert_eq!(block_x_positions(&typed_report), vec![0, 4]);
+    assert!(typed_report["blocks"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .all(|block| block["state"]["name"] == "minecraft:stone"));
+
+    let air_output = inspect(&structure_path, &["--block", "1,0,0", "--json"]);
+    assert_success(&air_output);
+    let air_report = serde_json::from_slice::<serde_json::Value>(&air_output.stdout).unwrap();
+    assert_eq!(block_x_positions(&air_report), vec![1]);
+    assert_eq!(air_report["blocks"][0]["state"]["name"], "minecraft:air");
+}
+
 fn inspect(path: &Path, args: &[&str]) -> Output {
     Command::new(env!("CARGO_BIN_EXE_redstone"))
         .arg("inspect")
@@ -107,6 +149,42 @@ fn structure() -> Vec<u8> {
         ("entities".to_owned(), Value::List(Vec::new())),
     ]);
     fastnbt::to_bytes(&root).unwrap()
+}
+
+fn range_structure() -> Vec<u8> {
+    let root = HashMap::from([
+        ("DataVersion".to_owned(), Value::Int(4790)),
+        (
+            "size".to_owned(),
+            Value::List(vec![Value::Int(5), Value::Int(1), Value::Int(1)]),
+        ),
+        (
+            "palette".to_owned(),
+            Value::List(vec![
+                block_state("minecraft:stone", &[]),
+                block_state("minecraft:dirt", &[]),
+            ]),
+        ),
+        (
+            "blocks".to_owned(),
+            Value::List(vec![
+                structure_block(0, 0, None),
+                structure_block(2, 1, None),
+                structure_block(4, 0, None),
+            ]),
+        ),
+        ("entities".to_owned(), Value::List(Vec::new())),
+    ]);
+    fastnbt::to_bytes(&root).unwrap()
+}
+
+fn block_x_positions(report: &serde_json::Value) -> Vec<i64> {
+    report["blocks"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|block| block["position"]["x"].as_i64().unwrap())
+        .collect()
 }
 
 fn block_state(name: &str, properties: &[(&str, &str)]) -> Value {

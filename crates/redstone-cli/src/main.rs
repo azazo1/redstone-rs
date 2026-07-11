@@ -45,12 +45,12 @@ enum Command {
         structure: PathBuf,
         #[arg(
             long = "block",
-            value_name = "X,Y,Z",
-            value_parser = inspect::parse_block_pos,
-            conflicts_with_all = ["all", "block_types"],
-            help = "查询指定坐标的方块, 可重复使用"
+            value_name = "X_OR_RANGE,Y_OR_RANGE,Z_OR_RANGE",
+            value_parser = inspect::parse_block_selector,
+            conflicts_with = "all",
+            help = "按坐标或 Rust 风格范围查询方块, 可重复使用"
         )]
-        blocks: Vec<BlockPos>,
+        blocks: Vec<inspect::BlockSelector>,
         #[arg(
             long,
             conflicts_with_all = ["blocks", "block_types"],
@@ -61,7 +61,7 @@ enum Command {
             long = "type",
             visible_aliases = ["block-type", "name"],
             value_name = "BLOCK_ID",
-            conflicts_with_all = ["blocks", "all"],
+            conflicts_with = "all",
             help = "按方块 ID 筛选, 可重复使用"
         )]
         block_types: Vec<String>,

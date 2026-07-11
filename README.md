@@ -48,6 +48,7 @@ just test
 ```shell
 cargo run -p redstone-cli -- inspect machine.litematic
 cargo run -p redstone-cli -- inspect machine.litematic --block 10,20,30
+cargo run -p redstone-cli -- inspect machine.litematic --block 0..=10,5,0.. --type minecraft:hopper
 cargo run -p redstone-cli -- inspect machine.litematic --type minecraft:hopper --format json
 cargo run -p redstone-cli -- inspect machine.litematic --all --json
 cargo run -p redstone-cli -- run scenario.toml --trace trace.jsonl --vcd signals.vcd
@@ -58,7 +59,7 @@ cargo run -p redstone-cli -- test scenarios
 cargo run --release -p redstone-cli -- bench
 ```
 
-`inspect` 默认输出结构汇总. `--block X,Y,Z` 可重复查询指定坐标, `--type BLOCK_ID` 按方块类型筛选, `--all` 输出全部非空气方块. 明细包含状态 ID, properties, 支持状态和完整方块实体 NBT, 包括嵌套的 `components`. `--format json` 与 `--json` 均可输出 JSON.
+`inspect` 默认输出结构汇总. `--block X,Y,Z` 可重复查询指定坐标, 每个坐标轴也支持 `a..b`, `a..=b`, `..b`, `..=b`, `a..` 和 `..` 范围. 范围只返回非空气方块, 并可叠加 `--type BLOCK_ID` 按方块类型筛选. `--all` 输出全部非空气方块. 明细包含状态 ID, properties, 支持状态和完整方块实体 NBT, 包括嵌套的 `components`. `--format json` 与 `--json` 均可输出 JSON.
 
 `run --replay` 和单场景 `test --replay` 会直接从 Rust 仿真生成 Replay Mod 格式 14 录像. 录像目标版本为 Minecraft `26.1.2`, 每个游戏 tick 对应 50 ms. 初始原理图声明区域覆盖的全部 chunk 会在同一批次加载, 外围保留一圈渲染邻居. 后续方块变化进入新 chunk 时只加载目标 chunk 的局部邻接圈, 可随飞行器移动持续扩展, 不会补齐与原理图之间的无关 chunk. 目录批量测试暂不支持共享录像输出路径. 断言失败时录像仍会完成并保留, 仿真或编码失败时不会替换目标文件.
 

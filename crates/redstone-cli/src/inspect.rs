@@ -1,4 +1,5 @@
 use std::collections::{BTreeMap, BTreeSet};
+use std::ops::Bound;
 use std::path::Path;
 
 use anyhow::{Context, Result, anyhow};
@@ -16,26 +17,143 @@ pub enum OutputFormat {
     Json,
 }
 
-pub fn parse_block_pos(value: &str) -> Result<BlockPos, String> {
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) struct BlockSelector {
+    region: BlockRegion,
+    point: Option<BlockPos>,
+}
+
+impl BlockSelector {
+    fn matches(self, pos: BlockPos) -> bool {
+        self.region.x.contains(pos.x)
+            && self.region.y.contains(pos.y)
+            && self.region.z.contains(pos.z)
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct BlockRegion {
+    x: AxisRange,
+    y: AxisRange,
+    z: AxisRange,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct AxisRange {
+    start: Bound<i32>,
+    end: Bound<i32>,
+}
+
+impl AxisRange {
+    fn point(value: i32) -> Self {
+        Self {
+            start: Bound::Included(value),
+            end: Bound::Included(value),
+        }
+    }
+
+    fn new(start: Option<i32>, end: Option<i32>, inclusive_end: bool) -> Self {
+        let (start, end) = match (start, end) {
+            (Some(start), Some(end)) if start > end => (Some(end), Some(start)),
+            bounds => bounds,
+        };
+        Self {
+            start: start.map_or(Bound::Unbounded, Bound::Included),
+            end: end.map_or(Bound::Unbounded, |value| {
+                if inclusive_end {
+                    Bound::Included(value)
+                } else {
+                    Bound::Excluded(value)
+                }
+            }),
+        }
+    }
+
+    fn contains(self, value: i32) -> bool {
+        let after_start = match self.start {
+            Bound::Included(start) => value >= start,
+            Bound::Excluded(start) => value > start,
+            Bound::Unbounded => true,
+        };
+        let before_end = match self.end {
+            Bound::Included(end) => value <= end,
+            Bound::Excluded(end) => value < end,
+            Bound::Unbounded => true,
+        };
+        after_start && before_end
+    }
+}
+
+pub(crate) fn parse_block_selector(value: &str) -> Result<BlockSelector, String> {
     let coordinates = value.split(',').map(str::trim).collect::<Vec<_>>();
     if coordinates.len() != 3 {
-        return Err("坐标必须使用 X,Y,Z 格式".to_owned());
+        return Err("方块选择器必须使用 X,Y,Z 格式".to_owned());
     }
-    let parse = |coordinate: &str| {
-        coordinate
-            .parse::<i32>()
-            .map_err(|_| format!("坐标值不是有效的 32 位整数: {coordinate}"))
-    };
-    Ok(BlockPos::new(
-        parse(coordinates[0])?,
-        parse(coordinates[1])?,
-        parse(coordinates[2])?,
-    ))
+    let (x, point_x) = parse_axis_range(coordinates[0])?;
+    let (y, point_y) = parse_axis_range(coordinates[1])?;
+    let (z, point_z) = parse_axis_range(coordinates[2])?;
+    Ok(BlockSelector {
+        region: BlockRegion { x, y, z },
+        point: match (point_x, point_y, point_z) {
+            (Some(x), Some(y), Some(z)) => Some(BlockPos::new(x, y, z)),
+            _ => None,
+        },
+    })
+}
+
+fn parse_axis_range(value: &str) -> Result<(AxisRange, Option<i32>), String> {
+    if let Some((start, end)) = value.split_once("..=") {
+        reject_additional_range_operator(start, end, value)?;
+        if end.trim().is_empty() {
+            return Err(format!("闭区间范围缺少上界: {value}"));
+        }
+        return Ok((
+            AxisRange::new(parse_optional_coordinate(start)?, Some(parse_coordinate(end)?), true),
+            None,
+        ));
+    }
+    if let Some((start, end)) = value.split_once("..") {
+        reject_additional_range_operator(start, end, value)?;
+        return Ok((
+            AxisRange::new(
+                parse_optional_coordinate(start)?,
+                parse_optional_coordinate(end)?,
+                false,
+            ),
+            None,
+        ));
+    }
+
+    let coordinate = parse_coordinate(value)?;
+    Ok((AxisRange::point(coordinate), Some(coordinate)))
+}
+
+fn reject_additional_range_operator(start: &str, end: &str, value: &str) -> Result<(), String> {
+    if start.contains("..") || end.contains("..") {
+        return Err(format!("范围包含多个运算符: {value}"));
+    }
+    Ok(())
+}
+
+fn parse_optional_coordinate(value: &str) -> Result<Option<i32>, String> {
+    let value = value.trim();
+    if value.is_empty() {
+        Ok(None)
+    } else {
+        parse_coordinate(value).map(Some)
+    }
+}
+
+fn parse_coordinate(value: &str) -> Result<i32, String> {
+    let value = value.trim();
+    value
+        .parse::<i32>()
+        .map_err(|_| format!("坐标值不是有效的 32 位整数: {value}"))
 }
 
 pub fn run(
     path: &Path,
-    requested_positions: &[BlockPos],
+    requested_blocks: &[BlockSelector],
     all: bool,
     requested_types: &[String],
     output_format: OutputFormat,
@@ -55,7 +173,7 @@ pub fn run(
     let positions = selected_positions(
         &structure,
         &resolver.0,
-        requested_positions,
+        requested_blocks,
         all,
         requested_types,
     )?;
@@ -89,17 +207,10 @@ pub fn run(
 fn selected_positions(
     structure: &LoadedStructure,
     registry: &Java26Registry,
-    requested_positions: &[BlockPos],
+    requested_blocks: &[BlockSelector],
     all: bool,
     requested_types: &[String],
 ) -> Result<Vec<BlockPos>> {
-    if !requested_positions.is_empty() {
-        return Ok(requested_positions.to_vec());
-    }
-    if !all && requested_types.is_empty() {
-        return Ok(Vec::new());
-    }
-
     let requested_types = requested_types
         .iter()
         .map(|name| {
@@ -110,21 +221,48 @@ fn selected_positions(
             }
         })
         .collect::<BTreeSet<_>>();
-    let mut positions = structure
-        .world
-        .iter_blocks()
-        .filter_map(|(pos, state_id)| {
-            if all {
-                return Some(pos);
-            }
-            registry
+    let matches_type = |state_id| {
+        requested_types.is_empty()
+            || registry
                 .state(state_id)
                 .is_some_and(|state| requested_types.contains(state.name.as_ref()))
-                .then_some(pos)
-        })
-        .collect::<Vec<_>>();
-    positions.sort_unstable();
-    Ok(positions)
+    };
+
+    if !requested_blocks.is_empty() {
+        let mut positions = BTreeSet::new();
+        for selector in requested_blocks {
+            let Some(pos) = selector.point else {
+                continue;
+            };
+            if matches_type(structure.world.get_block(pos)) {
+                positions.insert(pos);
+            }
+        }
+
+        let regions = requested_blocks
+            .iter()
+            .filter(|selector| selector.point.is_none())
+            .copied()
+            .collect::<Vec<_>>();
+        if !regions.is_empty() {
+            positions.extend(structure.world.iter_blocks().filter_map(|(pos, state_id)| {
+                (matches_type(state_id) && regions.iter().any(|region| region.matches(pos)))
+                    .then_some(pos)
+            }));
+        }
+        return Ok(positions.into_iter().collect());
+    }
+
+    if !all && requested_types.is_empty() {
+        return Ok(Vec::new());
+    }
+    Ok(structure
+        .world
+        .iter_blocks()
+        .filter_map(|(pos, state_id)| (all || matches_type(state_id)).then_some(pos))
+        .collect::<BTreeSet<_>>()
+        .into_iter()
+        .collect())
 }
 
 fn inspect_block(
@@ -261,9 +399,37 @@ mod tests {
     use super::*;
 
     #[test]
-    fn block_position_requires_three_signed_integers() {
-        assert_eq!(parse_block_pos("-1, 2, 30"), Ok(BlockPos::new(-1, 2, 30)));
-        assert!(parse_block_pos("1,2").is_err());
-        assert!(parse_block_pos("1,two,3").is_err());
+    fn block_selector_parses_points_and_mixed_ranges() {
+        let point = parse_block_selector("-1, 2, 30").unwrap();
+        assert_eq!(point.point, Some(BlockPos::new(-1, 2, 30)));
+
+        let range = parse_block_selector("-3..=-1, 2..5, ..").unwrap();
+        assert_eq!(range.point, None);
+        assert!(range.matches(BlockPos::new(-3, 2, i32::MIN)));
+        assert!(range.matches(BlockPos::new(-1, 4, i32::MAX)));
+        assert!(!range.matches(BlockPos::new(0, 4, 0)));
+        assert!(!range.matches(BlockPos::new(-2, 5, 0)));
+    }
+
+    #[test]
+    fn block_selector_supports_open_and_reversed_ranges() {
+        let open = parse_block_selector("..=-1, 3.., ..10").unwrap();
+        assert!(open.matches(BlockPos::new(-1, 3, 9)));
+        assert!(!open.matches(BlockPos::new(0, 3, 9)));
+        assert!(!open.matches(BlockPos::new(-1, 2, 9)));
+        assert!(!open.matches(BlockPos::new(-1, 3, 10)));
+
+        let reversed = parse_block_selector("3..1, 5..=2, 0").unwrap();
+        assert!(reversed.matches(BlockPos::new(1, 2, 0)));
+        assert!(reversed.matches(BlockPos::new(2, 5, 0)));
+        assert!(!reversed.matches(BlockPos::new(3, 5, 0)));
+    }
+
+    #[test]
+    fn block_selector_rejects_invalid_syntax() {
+        assert!(parse_block_selector("1,2").is_err());
+        assert!(parse_block_selector("1,two,3").is_err());
+        assert!(parse_block_selector("1..=,2,3").is_err());
+        assert!(parse_block_selector("1..2..3,0,0").is_err());
     }
 }
