@@ -3,7 +3,8 @@ use std::collections::{BTreeSet, VecDeque};
 use indexmap::IndexMap;
 use thiserror::Error;
 use tokio::sync::broadcast;
-use tracing::{debug, info, warn};
+use tracing::{debug, warn};
+use tracing_indicatif::{span_ext::IndicatifSpanExt, style::ProgressStyle};
 
 use crate::{
     Action, BlockEvent, BlockKindId, BlockPos, BlockRules, DeferredBlockEntityUpdate, Direction,
@@ -15,6 +16,14 @@ use crate::{
 const DEFAULT_MAX_SCHEDULED_TICKS_PER_TICK: usize = 65_536;
 const DEFAULT_MAX_CHAINED_NEIGHBOR_UPDATES: usize = 1_000_000;
 const UPDATE_REGION_PROGRESS_INTERVAL: usize = 16_384;
+
+fn region_update_progress_style() -> ProgressStyle {
+    ProgressStyle::with_template(
+        "{span_child_prefix}{spinner:.green} {msg} [{bar:28.green}] {pos}/{len} {per_sec:2} ETA:{eta}",
+    )
+    .expect("选区更新进度条模板必须有效")
+    .progress_chars("=> ")
+}
 
 #[derive(Clone, Debug)]
 pub struct SimulationConfig {
@@ -244,12 +253,11 @@ impl<R: BlockRules> Simulation<R> {
     ) -> Result<(), SimulationError> {
         let (region_min, region_max) = ordered_bounds(region_min, region_max);
         let positions = region_positions(region_min, region_max).collect::<Vec<_>>();
-        info!(
-            ?region_min,
-            ?region_max,
-            blocks = positions.len(),
-            "开始应用选区更新"
-        );
+        let progress = tracing::info_span!("region_update", ?region_min, ?region_max);
+        progress.pb_set_style(&region_update_progress_style());
+        progress.pb_set_length(positions.len() as u64);
+        progress.pb_set_message("更新粘贴选区");
+        progress.pb_start();
         for (index, pos) in positions.iter().copied().enumerate() {
             let tasks = self.with_context_and_changes(
                 SimulationPhase::PreTick,
@@ -259,10 +267,10 @@ impl<R: BlockRules> Simulation<R> {
             self.process_neighbor_tasks_with_changes(tasks, SimulationPhase::PreTick, changes)?;
             let processed = index + 1;
             if processed % UPDATE_REGION_PROGRESS_INTERVAL == 0 {
-                info!(processed, total = positions.len(), "应用选区更新进度");
+                progress.pb_set_position(processed as u64);
             }
         }
-        info!(blocks = positions.len(), "完成选区更新");
+        progress.pb_set_position(positions.len() as u64);
         Ok(())
     }
 
