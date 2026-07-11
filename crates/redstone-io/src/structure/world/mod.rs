@@ -3,7 +3,8 @@ use std::path::Path;
 
 use fastnbt::Value;
 use redstone_core::{BlockPos, SparseWorld};
-use tracing::{info, warn};
+use tracing::{info_span, warn};
+use tracing_indicatif::{span_ext::IndicatifSpanExt, style::ProgressStyle};
 
 use super::{
     LoadedStructure, StructureError, StructureLoadOptions, StructureRegion,
@@ -14,6 +15,14 @@ mod chunk;
 mod region;
 mod settings;
 mod source;
+
+fn region_progress_style() -> ProgressStyle {
+    ProgressStyle::with_template(
+        "{span_child_prefix}{spinner:.green} {msg} [{bar:28.green}] {pos}/{len} {per_sec:2} ETA:{eta}",
+    )
+    .expect("世界 region 进度条模板必须有效")
+    .progress_chars("=> ")
+}
 
 pub(super) fn load<R: StructureStateResolver>(
     path: &Path,
@@ -41,14 +50,25 @@ pub(super) fn load<R: StructureStateResolver>(
     let entity_regions = region::list(&source, &entity_directory)
         .map_err(StructureError::MinecraftWorld)?;
     let separate_entities = source.has_directory(&entity_directory);
-    info!(
-        world = %path.display(),
-        regions = block_regions.len(),
-        entity_regions = entity_regions.len(),
-        explicit_region = explicit_region.is_some(),
-        skip_old_regions = options.skip_old_regions,
-        "开始读取 Minecraft 世界"
-    );
+    let selected_block_regions = block_regions
+        .iter()
+        .filter(|region_path| region_intersects(region_path.x, region_path.z, explicit_region))
+        .count();
+    let selected_entity_regions = if separate_entities {
+        entity_regions
+            .iter()
+            .filter(|region_path| region_intersects(region_path.x, region_path.z, explicit_region))
+            .count()
+    } else {
+        0
+    };
+    let total_regions = selected_block_regions + selected_entity_regions;
+    let progress = info_span!("minecraft_world_regions", world = %path.display());
+    progress.pb_set_style(&region_progress_style());
+    progress.pb_set_length(total_regions as u64);
+    progress.pb_set_message("读取 Minecraft block regions");
+    progress.pb_start();
+    let mut processed_regions = 0usize;
     let mut state = LoadState::new(resolver.air_state());
     let mut chunks = 0usize;
     for region_path in &block_regions {
@@ -56,6 +76,10 @@ pub(super) fn load<R: StructureStateResolver>(
             continue;
         }
         let region_display = source.display(&region_path.path);
+        progress.pb_set_message(&format!(
+            "读取 block region {}",
+            region_file_name(region_path),
+        ));
         if options.skip_old_regions {
             let old_version = old_region_data_version(
                 &mut source,
@@ -72,6 +96,8 @@ pub(super) fn load<R: StructureStateResolver>(
                     expected_data_version = settings::DATA_VERSION,
                     "跳过旧版 Minecraft block region"
                 );
+                processed_regions += 1;
+                progress.pb_set_position(processed_regions as u64);
                 continue;
             }
         }
@@ -97,19 +123,20 @@ pub(super) fn load<R: StructureStateResolver>(
             },
         )
         .map_err(StructureError::MinecraftWorld)?;
-        info!(
-            path = %region_display,
-            chunks,
-            blocks = state.world.non_air_blocks(),
-            "读取世界 region"
-        );
+        processed_regions += 1;
+        progress.pb_set_position(processed_regions as u64);
     }
     if separate_entities {
+        progress.pb_set_message("读取 Minecraft entities regions");
         for region_path in &entity_regions {
             if !region_intersects(region_path.x, region_path.z, explicit_region) {
                 continue;
             }
             let region_display = source.display(&region_path.path);
+            progress.pb_set_message(&format!(
+                "读取 entities region {}",
+                region_file_name(region_path),
+            ));
             if options.skip_old_regions {
                 let old_version = old_region_data_version(
                     &mut source,
@@ -126,6 +153,8 @@ pub(super) fn load<R: StructureStateResolver>(
                         expected_data_version = settings::DATA_VERSION,
                         "跳过旧版 Minecraft entities region"
                     );
+                    processed_regions += 1;
+                    progress.pb_set_position(processed_regions as u64);
                     continue;
                 }
             }
@@ -141,8 +170,16 @@ pub(super) fn load<R: StructureStateResolver>(
                 },
             )
             .map_err(StructureError::MinecraftWorld)?;
+            processed_regions += 1;
+            progress.pb_set_position(processed_regions as u64);
         }
     }
+    progress.pb_set_finish_message(&format!(
+        "完成 Minecraft 世界读取, {chunks} chunks, {} blocks, {} entities",
+        state.world.non_air_blocks(),
+        state.world.entities().count(),
+    ));
+    progress.pb_set_position(total_regions as u64);
     let (region_min, region_max) = if let Some(region) = explicit_region {
         transformed_bounds(options.transform, region.min, region.max)
     } else {
@@ -153,15 +190,6 @@ pub(super) fn load<R: StructureStateResolver>(
     };
     let min = state.block_min.unwrap_or(region_min);
     let max = state.block_max.unwrap_or(region_max);
-    info!(
-        world = %path.display(),
-        chunks,
-        blocks = state.world.non_air_blocks(),
-        entities = state.world.entities().count(),
-        ?region_min,
-        ?region_max,
-        "完成 Minecraft 世界读取"
-    );
     Ok(LoadedStructure {
         world: state.world,
         min,
@@ -203,6 +231,14 @@ fn old_region_data_version(
     } else {
         result.map(|_| None)
     }
+}
+
+fn region_file_name(region_path: &region::RegionPath) -> String {
+    region_path
+        .path
+        .file_name()
+        .map(|name| name.to_string_lossy().into_owned())
+        .unwrap_or_else(|| region_path.path.display().to_string())
 }
 
 struct LoadState {

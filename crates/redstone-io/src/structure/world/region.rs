@@ -36,13 +36,13 @@ pub(super) fn read_chunks(
     mut accepts: impl FnMut(i32, i32) -> bool,
     mut consume: impl FnMut(i32, i32, Vec<u8>) -> Result<(), String>,
 ) -> Result<usize, String> {
-    let display = source.display(&region.path);
+    let region_display = source.display(&region.path);
     let mut file = source.open_region(&region.path)?;
     let mut header = [0u8; HEADER_BYTES];
     file.read_exact(&mut header).map_err(|error| {
-        format!("region header 截断 {display}: {error}")
+        format!("region header 截断 {region_display}: {error}")
     })?;
-    let mut count = 0usize;
+    let mut chunks = Vec::new();
     for index in 0..1024usize {
         let base = index * 4;
         let sector = u32::from_be_bytes([0, header[base], header[base + 1], header[base + 2]]);
@@ -65,6 +65,10 @@ pub(super) fn read_chunks(
         if !accepts(chunk_x, chunk_z) {
             continue;
         }
+        chunks.push((sector, sectors, chunk_x, chunk_z));
+    }
+    let count = chunks.len();
+    for (sector, sectors, chunk_x, chunk_z) in chunks {
         let offset = u64::from(sector) * SECTOR_BYTES;
         file.seek(SeekFrom::Start(offset))
             .map_err(|error| error.to_string())?;
@@ -111,7 +115,6 @@ pub(super) fn read_chunks(
         let decoded = decompress(compression, compressed)
             .map_err(|error| format!("解压 chunk ({chunk_x},{chunk_z}) 失败: {error}"))?;
         consume(chunk_x, chunk_z, decoded)?;
-        count += 1;
     }
     Ok(count)
 }

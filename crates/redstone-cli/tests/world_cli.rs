@@ -129,6 +129,25 @@ fn inspect_can_warn_and_skip_old_regions() {
     assert_eq!(report["non_air_blocks"], 0);
 }
 
+#[test]
+fn convert_rejects_invalid_output_before_reading_input() {
+    let directory = TestDirectory::new();
+    let missing_input = directory.path().join("missing.zip");
+    let invalid_output = directory.path().join("cpu.litematica");
+    let output = Command::new(env!("CARGO_BIN_EXE_redstone"))
+        .arg("convert")
+        .arg(&missing_input)
+        .arg("--skip-old-regions")
+        .arg(&invalid_output)
+        .output()
+        .unwrap();
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("无法识别结构格式"));
+    assert!(stderr.contains("cpu.litematica"));
+    assert!(!stderr.contains("missing.zip"));
+}
+
 fn assert_success(output: &std::process::Output) {
     assert!(
         output.status.success(),

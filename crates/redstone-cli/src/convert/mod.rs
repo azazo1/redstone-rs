@@ -3,8 +3,8 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, Result, anyhow, bail};
 use redstone_core::BlockStateId;
 use redstone_io::{
-    StructureLoadOptions, StructureLoader, StructureRegion, StructureState, StructureWriter,
-    StructureWriteOptions,
+    StructureFormat, StructureLoadOptions, StructureLoader, StructureRegion, StructureState,
+    StructureWriter, StructureWriteOptions,
 };
 use redstone_java_26::{JAVA_DATA_VERSION, Java26Registry};
 use tracing::info;
@@ -19,16 +19,32 @@ pub fn run(
     region: Option<StructureRegion>,
     skip_old_regions: bool,
 ) -> Result<()> {
-    if input.extension().is_some_and(|extension| extension == "toml") {
+    let scenario_input = input.extension().is_some_and(|extension| extension == "toml");
+    validate_output(output, scenario_input)?;
+    if scenario_input {
         if region.is_some() {
             bail!("场景转换的 region 必须写在 source 或 paste 中");
         }
         return scenario::convert(input, output, skip_old_regions);
     }
-    if output.extension().is_some_and(|extension| extension == "toml") {
+    convert_structure(input, output, region, skip_old_regions, true).map(|_| ())
+}
+
+fn validate_output(output: &Path, scenario_input: bool) -> Result<()> {
+    let toml_output = output.extension().is_some_and(|extension| extension == "toml");
+    if scenario_input {
+        if !toml_output {
+            bail!("场景转换输出必须使用 .toml 扩展名");
+        }
+        return Ok(());
+    }
+    if toml_output {
         bail!("只有场景 TOML 可以转换为 TOML");
     }
-    convert_structure(input, output, region, skip_old_regions, true).map(|_| ())
+    if StructureLoader::detect(output)? == StructureFormat::MinecraftWorld {
+        bail!("结构转换输出必须是 .litematic, .schem, .nbt 或 .structure 文件");
+    }
+    Ok(())
 }
 
 pub(super) fn convert_structure(
