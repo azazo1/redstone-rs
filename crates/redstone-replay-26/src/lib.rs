@@ -1,6 +1,6 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs::{File, OpenOptions};
-use std::io::{BufWriter, Write};
+use std::io::{BufWriter, Read, Write};
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
@@ -382,7 +382,14 @@ impl ReplayWriter {
         )
     }
 
-    pub fn finish(mut self) -> Result<ReplayStats, ReplayError> {
+    pub fn finish(self) -> Result<ReplayStats, ReplayError> {
+        self.finish_with_progress(|_, _| {})
+    }
+
+    pub fn finish_with_progress(
+        mut self,
+        mut report_progress: impl FnMut(u64, u64),
+    ) -> Result<ReplayStats, ReplayError> {
         let mut recording = self.recording.take().ok_or(ReplayError::AlreadyFinished)?;
         recording.flush()?;
         let recording_file = recording.into_inner().map_err(|error| error.into_error())?;
@@ -395,7 +402,19 @@ impl ReplayWriter {
             .unix_permissions(0o644);
         archive.start_file("recording.tmcpr", options)?;
         let mut recording_input = File::open(&self.recording_path)?;
-        std::io::copy(&mut recording_input, &mut archive)?;
+        let recording_size = recording_input.metadata()?.len();
+        report_progress(0, recording_size);
+        let mut copied = 0;
+        let mut buffer = [0; 256 * 1024];
+        loop {
+            let read = recording_input.read(&mut buffer)?;
+            if read == 0 {
+                break;
+            }
+            archive.write_all(&buffer[..read])?;
+            copied += read as u64;
+            report_progress(copied, recording_size);
+        }
         archive.start_file("recording.tmcpr.crc32", options)?;
         write!(archive, "{}", self.crc.clone().finalize())?;
         archive.start_file("metaData.json", options)?;
@@ -988,9 +1007,19 @@ mod tests {
                 probes: Vec::new(),
             })
             .unwrap();
-        let stats = writer.finish().unwrap();
+        let mut export_progress = Vec::new();
+        let stats = writer
+            .finish_with_progress(|copied, total| export_progress.push((copied, total)))
+            .unwrap();
         assert_eq!(stats.ticks, 3);
         assert_eq!(stats.block_updates, 1);
+        assert!(export_progress.len() >= 2);
+        assert_eq!(export_progress[0].0, 0);
+        assert!(export_progress[0].1 > 0);
+        assert_eq!(export_progress.last().unwrap().0, export_progress[0].1);
+        assert!(export_progress
+            .windows(2)
+            .all(|samples| samples[0].0 <= samples[1].0));
 
         let mut archive = ZipArchive::new(File::open(output).unwrap()).unwrap();
         assert!(archive.by_name("recording.tmcpr").is_ok());

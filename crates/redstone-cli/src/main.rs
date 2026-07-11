@@ -398,6 +398,13 @@ fn simulation_progress_style() -> Result<ProgressStyle> {
     .progress_chars("=> "))
 }
 
+fn replay_export_progress_style() -> Result<ProgressStyle> {
+    Ok(ProgressStyle::with_template(
+        "{span_child_prefix}{spinner:.green} {msg} [{bar:28.green}] {bytes}/{total_bytes} {bytes_per_sec} ETA:{eta}",
+    )?
+    .progress_chars("=> "))
+}
+
 fn oracle_progress_style() -> Result<ProgressStyle> {
     Ok(ProgressStyle::with_template(
         "{span_child_prefix}{spinner} {msg:72!}",
@@ -677,9 +684,22 @@ fn execute_scenario(
     }
     if let Some(replay) = replay {
         let path = replay_path.expect("replay path must exist");
+        let progress = tracing::info_span!("replay_export");
+        progress.pb_set_style(&replay_export_progress_style()?);
+        progress.pb_set_message(&format!(
+            "导出 Replay {}",
+            path.file_name()
+                .unwrap_or(path.as_os_str())
+                .to_string_lossy()
+        ));
+        progress.pb_start();
         let stats = replay
-            .finish()
+            .finish_with_progress(|copied, total| {
+                progress.pb_set_length(total);
+                progress.pb_set_position(copied);
+            })
             .with_context(|| format!("完成 Replay Mod 录像失败: {}", path.display()))?;
+        drop(progress);
         log_replay_stats(path, &stats);
     }
     if let Some(path) = trace_path {
