@@ -1,0 +1,16 @@
+version = "26.1.2"
+mode = "default"
+seed = 0
+max_ticks = 1700
+strict = true
+
+[source]
+path = "../schematics/flying-machine.litematic"
+initialization = "raw"
+
+[[actions]]
+tick = 20
+type = "set_block"
+pos = { x = 17, y = 21, z = 29 }
+name = "minecraft:stone_button"
+properties = { face = "wall", facing = "north", powered = "false" }
