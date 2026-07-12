@@ -387,9 +387,56 @@ struct RunSummary {
     blocks: usize,
     trace_events: usize,
     tick_elapsed: Duration,
+    stability: Option<StabilityPoint>,
 }
 
 const TICK_PROGRESS_UPDATE_INTERVAL: u64 = 10;
+const STABILITY_CONFIRMATION_TICKS: u64 = 20;
+
+#[derive(Clone, Copy, Debug)]
+struct StabilityPoint {
+    tick: u64,
+    elapsed: Duration,
+}
+
+#[derive(Debug)]
+struct StabilityTracker {
+    last_external_tick: u64,
+    candidate: Option<StabilityPoint>,
+    idle_ticks: u64,
+    stable: Option<StabilityPoint>,
+}
+
+impl StabilityTracker {
+    fn new(last_external_tick: u64) -> Self {
+        Self {
+            last_external_tick,
+            candidate: None,
+            idle_ticks: 0,
+            stable: None,
+        }
+    }
+
+    fn observe(&mut self, tick: u64, elapsed: Duration, idle: bool) {
+        if tick < self.last_external_tick || !idle {
+            self.candidate = None;
+            self.idle_ticks = 0;
+            self.stable = None;
+            return;
+        }
+        if self.candidate.is_none() {
+            self.candidate = Some(StabilityPoint { tick, elapsed });
+        }
+        self.idle_ticks += 1;
+        if self.idle_ticks >= STABILITY_CONFIRMATION_TICKS {
+            self.stable = self.candidate;
+        }
+    }
+
+    fn stable(&self) -> Option<StabilityPoint> {
+        self.stable
+    }
+}
 
 fn simulation_progress_style() -> Result<ProgressStyle> {
     Ok(ProgressStyle::with_template(
@@ -435,6 +482,19 @@ fn run(
         "ticks_per_second: {:.3}",
         summary.ticks as f64 / summary.tick_elapsed.as_secs_f64()
     );
+    if let Some(stability) = summary.stability {
+        println!("stable_tick: {}", stability.tick);
+        println!(
+            "active_ticking_elapsed_ms: {:.3}",
+            stability.elapsed.as_secs_f64() * 1_000.0
+        );
+        println!(
+            "active_ticks_per_second: {:.3}",
+            stability.tick as f64 / stability.elapsed.as_secs_f64()
+        );
+    } else {
+        println!("stable_tick: not_reached");
+    }
     println!("expectations: passed");
     Ok(())
 }
@@ -499,6 +559,16 @@ fn execute_scenario(
         })
         .collect::<Result<Vec<_>>>()?;
     actions.sort_by_key(|(tick, _)| *tick);
+    let last_external_tick = actions
+        .iter()
+        .map(|(tick, _)| tick.0)
+        .chain(
+            pastes
+                .iter()
+                .filter_map(|(paste, _)| paste.tick.map(|tick| tick.0)),
+        )
+        .max()
+        .unwrap_or(0);
 
     let rules = Java26Rules::new(resolver.0);
     let mut simulation = Simulation::load(
@@ -594,6 +664,7 @@ fn execute_scenario(
     ));
     progress.pb_start();
     let tick_started = Instant::now();
+    let mut stability = StabilityTracker::new(last_external_tick);
     while simulation.current_tick().0 < scenario.max_ticks {
         let next_tick = GameTick(simulation.current_tick().0 + 1);
         if !monitoring_enabled && next_tick.0 > scenario.monitor.skip_ticks {
@@ -645,6 +716,11 @@ fn execute_scenario(
         for sample in delta.probes {
             samples.insert((delta.tick, sample.name), sample.value);
         }
+        stability.observe(
+            completed_tick,
+            tick_started.elapsed(),
+            delta.events.is_empty() && simulation.pending_scheduled_ticks() == 0,
+        );
         if completed_tick % TICK_PROGRESS_UPDATE_INTERVAL == 0
             || completed_tick == scenario.max_ticks
         {
@@ -704,6 +780,7 @@ fn execute_scenario(
         blocks: simulation.world().non_air_blocks(),
         trace_events: simulation.trace().events().len(),
         tick_elapsed,
+        stability: stability.stable(),
     })
 }
 
@@ -1606,6 +1683,39 @@ mod tests {
     fn scenario_hash_is_stable() {
         let path = Path::new("examples/basic.toml");
         assert_eq!(stable_path_hash(path), stable_path_hash(path));
+    }
+
+    #[test]
+    fn stability_tracker_waits_for_the_last_input_and_confirmation_window() {
+        let mut tracker = StabilityTracker::new(5);
+        for tick in 1..5 {
+            tracker.observe(tick, Duration::from_millis(tick), true);
+        }
+        assert!(tracker.stable().is_none());
+
+        for tick in 5..5 + STABILITY_CONFIRMATION_TICKS - 1 {
+            tracker.observe(tick, Duration::from_millis(tick), true);
+        }
+        assert!(tracker.stable().is_none());
+        tracker.observe(
+            5 + STABILITY_CONFIRMATION_TICKS - 1,
+            Duration::from_millis(100),
+            true,
+        );
+        let stable = tracker.stable().unwrap();
+        assert_eq!(stable.tick, 5);
+        assert_eq!(stable.elapsed, Duration::from_millis(5));
+    }
+
+    #[test]
+    fn stability_tracker_discards_an_idle_window_followed_by_activity() {
+        let mut tracker = StabilityTracker::new(0);
+        for tick in 1..=STABILITY_CONFIRMATION_TICKS {
+            tracker.observe(tick, Duration::from_millis(tick), true);
+        }
+        assert_eq!(tracker.stable().unwrap().tick, 1);
+        tracker.observe(21, Duration::from_millis(21), false);
+        assert!(tracker.stable().is_none());
     }
 
     #[test]
