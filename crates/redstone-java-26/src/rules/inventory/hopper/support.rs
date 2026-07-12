@@ -262,6 +262,56 @@ pub(super) fn item_entities_in_suck_aabb(
         .collect()
 }
 
+pub(super) fn item_entity_block_bounds(
+    world: &SparseWorld,
+    id: EntityId,
+) -> Option<(BlockPos, BlockPos)> {
+    const DEFLATE: f64 = 1.0e-5;
+
+    let entity = world.entity(id)?;
+    if entity.kind != "minecraft:item"
+        || entity
+            .fields
+            .get("item_count")
+            .and_then(Value::as_i64)
+            .unwrap_or(1)
+            <= 0
+    {
+        return None;
+    }
+    let aabb = item_aabb(entity.position);
+    Some((
+        BlockPos::new(
+            (aabb.min[0] + DEFLATE).floor() as i32,
+            (aabb.min[1] + DEFLATE).floor() as i32,
+            (aabb.min[2] + DEFLATE).floor() as i32,
+        ),
+        BlockPos::new(
+            (aabb.max[0] - DEFLATE).floor() as i32,
+            (aabb.max[1] - DEFLATE).floor() as i32,
+            (aabb.max[2] - DEFLATE).floor() as i32,
+        ),
+    ))
+}
+
+pub(super) fn item_entity_intersects_hopper_suck_aabb(
+    world: &SparseWorld,
+    id: EntityId,
+    hopper: BlockPos,
+) -> bool {
+    world.entity(id).is_some_and(|entity| {
+        entity.kind == "minecraft:item"
+            && item_aabb(entity.position).intersects(
+                [hopper.x as f64, hopper.y as f64 + 0.6875, hopper.z as f64],
+                [
+                    hopper.x as f64 + 1.0,
+                    hopper.y as f64 + 2.0,
+                    hopper.z as f64 + 1.0,
+                ],
+            )
+    })
+}
+
 pub(super) fn item_entities_for_minecart_suck(
     world: &SparseWorld,
     position: [f64; 3],

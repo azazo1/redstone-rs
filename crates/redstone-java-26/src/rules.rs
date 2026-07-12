@@ -1437,8 +1437,8 @@ impl BlockRules for Java26Rules {
     }
 
     fn tick_entities(&mut self, ctx: &mut EventContext<'_>) -> Result<(), RulesError> {
-        self.tick_minimal_entities(ctx)?;
-        self.tick_hopper_entity_collisions(ctx)?;
+        let item_entities = self.tick_minimal_entities(ctx)?;
+        self.tick_hopper_entity_collisions(ctx, &item_entities)?;
         let mut occupied_positions = ctx
             .world
             .entities()
@@ -1611,8 +1611,12 @@ impl Java26Rules {
         Ok(())
     }
 
-    fn tick_minimal_entities(&mut self, ctx: &mut EventContext<'_>) -> Result<(), RulesError> {
+    fn tick_minimal_entities(
+        &mut self,
+        ctx: &mut EventContext<'_>,
+    ) -> Result<Vec<EntityId>, RulesError> {
         let mut expired = Vec::<EntityId>::new();
+        let mut item_entities = Vec::<EntityId>::new();
         let entity_ids = ctx.world.entities().map(|(id, _)| *id).collect::<Vec<_>>();
         for id in entity_ids {
             let kind = ctx.world.entity(id).map(|entity| entity.kind.clone());
@@ -1642,6 +1646,8 @@ impl Java26Rules {
                     );
                     if age >= 6_000 {
                         expired.push(id);
+                    } else {
+                        item_entities.push(id);
                     }
                 }
                 Some("minecraft:tnt") => {
@@ -1697,7 +1703,7 @@ impl Java26Rules {
                     .or_default() += 1;
             }
         }
-        Ok(())
+        Ok(item_entities)
     }
 
     fn refresh_entity_sensor(

@@ -98,24 +98,31 @@ impl Java26Rules {
     pub(in crate::rules) fn tick_hopper_entity_collisions(
         &mut self,
         ctx: &mut EventContext<'_>,
+        item_entities: &[EntityId],
     ) -> Result<(), RulesError> {
-        let hoppers = ctx
-            .world
-            .block_entities()
-            .map(|(pos, _)| *pos)
-            .filter(|pos| {
-                self.state(ctx.world.get_block(*pos))
-                    .is_ok_and(|state| matches!(state.behavior, BlockBehavior::Hopper))
-            })
-            .collect::<Vec<_>>();
-        for pos in hoppers {
-            let state = self.state(ctx.world.get_block(pos))?.clone();
-            if !state.bool_property("enabled")
-                || block_entity_i64(ctx.world, pos, "cooldown").unwrap_or(0) > 0
-            {
+        for &entity_id in item_entities {
+            let Some((min, max)) = item_entity_block_bounds(ctx.world, entity_id) else {
                 continue;
-            }
-            for entity_id in item_entities_in_suck_aabb(ctx.world, pos, true) {
+            };
+            'blocks: for z in min.z..=max.z {
+                for y in min.y..=max.y {
+                    for x in min.x..=max.x {
+                        if ctx.world.entity(entity_id).is_none() {
+                            break 'blocks;
+                        }
+                        let pos = BlockPos::new(x, y, z);
+                        let state = self.state(ctx.world.get_block(pos))?.clone();
+                        if !matches!(state.behavior, BlockBehavior::Hopper)
+                            || !item_entity_intersects_hopper_suck_aabb(
+                                ctx.world,
+                                entity_id,
+                                pos,
+                            )
+                            || !state.bool_property("enabled")
+                            || block_entity_i64(ctx.world, pos, "cooldown").unwrap_or(0) > 0
+                        {
+                            continue;
+                        }
                 self.active_hopper = Some(pos);
                 let mut session = TransferSession::default();
                 let moved = self.try_move_hopper_items(
@@ -135,8 +142,7 @@ impl Java26Rules {
                 }
                 self.active_hopper = None;
                 session.commit(self, ctx)?;
-                if moved {
-                    break;
+                    }
                 }
             }
         }

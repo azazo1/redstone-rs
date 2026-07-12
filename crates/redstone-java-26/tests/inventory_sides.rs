@@ -540,6 +540,52 @@ fn full_block_above_hopper_blocks_periodic_item_absorption() {
 }
 
 #[test]
+fn item_inside_hopper_bypasses_periodic_full_block_obstruction() {
+    let mut registry = Java26Registry::new();
+    let hopper = state(
+        &mut registry,
+        "minecraft:hopper",
+        &[("enabled", "true"), ("facing", "down")],
+    );
+    let stone = state(&mut registry, "minecraft:stone", &[]);
+    let mut world = SparseWorld::new(registry.air_state());
+    world.set_block(BlockPos::ZERO, hopper).unwrap();
+    world.set_block(BlockPos::new(0, 1, 0), stone).unwrap();
+    world.set_block_entity(BlockPos::ZERO, container("minecraft:hopper", 5, &[]));
+    world
+        .spawn_entity_with_id(
+            EntityId(18),
+            EntityData {
+                kind: "minecraft:item".to_owned(),
+                position: [0.5, 0.75, 0.5],
+                fields: BTreeMap::from([
+                    (
+                        "item_id".to_owned(),
+                        serde_json::Value::String("minecraft:stone".to_owned()),
+                    ),
+                    ("item_count".to_owned(), serde_json::Value::from(1)),
+                ]),
+            },
+        )
+        .unwrap();
+    let mut simulation = Simulation::load(
+        Java26Rules::new(registry),
+        world,
+        SimulationConfig::default(),
+    )
+    .unwrap();
+
+    simulation.step().unwrap();
+
+    assert_eq!(item_count(simulation.world(), BlockPos::ZERO), 1);
+    assert!(simulation.world().entity(EntityId(18)).is_none());
+    assert_eq!(
+        simulation.world().block_entity(BlockPos::ZERO).unwrap().fields["cooldown"],
+        7
+    );
+}
+
+#[test]
 fn hopper_uses_double_chest_and_container_entity_targets() {
     let mut registry = Java26Registry::new();
     let hopper_east = state(
