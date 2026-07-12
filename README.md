@@ -19,7 +19,49 @@
 - [场景编写手册](docs/scenario-guide.md): TOML 场景, 动作, 探针, 断言, Replay 和运行方式.
 - [实现状态](docs/todo.md): 已完成能力, 稳定前任务和暂不支持范围.
 - [性能优化记录](docs/perf.md): 基准, profile 证据和优化结果.
+- [MCHPRS 基准适配器](docs/mchprs-benchmark.md): headless 适配口径, 构建方式和独立 Rust 源码.
 - [Java oracle 协议](tools/vanilla-oracle/README.md): 参考探针的构建, 输出协议和支持范围.
+
+## Frostbyte 16-bit CPU 性能
+
+下表使用 Apple M1 8 核, 16 GB 内存在 2026-07-12 测量. 每项独立运行 3 次且保留全部结果, 表中为中位数. `总 tick/s` 包含机器稳定后的空闲尾部, `稳定前 tick/s` 只统计首次确认稳定之前的活动区间. MCHPRS 已换算为等价 game tick/s. 详细口径和原始数据见 [性能优化记录](docs/perf.md#跨实现-frostbyte-基准).
+
+### Hello World, 8800 game tick
+
+| 实现 | 总 tick/s | 稳定前 tick/s | 稳定 tick | tick 阶段 | wall | 峰值 RSS | 正确性 |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | --- |
+| [`redstone-rs` `7f8344e7`](https://github.com/azazo1/redstone-rs/commit/7f8344e70ed78c38e535db7eeaf9851d73ed45fc) | 2459.498 | 2428.251 | 8688 | 3.578 s | 4.19 s | 93.3 MiB | 206 个灯通过 |
+| [MCHPRS 普通引擎 `8734f72b`](https://github.com/MCHPR/MCHPRS/commit/8734f72bcf48be492c39e657d549e054255bed31) | 1917.223 | 1892.394 | 8686 | 4.590 s | 5.37 s | 128.6 MiB | 206 个灯通过 |
+| [MCHPRS Redpiler `8734f72b`](https://github.com/MCHPR/MCHPRS/commit/8734f72bcf48be492c39e657d549e054255bed31) | 10220.672 | 10223.299 | 8686 | 0.861 s | 2.26 s | 205.3 MiB | 206 个灯通过 |
+| Minecraft Java 26.1.2 GameTest | 257.618 | - | - | 34.159 s | 88.42 s | 1698.9 MiB | 206 个灯与 Rust 一致 |
+
+### Line Drawing, 225000 game tick
+
+| 实现 | 总 tick/s | 稳定前 tick/s | 稳定 tick | tick 阶段 | wall | 峰值 RSS | 正确性 |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | --- |
+| `redstone-rs` | 2501.382 | 2130.913 | 191672 | 89.950 s | 90.61 s | 97.0 MiB | 36 个灯通过 |
+| MCHPRS 普通引擎 | 1748.683 | 1489.656 | 191670 | 128.668 s | 129.40 s | 129.6 MiB | 36 个灯通过 |
+| MCHPRS Redpiler | 11230.790 | 11108.074 | 191670 | 20.034 s | 21.46 s | 195.6 MiB | 36 个灯通过 |
+| Minecraft Java 26.1.2 GameTest | - | - | - | - | - | - | 未执行完整 225000 tick |
+
+这不是单一速度排名. `redstone-rs` 和 Java GameTest 按 game tick 执行完整规则, MCHPRS 普通引擎以 1 redstone tick 对应 2 game tick, Redpiler 则预计算连接并使用 `optimize` 和 `io_only` 缩小运行时工作. Redpiler 编译时间单列在详细报告中, 不计入 tick/s. Java line-drawing 不用短截断结果代替完整程序结果.
+
+## 模拟器功能对比
+
+| 能力 | `redstone-rs` | Minecraft Java 26.1.2 | MCHPRS 普通引擎 | MCHPRS Redpiler | [3D Redstone Simulator `d52c5ca0`](https://github.com/GuilhermeRossato/3D-Redstone-Simulator/commit/d52c5ca09ad62f18abdcccc9b6eb18cae12b5478) |
+| --- | --- | --- | --- | --- | --- |
+| Java 规则目标 | 26.1.2, default/experimental 更新顺序 | 26.1.2 原版 | 1.20.4 计算红石子集 | 1.20.4 编译图子集 | 无版本化红石执行规则 |
+| 真实三维线路 | 支持 | 支持 | 支持 | 编译三维世界中的连接 | 支持三维世界和方块外观 |
+| wire, torch, repeater, comparator | 支持 | 支持 | 支持 | 支持编译后的节点子集 | 未实现传播 |
+| 普通/黏性活塞, QC, zero-tick, 黏连分支 | 支持, 方块实体移动仍有限制 | 支持 | 不支持活塞行为 | 不支持 | 未实现, 位于计划中 |
+| 观察者 | 支持 | 支持 | 不支持主动行为 | 不支持 | 未实现 |
+| 容器, hopper 和实体传感器 | 最小容器转移和实体模型 | 完整游戏规则 | 比较器容器和玩家交互子集, 无通用实体模型 | 容器常量和输入节点子集 | 无红石执行模型 |
+| 世界及 schematic 输入 | 世界目录/ZIP, Litematic, Sponge, vanilla structure | 世界和 oracle 生成的 structure | plot 和 Sponge schematic | 从 plot/选区编译 | 自有浏览器世界持久化 |
+| 场景动作和断言 | TOML action, probe, expectation | GameTest 适配全部场景动作和 probe | 基准适配器支持按钮和最终灯断言 | 同左 | 无可复现红石断言协议 |
+| 运行中修改结构 | action 和定时 paste | 支持 | WorldEdit 和玩家修改 | 修改会 reset 并停用 Redpiler | 支持浏览器放置/破坏方块 |
+| 回放和可视化 | Replay Mod MCPR, JSONL, VCD | 原版客户端, oracle JSONL | Minecraft 客户端 | Minecraft 客户端 | 浏览器三维可视化和世界历史 |
+
+MCHPRS 普通引擎确实在三维世界中计算红石, 但当前红石执行入口没有活塞和观察者行为. Redpiler 通过预搜索 wire 路径和保存连接换取高吞吐, 运行时改建会使编译结果失效. 3D Redstone Simulator 当前主要是浏览器三维世界项目, 其 README 把 redstone simulation 和 piston simulation 列为后续目标, 因而不进入性能表.
 
 ## 构建和测试
 

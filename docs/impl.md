@@ -277,6 +277,7 @@
 ### `run`, `trace` 和 `test`
 
 - `run` 加载单个场景, 执行 paste 与 action, 采样 probe, 检查全部 expectation, 并输出 tick 数, 方块数, 轨迹数量, 耗时和 TPS.
+- `run` 在最后一次外部 action 或定时 paste 之后检测稳定点. 连续 20 tick 没有 delta 事件且没有计划刻时, 输出 `stable_tick`, `active_ticking_elapsed_ms` 和 `active_ticks_per_second`, 从而把活动传播和稳定后的空闲尾部分开.
 - `trace` 是强制写出 JSONL 的单场景入口, 可同时写 VCD. `run` 也支持可选 JSONL 和 VCD.
 - `test` 接受单文件或目录. 目录模式仅扫描直接子文件中的 `.toml`, 按文件名排序, 使用系统可用并行度运行, 最后稳定汇总所有 PASS/FAIL.
 - `--allow-static-fallback` 可在 CLI 层关闭场景 strict 检查.

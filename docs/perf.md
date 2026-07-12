@@ -278,3 +278,153 @@ cargo samply run assets/scenarios/observer-clock-100.toml
 | `active_ticks_per_second` | 2104.210 | 2165.149 |
 | `ticks_per_second` | 2470.036 | 2541.568 |
 | 场景断言 | 通过 | 通过 |
+
+## 跨实现 Frostbyte 基准
+
+### 测试范围
+
+本节使用同一台 Apple M1 8 核, 16 GB 机器在 2026-07-12 测量. `redstone-rs` 数据在性能优化后的 commit [`7f8344e70ed78c38e535db7eeaf9851d73ed45fc`](https://github.com/azazo1/redstone-rs/commit/7f8344e70ed78c38e535db7eeaf9851d73ed45fc) 上全部重跑, 旧测量不进入本节统计.
+
+固定实现如下:
+
+- `redstone-rs`: `7f8344e70ed78c38e535db7eeaf9851d73ed45fc`, release profile, 单个 CLI 进程.
+- MCHPRS: [`8734f72bcf48be492c39e657d549e054255bed31`](https://github.com/MCHPR/MCHPRS/commit/8734f72bcf48be492c39e657d549e054255bed31), 单个 headless plot. 普通引擎和 Redpiler 分开测量.
+- Minecraft Java: 26.1.2 GameTest, `oracle_micro_trace=false`, 仅在最终 tick 读取 probe.
+- [3D Redstone Simulator `d52c5ca0`](https://github.com/GuilhermeRossato/3D-Redstone-Simulator/commit/d52c5ca09ad62f18abdcccc9b6eb18cae12b5478) 只有三维世界和浏览器交互, 该 commit 尚未实现 redstone simulation, 因此只进入功能矩阵.
+
+共同负载如下:
+
+| 场景 | 程序 | game tick | 按钮动作 | 最终断言 |
+| --- | --- | ---: | ---: | ---: |
+| `frostbyte-cpu-16bit-hello-world.toml` | Frostbyte hello-world | 8800 | tick 100 | 206 个屏幕灯 |
+| `frostbyte-cpu-16bit-line-drawing.toml` | Frostbyte line-drawing | 225000 | tick 100 | 36 个屏幕灯 |
+
+每个已发布的实现和场景都启动独立进程运行 3 次, 不删除异常值, 摘要对每一列取中位数. `redstone-rs`, MCHPRS 普通引擎和 Redpiler 均完整执行两个场景并通过最终灯断言. Java GameTest 完整执行 hello-world, 三轮输出与 Rust 的 206 个最终 probe 逐项一致. Java 不执行 225000 tick 的完整 line-drawing, 也不使用截断运行代替完整结果.
+
+### 指标定义
+
+- `tick 阶段`: 世界和程序装载完成后, 完整 tick 循环的耗时.
+- `总 tick/s`: 配置的全部 game tick 除以 tick 阶段耗时. 机器提前稳定时, 该值包含空闲尾部.
+- `稳定 tick`: 最后一个外部 action 之后, 连续 20 tick 没有模拟事件且没有待执行计划刻时, 取空闲窗口的第一个 tick.
+- `稳定前 tick/s`: `stable_tick / active_ticking_elapsed`. 它衡量机器仍在传播或刚刚进入空闲点之前的平均速度.
+- `wall`: 外部资源测量工具报告的端到端 real time.
+- `峰值 RSS`: 外部资源测量工具报告的最大常驻内存, 原始表保留 byte, README 换算为 MiB.
+
+稳定前速度可以消除 line-drawing 最后约 33328 个空闲 tick 对总吞吐的抬高, 但它不是单 tick 分位数. `redstone-rs` 观察方块变化, 方块实体变化, 规则事件和计划刻队列. MCHPRS 普通引擎只用计划刻队列判断空闲, Redpiler 使用内部 pending tick 状态, 并以 1 redstone tick 对应 2 game tick 换算. 本次 MCHPRS 的稳定点比 `redstone-rs` 早 2 game tick, 因此两个稳定点不应解释为微观事件完全一致.
+
+### 执行命令
+
+构建和验证当前项目:
+
+```shell
+cargo build --release -p redstone-cli
+cargo test --release -p redstone-cli stability_tracker -- --nocapture
+cargo clippy -p redstone-cli --all-targets
+```
+
+`redstone-rs` 每轮使用:
+
+```shell
+target/release/redstone run \
+  assets/scenarios/frostbyte-cpu-16bit-hello-world.toml
+
+target/release/redstone run \
+  assets/scenarios/frostbyte-cpu-16bit-line-drawing.toml
+```
+
+MCHPRS 的源码, 结构归一化, 构建步骤和完整命令见 [mchprs-benchmark.md](mchprs-benchmark.md). Java 每轮使用:
+
+```shell
+just oracle \
+  assets/scenarios/frostbyte-cpu-16bit-hello-world.toml \
+  frostbyte-hello-oracle.jsonl
+```
+
+Java 正式三轮在依赖准备完成后开始. `wall` 包含 `just oracle` 的运行库存在性检查, oracle adapter 构建, 场景转换, Minecraft 初始化和 GameTest tick. `GAMETEST_TICKS` 只包含 GameTest tick 阶段, 两者不能相减后直接称为纯 Minecraft 初始化时间.
+
+### `redstone-rs` 原始结果
+
+Hello-world:
+
+| 轮次 | tick ms | 总 tick/s | stable tick | 稳定前 ms | 稳定前 tick/s | wall s | RSS byte | 断言 |
+| ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- |
+| 1 | 3577.965 | 2459.498 | 8688 | 3577.884 | 2428.251 | 4.36 | 95666176 | 通过 |
+| 2 | 3420.551 | 2572.685 | 8688 | 3420.468 | 2540.003 | 4.05 | 97878016 | 通过 |
+| 3 | 3583.236 | 2455.881 | 8688 | 3583.151 | 2424.682 | 4.19 | 98549760 | 通过 |
+| 中位数 | 3577.965 | 2459.498 | 8688 | 3577.884 | 2428.251 | 4.19 | 97878016 | 通过 |
+
+Line-drawing:
+
+| 轮次 | tick ms | 总 tick/s | stable tick | 稳定前 ms | 稳定前 tick/s | wall s | RSS byte | 断言 |
+| ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- |
+| 1 | 88953.650 | 2529.407 | 191672 | 88951.655 | 2154.788 | 89.60 | 101744640 | 通过 |
+| 2 | 89950.290 | 2501.382 | 191672 | 89948.291 | 2130.913 | 90.61 | 100696064 | 通过 |
+| 3 | 94815.110 | 2373.039 | 191672 | 94813.042 | 2021.578 | 95.51 | 102137856 | 通过 |
+| 中位数 | 89950.290 | 2501.382 | 191672 | 89948.291 | 2130.913 | 90.61 | 101744640 | 通过 |
+
+### MCHPRS 原始结果
+
+MCHPRS 输入保留完整 CPU 和程序结构. 其 parser 无法表示的 1 个 chest, 1 个 lectern 和 9 个孤立 moving piston 被映射为空气. 这些方块不在活动数据通路中. 除这 11 个方块外没有替换其他元件. 测试使用固定源码 commit 构建 headless adapter.
+
+Hello-world:
+
+| 后端 | 轮次 | load ms | compile ms | tick ms | 总 game tick/s | stable game tick | 稳定前 ms | 稳定前 game tick/s | total ms | wall s | RSS byte |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| 普通 | 1 | 850.362 | - | 5343.892 | 1646.740 | 8686 | 5343.866 | 1625.415 | 6195.075 | 6.84 | 132923392 |
+| 普通 | 2 | 761.634 | - | 4589.972 | 1917.223 | 8686 | 4589.953 | 1892.394 | 5352.935 | 5.37 | 134823936 |
+| 普通 | 3 | 723.112 | - | 4554.286 | 1932.246 | 8686 | 4554.261 | 1907.225 | 5278.014 | 5.28 | 147439616 |
+| 普通中位数 | - | 761.634 | - | 4589.972 | 1917.223 | 8686 | 4589.953 | 1892.394 | 5352.935 | 5.37 | 134823936 |
+| Redpiler | 1 | 798.626 | 572.451 | 896.891 | 9811.675 | 8686 | 886.173 | 9801.703 | 2270.510 | 2.29 | 219578368 |
+| Redpiler | 2 | 708.000 | 478.831 | 736.390 | 11950.183 | 8686 | 726.445 | 11956.859 | 1925.976 | 1.94 | 215252992 |
+| Redpiler | 3 | 837.723 | 537.970 | 861.000 | 10220.672 | 8686 | 849.628 | 10223.299 | 2243.661 | 2.26 | 200671232 |
+| Redpiler 中位数 | - | 798.626 | 537.970 | 861.000 | 10220.672 | 8686 | 849.628 | 10223.299 | 2243.661 | 2.26 | 215252992 |
+
+Line-drawing:
+
+| 后端 | 轮次 | load ms | compile ms | tick ms | 总 game tick/s | stable game tick | 稳定前 ms | 稳定前 game tick/s | total ms | wall s | RSS byte |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| 普通 | 1 | 727.801 | - | 128668.250 | 1748.683 | 191670 | 128667.329 | 1489.656 | 129397.337 | 129.40 | 136675328 |
+| 普通 | 2 | 736.614 | - | 124777.226 | 1803.214 | 191670 | 124776.357 | 1536.108 | 125515.390 | 125.52 | 134823936 |
+| 普通 | 3 | 696.169 | - | 131268.019 | 1714.050 | 191670 | 131267.149 | 1460.152 | 131966.727 | 131.99 | 135888896 |
+| 普通中位数 | - | 727.801 | - | 128668.250 | 1748.683 | 191670 | 128667.329 | 1489.656 | 129397.337 | 129.40 | 135888896 |
+| Redpiler | 1 | 849.972 | 521.425 | 19300.466 | 11657.750 | 191670 | 15913.710 | 12044.332 | 20677.185 | 20.69 | 175046656 |
+| Redpiler | 2 | 923.033 | 478.994 | 20034.210 | 11230.790 | 191670 | 17255.016 | 11108.074 | 21439.926 | 21.46 | 205111296 |
+| Redpiler | 3 | 710.814 | 527.216 | 23817.182 | 9446.961 | 191670 | 20352.092 | 9417.705 | 25060.487 | 25.10 | 213729280 |
+| Redpiler 中位数 | - | 849.972 | 521.425 | 20034.210 | 11230.790 | 191670 | 17255.016 | 11108.074 | 21439.926 | 21.46 | 205111296 |
+
+全部 MCHPRS hello-world 运行通过 206 个 probe, 全部 line-drawing 运行通过 36 个 probe. Redpiler 的 `compile_ms` 不包含在 `tick_ms` 和 tick/s 中, 但包含在 `total_ms` 和 wall 中.
+
+### Minecraft Java 26.1.2 原始结果
+
+Hello-world:
+
+| 轮次 | GameTest tick ms | tick/s | wall s | RSS byte | 最终 probe |
+| ---: | ---: | ---: | ---: | ---: | --- |
+| 1 | 32283.587 | 272.584 | 86.78 | 1956036608 | 与 Rust 一致 |
+| 2 | 34159.140 | 257.618 | 88.42 | 1697398784 | 与 Rust 一致 |
+| 3 | 38000.301 | 231.577 | 91.89 | 1781465088 | 与 Rust 一致 |
+| 中位数 | 34159.140 | 257.618 | 88.42 | 1781465088 | 与 Rust 一致 |
+
+每轮输出 1 行 `probe_samples_v1` header 和 206 行 tick 8800 probe. 三个 Java 输出文件字节一致. Rust JSONL 按结构化字段投影为 `tick`, `probe`, `value` 后与 Java 输出无差异.
+
+Java GameTest 未加入稳定点检测, 因而不报告稳定前速度. 完整 line-drawing 需要原版执行 225000 tick, 本次不运行该长任务. 表格保留空项, 不发布 Java line-drawing 速度或相对倍数.
+
+### 结果解释
+
+Hello-world 的 `redstone-rs` 稳定前中位数为 2428.251 tick/s, MCHPRS 普通引擎为 1892.394 等价 game tick/s, Redpiler 为 10223.299 等价 game tick/s. Line-drawing 对应值分别为 2130.913, 1489.656 和 11108.074. Redpiler 更高的吞吐建立在预计算连接, `optimize` 和 `io_only` 上, 不能外推为完整规则模拟的通用领先幅度.
+
+总 tick/s 在两个场景中都高于或接近稳定前速度, 原因是完整运行包含稳定后的空闲 tick. line-drawing 的差异最明显: `redstone-rs` 总速率为 2501.382 tick/s, 活动区间为 2130.913 tick/s. 如果只报告完整运行平均值, 会高估持续传播阶段的计算能力.
+
+端到端 wall 同时受结构解析, 注册表初始化, MCHPRS 编译, JVM 启动和操作系统调度影响. tick 阶段适合观察稳态执行, wall 适合估计一次性工具调用成本, 两者不能互相替代.
+
+### 通用性能分析规则
+
+1. 正确性先于速度. 只有达到相同最终状态, 或通过逐 tick oracle 的实现才能进入对应速度表.
+2. 统一 tick 定义. game tick, redstone tick, 子步和编译图求值必须显式换算, 原始单位也要保留.
+3. 单线程和多线程分开报告. 本节比较单个 CLI, 单个 GameTest server thread 和单个 MCHPRS plot, 不把 plot 级并发吞吐混入单机器速度.
+4. 初始化和稳态分离. 世界加载, 注册表初始化, JIT, 图编译和首轮缓存应单列, 不能混入 tick/s.
+5. 活动区间和空闲尾部分离. 报告稳定点, 稳定前速度和完整运行速度, 避免空闲 tick 抬高复杂机器吞吐.
+6. trace, replay 和网络分离. 正式吞吐关闭微轨迹和客户端网络, 另行测量观测与导出成本.
+7. 微基准和真实机器并存. 元件微基准用于定位局部热路径, Frostbyte 这类大型 CPU 用于验证组合行为和缓存压力.
+8. 保留原始值和异常轮次. 摘要使用中位数, 但不能静默删除调度抖动, 热降频或页面错误造成的慢轮次.
+9. 不生成跨语义范围的单一总排名. 完整原版规则, 计算红石子集, 预编译连接图和纯三维可视化项目应分别解释.
