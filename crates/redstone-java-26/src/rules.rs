@@ -14,7 +14,7 @@ use tracing::debug;
 
 use crate::compiled::{
     CompiledExecutor, CompiledOrderedWireEvent, CompiledWireTransition, NetworkInputPower,
-    WirePlan,
+    OrderedPropagation, WirePlan,
 };
 use crate::orientation::{Orientation, SideBias};
 use crate::{BlockBehavior, JAVA_VERSION, Java26Registry, PushReaction, StateDefinition};
@@ -1713,7 +1713,9 @@ impl BlockRules for Java26Rules {
                 let propagated = self.compiled.propagate_ordered(update.pos, &mut events);
                 let mut applied_counts = None;
                 let result = match propagated {
-                    Ok(true) => match self.apply_compiled_ordered_wire_events(ctx, &events) {
+                    Ok(OrderedPropagation::Compiled) => match self
+                        .apply_compiled_ordered_wire_events(ctx, &events)
+                    {
                         Ok(counts) => {
                             applied_counts = Some(counts);
                             Ok(())
@@ -1726,7 +1728,10 @@ impl BlockRules for Java26Rules {
                             Err(error) => Err(error),
                         },
                     },
-                    Ok(false) => {
+                    Ok(OrderedPropagation::Interpreted) => {
+                        self.update_wire(ctx, update.pos, update.orientation)
+                    }
+                    Ok(OrderedPropagation::FellBack) => {
                         self.restore_interpreted_caches(ctx.world);
                         self.update_wire(ctx, update.pos, update.orientation)
                     }

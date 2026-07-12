@@ -25,6 +25,13 @@ pub(crate) use self::network::runtime::{
 pub(crate) use self::runtime::{CompiledWireTransition, Synchronization};
 use self::runtime::CompiledRuntime;
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum OrderedPropagation {
+    Compiled,
+    Interpreted,
+    FellBack,
+}
+
 #[derive(Clone, Debug, Default)]
 pub(crate) struct CompiledExecutor {
     report: ExecutionReport,
@@ -241,7 +248,7 @@ impl CompiledExecutor {
         &mut self,
         origin: BlockPos,
         events: &mut Vec<CompiledOrderedWireEvent>,
-    ) -> Result<bool, RulesError> {
+    ) -> Result<OrderedPropagation, RulesError> {
         if self.runtime.is_none()
             && self.report.requested_mode == ExecutionMode::Compiled
             && let Some(reason) = &self.permanent_fallback_reason
@@ -251,16 +258,17 @@ impl CompiledExecutor {
             )));
         }
         let Some(runtime) = self.runtime.as_mut() else {
-            return Ok(false);
+            return Ok(OrderedPropagation::Interpreted);
         };
         match runtime.propagate_ordered(origin, events) {
-            Ok(events) => Ok(events),
+            Ok(true) => Ok(OrderedPropagation::Compiled),
+            Ok(false) => Ok(OrderedPropagation::Interpreted),
             Err(error) => {
                 self.fail_runtime(
                     "compiled ordered wire propagation failed",
                     format!("{error} at {origin:?}"),
                 )?;
-                Ok(false)
+                Ok(OrderedPropagation::FellBack)
             }
         }
     }
@@ -556,10 +564,10 @@ mod tests {
         assert_eq!(auto.report().backend, ExecutionBackend::Interpreted);
         assert!(auto.report().fallback_reason.is_some());
         assert!(!auto.network_active());
-        assert!(
-            !auto
-                .propagate_ordered(BlockPos::ZERO, &mut Vec::new())
-                .unwrap()
+        assert_eq!(
+            auto.propagate_ordered(BlockPos::ZERO, &mut Vec::new())
+                .unwrap(),
+            OrderedPropagation::Interpreted
         );
 
         let mut forced = CompiledExecutor::default();

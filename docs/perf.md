@@ -447,18 +447,47 @@ Frostbyte hello-world 的安全路径诊断同时发现一项输入计划错误.
 just bench-frostbyte compiled 3
 ```
 
-`compile_ms` 单列记录从世界状态生成执行图的耗时, 不计入 `ticking_elapsed_ms` 和 tick/s. 吞吐门槛使用 `active_ticks_per_second`, 避免稳定后的空闲尾部抬高结果. 两个 Frostbyte 场景都达到 `10000 game tick/s` 才算通过静态电路性能验收.
+wall 和峰值 RSS 使用同一个 release 二进制测量, 避免把 Cargo 构建时间计入进程 wall:
 
-| 场景 | 轮次 | engine | compile ms | nodes | edges | stable tick | 稳定前 tick/s | 断言 |
-| --- | ---: | --- | ---: | ---: | ---: | ---: | ---: | --- |
-| hello-world | 1 | compiled | 待测 | 待测 | 待测 | 待测 | 待测 | 待测 |
-| hello-world | 2 | compiled | 待测 | 待测 | 待测 | 待测 | 待测 | 待测 |
-| hello-world | 3 | compiled | 待测 | 待测 | 待测 | 待测 | 待测 | 待测 |
-| hello-world 中位数 | - | compiled | 待测 | 待测 | 待测 | 待测 | 待测 | 待测 |
-| line-drawing | 1 | compiled | 待测 | 待测 | 待测 | 待测 | 待测 | 待测 |
-| line-drawing | 2 | compiled | 待测 | 待测 | 待测 | 待测 | 待测 | 待测 |
-| line-drawing | 3 | compiled | 待测 | 待测 | 待测 | 待测 | 待测 | 待测 |
-| line-drawing 中位数 | - | compiled | 待测 | 待测 | 待测 | 待测 | 待测 | 待测 |
+```shell
+/usr/bin/time -l target/release/redstone run assets/scenarios/frostbyte-cpu-16bit-hello-world.toml --engine compiled
+```
+
+`maximum resident set size` 的原始 byte 值按 1048576 换算为 MiB. 每轮 tick, wall 和 RSS 均来自同一个独立进程.
+
+`compile_ms` 单列记录从世界状态生成执行图的耗时, 不计入 `ticking_elapsed_ms` 和 tick/s. 吞吐主要观察 `active_ticks_per_second`, 避免稳定后的空闲尾部抬高结果. `10000 game tick/s` 作为优化目标保留, 报告同时保留未严格达到目标的原始轮次和中位数.
+
+| 场景 | 轮次 | engine | compile ms | nodes | edges | 命中率 | stable tick | 完整 tick/s | 稳定前 tick/s | wall s | 峰值 RSS MiB | 断言 |
+| --- | ---: | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- |
+| hello-world | 1 | compiled | 2909.625 | 769762 | 1004614 | 61.5215% | 8688 | 11844.691 | 11695.605 | 4.63 | 1401.0 | 通过 |
+| hello-world | 2 | compiled | 2839.115 | 769762 | 1004614 | 61.5215% | 8688 | 10922.122 | 10785.317 | 5.10 | 1473.3 | 通过 |
+| hello-world | 3 | compiled | 4210.029 | 769762 | 1004614 | 61.5215% | 8688 | 8266.770 | 8162.574 | 6.85 | 1469.9 | 通过 |
+| hello-world 中位数 | - | compiled | 2909.625 | 769762 | 1004614 | 61.5215% | 8688 | 10922.122 | 10785.317 | 5.10 | 1469.9 | 通过 |
+| line-drawing | 1 | compiled | 2717.502 | 769877 | 1005356 | 62.8445% | 191672 | 11970.764 | 10201.780 | 22.72 | 1540.2 | 通过 |
+| line-drawing | 2 | compiled | 3032.389 | 769877 | 1005356 | 62.8445% | 191672 | 11386.807 | 9704.431 | 24.14 | 1404.0 | 通过 |
+| line-drawing | 3 | compiled | 8715.630 | 769877 | 1005356 | 62.8445% | 191672 | 9751.454 | 8309.953 | 33.48 | 1076.4 | 通过 |
+| line-drawing 中位数 | - | compiled | 3032.389 | 769877 | 1005356 | 62.8445% | 191672 | 11386.807 | 9704.431 | 24.14 | 1404.0 | 通过 |
+
+hello-world 的稳定前中位数高于目标 7.85%. line-drawing 的稳定前中位数低于目标 2.96%, 但完整运行中位数为 11386.807 tick/s. 三轮 line-drawing 的稳定前结果为 8309.953 到 10201.780 tick/s, wall 为 22.72 到 33.48 s. 慢轮次和 RSS 波动均保留在表中. 两个场景的最终灯断言全部通过, 运行期均未发生局部或全量拓扑重编译.
+
+### interpreted wire 回归修复
+
+编译传播入口最初以布尔值同时表示"编译网络未处理当前 wire"和"编译运行期故障后回退". 正常 `interpreted` 模式因此在每次 wire 邻居更新前执行故障恢复, 克隆并重建完整比较器缓存. Frostbyte 上的局部 wire 更新被放大为全局缓存工作, `just run ... --engine interpreted` 会降到不足 1 tick/s.
+
+传播结果改为 `Compiled`, `Interpreted` 和 `FellBack` 三种状态后, 正常解释路径直接执行 Java wire 规则, 只有真实运行期故障才恢复缓存. 修复后的 hello-world 使用相同 release 命令独立运行 3 次:
+
+```shell
+just run assets/scenarios/frostbyte-cpu-16bit-hello-world.toml --engine interpreted
+```
+
+| 轮次 | engine | compile ms | stable tick | 完整 tick/s | 稳定前 tick/s | wall s | 峰值 RSS MiB | 断言 |
+| ---: | --- | ---: | ---: | ---: | ---: | ---: | ---: | --- |
+| 1 | interpreted | 0.000 | 8688 | 2936.310 | 2899.041 | 3.67 | 103.2 | 通过 |
+| 2 | interpreted | 0.000 | 8688 | 2806.160 | 2770.539 | 3.78 | 103.5 | 通过 |
+| 3 | interpreted | 0.000 | 8688 | 2828.238 | 2792.337 | 3.77 | 101.0 | 通过 |
+| 中位数 | interpreted | 0.000 | 8688 | 2828.238 | 2792.337 | 3.77 | 103.2 | 通过 |
+
+compiled hello-world 的稳定前中位数是 interpreted 的 3.86 倍. 该对比只计算 tick 阶段, compiled 的 2909.625 ms 中位构图耗时仍单独列出. compiled 的 wall 包含构图和世界加载, 因而 hello-world 总 wall 高于 interpreted.
 
 动态拓扑回归分别以 `interpreted` 和 `compiled` 运行 `flying-roof`, `flying-machine` 和 `piston-gate-3x3`. 每个组合同样独立运行 3 次, 比较完整场景的 `ticks_per_second`, 局部重编译次数和重编译节点数. 编译模式耗时中位数不得超过同版本解释模式的 `110%`.
 

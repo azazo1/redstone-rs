@@ -30,7 +30,9 @@
 
 | 实现 | 总 tick/s | 稳定前 tick/s | 稳定 tick | tick 阶段 | wall | 峰值 RSS | 正确性 |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | --- |
-| [`redstone-rs` `7f8344e7`](https://github.com/azazo1/redstone-rs/commit/7f8344e70ed78c38e535db7eeaf9851d73ed45fc) | 2459.498 | 2428.251 | 8688 | 3.578 s | 4.19 s | 93.3 MiB | 206 个灯通过 |
+| `redstone-rs` compiled | 10922.122 | 10785.317 | 8688 | 0.806 s | 5.10 s | 1469.9 MiB | 206 个灯通过 |
+| `redstone-rs` interpreted | 2828.238 | 2792.337 | 8688 | 3.111 s | 3.77 s | 103.2 MiB | 206 个灯通过 |
+| [`redstone-rs` interpreted `7f8344e7`, 历史](https://github.com/azazo1/redstone-rs/commit/7f8344e70ed78c38e535db7eeaf9851d73ed45fc) | 2459.498 | 2428.251 | 8688 | 3.578 s | 4.19 s | 93.3 MiB | 206 个灯通过 |
 | [MCHPRS 普通引擎 `8734f72b`](https://github.com/MCHPR/MCHPRS/commit/8734f72bcf48be492c39e657d549e054255bed31) | 1917.223 | 1892.394 | 8686 | 4.590 s | 5.37 s | 128.6 MiB | 206 个灯通过 |
 | [MCHPRS Redpiler `8734f72b`](https://github.com/MCHPR/MCHPRS/commit/8734f72bcf48be492c39e657d549e054255bed31) | 10220.672 | 10223.299 | 8686 | 0.861 s | 2.26 s | 205.3 MiB | 206 个灯通过 |
 | Minecraft Java 26.1.2 GameTest | 257.618 | - | - | 34.159 s | 88.42 s | 1698.9 MiB | 206 个灯与 Rust 一致 |
@@ -39,10 +41,13 @@
 
 | 实现 | 总 tick/s | 稳定前 tick/s | 稳定 tick | tick 阶段 | wall | 峰值 RSS | 正确性 |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | --- |
-| `redstone-rs` | 2501.382 | 2130.913 | 191672 | 89.950 s | 90.61 s | 97.0 MiB | 36 个灯通过 |
+| `redstone-rs` compiled | 11386.807 | 9704.431 | 191672 | 19.760 s | 24.14 s | 1404.0 MiB | 36 个灯通过 |
+| `redstone-rs` interpreted, 历史 | 2501.382 | 2130.913 | 191672 | 89.950 s | 90.61 s | 97.0 MiB | 36 个灯通过 |
 | MCHPRS 普通引擎 | 1748.683 | 1489.656 | 191670 | 128.668 s | 129.40 s | 129.6 MiB | 36 个灯通过 |
 | MCHPRS Redpiler | 11230.790 | 11108.074 | 191670 | 20.034 s | 21.46 s | 195.6 MiB | 36 个灯通过 |
 | Minecraft Java 26.1.2 GameTest | - | - | - | - | - | - | 未执行完整 225000 tick |
+
+当前 compiled 构图耗时中位数为 hello-world 2909.625 ms, line-drawing 3032.389 ms, 不计入 tick/s. wall 和峰值 RSS 与 tick 数据来自同一批独立进程.
 
 这不是单一速度排名. `redstone-rs` 和 Java GameTest 按 game tick 执行完整规则, MCHPRS 普通引擎以 1 redstone tick 对应 2 game tick, Redpiler 则预计算连接并使用 `optimize` 和 `io_only` 缩小运行时工作. Redpiler 编译时间单列在详细报告中, 不计入 tick/s. Java line-drawing 不用短截断结果代替完整程序结果.
 
