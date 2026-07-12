@@ -10,7 +10,8 @@
 - `redstone-java-26`: Java `26.1.2` 状态注册表, 红石规则和混合编译执行器.
 - `redstone-io`: Litematic, 原版 structure NBT 和 TOML 场景.
 - `redstone-replay-26`: Replay Mod MCPR 容器和 Java `26.1.2` 网络协议编码.
-- `redstone-cli`: `inspect`, `run`, `test`, `trace`, `bench` 和 `convert` 命令.
+- `redstone-render-26`: 基于 wgpu 的 Replay 离屏渲染和 FFmpeg 视频编码.
+- `redstone-cli`: `inspect`, `run`, `test`, `trace`, `bench`, `convert` 和 `render` 命令.
 - `tools/vanilla-oracle`: 外部 Java 参考探针的调用协议.
 
 ## 文档
@@ -65,7 +66,7 @@
 | 世界及 schematic 输入 | 世界目录/ZIP, Litematic, Sponge, vanilla structure | 世界和 oracle 生成的 structure | plot 和 Sponge schematic | 从 plot/选区编译 | 自有浏览器世界持久化 |
 | 场景动作和断言 | TOML action, probe, expectation | GameTest 适配全部场景动作和 probe | 基准适配器支持按钮和最终灯断言 | 同左 | 无可复现红石断言协议 |
 | 运行中修改结构 | action, 定时 paste 和编译拓扑同步, 失败时按执行模式回退或报错 | 支持 | WorldEdit 和玩家修改 | 修改会 reset 并停用 Redpiler | 支持浏览器放置/破坏方块 |
-| 回放和可视化 | Replay Mod MCPR 可保留 compiled, JSONL/VCD 使用 interpreted | 原版客户端, oracle JSONL | Minecraft 客户端 | Minecraft 客户端 | 浏览器三维可视化和世界历史 |
+| 回放和可视化 | Replay Mod MCPR, 原生简化 3D MP4, JSONL/VCD | 原版客户端, oracle JSONL | Minecraft 客户端 | Minecraft 客户端 | 浏览器三维可视化和世界历史 |
 
 `redstone-rs` 的 compiled 后端保留 `SparseWorld`, 计划刻, 方块事件和 Java 26.1.2 规则作为权威状态, 编译图只加速电气传播. 活塞及其动态拓扑变化仍通过现有 Java 规则执行并同步回编译拓扑. MCHPRS 普通引擎确实在三维世界中计算红石, 但当前红石执行入口没有活塞和观察者行为. Redpiler 通过预搜索 wire 路径和保存连接换取高吞吐, 运行时改建会使编译结果失效. 3D Redstone Simulator 当前主要是浏览器三维世界项目, 其 README 把 redstone simulation 和 piston simulation 列为后续目标, 因而不进入性能表.
 
@@ -112,6 +113,8 @@ cargo run -p redstone-cli -- inspect path/to/world --region 0,-64,0 255,319,255 
 cargo run -p redstone-cli -- convert machine.litematic machine.schem
 cargo run -p redstone-cli -- convert path/to/world machine.litematic --region 0,-64,0 255,319,255
 cargo run -p redstone-cli -- convert scenario.toml prepared/scenario.toml
+cargo run --release -p redstone-cli -- render recording.mcpr recording.mp4
+cargo run --release -p redstone-cli -- render recording.mcpr walltime.mp4 --original-speed
 ```
 
 `inspect` 默认输出结构汇总. `--block X,Y,Z` 只查询单个坐标并可重复使用. `--region FROM TO` 使用两个方块坐标查询闭合区域内的非空气方块, 两个端点不要求按大小排序, 并可叠加 `--type BLOCK_ID` 按方块类型筛选. 对世界目录或 ZIP, `--region` 同时限制需要读取的 chunk. `--all` 输出全部非空气方块. 明细包含状态 ID, properties, 支持状态和完整方块实体 NBT, 包括嵌套的 `components`. `--format json` 与 `--json` 均可输出 JSON.

@@ -1,32 +1,20 @@
 [package]
-name = "redstone-cli"
+name = "redstone-render-26"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 authors.workspace = true
 
-[[bin]]
-name = "redstone"
-path = "src/main.rs"
-
 [dependencies]
 anyhow.workspace = true
-clap.workspace = true
-indicatif.workspace = true
-libc.workspace = true
+bytemuck.workspace = true
+glam.workspace = true
 redstone-core = { path = "../redstone-core" }
-redstone-io = { path = "../redstone-io" }
 redstone-java-26 = { path = "../redstone-java-26" }
 redstone-replay-26 = { path = "../redstone-replay-26" }
-redstone-render-26 = { path = "../redstone-render-26" }
 serde.workspace = true
 serde_json.workspace = true
 tokio.workspace = true
-toml.workspace = true
 tracing.workspace = true
-tracing-indicatif.workspace = true
-tracing-subscriber.workspace = true
-
-[dev-dependencies]
-fastnbt.workspace = true
+wgpu.workspace = true
 zip.workspace = true

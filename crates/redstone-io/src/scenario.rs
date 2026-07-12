@@ -94,11 +94,28 @@ pub struct ScenarioReplay {
     pub end_tick: Option<u64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub duration_ms: Option<u64>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub time_keyframes: Vec<ScenarioReplayTimeKeyframe>,
     #[serde(default)]
     pub camera: ScenarioReplayCamera,
 }
 
-#[derive(Clone, Copy, Debug, Deserialize, Serialize)]
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct ScenarioReplayTimeKeyframe {
+    pub time_ms: u64,
+    pub tick: u64,
+}
+
+#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ScenarioReplayCameraInterpolation {
+    Linear,
+    Cubic,
+    #[default]
+    CatmullRom,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct ScenarioReplayCamera {
     #[serde(default = "default_replay_view_distance")]
     pub view_distance: i32,
@@ -108,6 +125,25 @@ pub struct ScenarioReplayCamera {
     pub yaw: Option<f32>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub pitch: Option<f32>,
+    #[serde(default)]
+    pub interpolation: ScenarioReplayCameraInterpolation,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub keyframes: Vec<ScenarioReplayCameraKeyframe>,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+pub struct ScenarioReplayCameraKeyframe {
+    pub time_ms: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub f3: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub position: Option<[f64; 3]>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub yaw: Option<f32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pitch: Option<f32>,
+    #[serde(default)]
+    pub roll: f32,
 }
 
 impl Default for ScenarioReplayCamera {
@@ -117,6 +153,8 @@ impl Default for ScenarioReplayCamera {
             position: None,
             yaw: None,
             pitch: None,
+            interpolation: ScenarioReplayCameraInterpolation::default(),
+            keyframes: Vec::new(),
         }
     }
 }
@@ -659,6 +697,57 @@ path = "machine.nbt"
         assert_eq!(replay.start_tick, 20);
         assert_eq!(replay.end_tick, Some(80));
         assert_eq!(replay.duration_ms, Some(1500));
+    }
+
+    #[test]
+    fn replay_parses_time_and_camera_keyframes() {
+        let scenario = toml::from_str::<Scenario>(
+            r#"
+version = "26.1.2"
+mode = "default"
+
+[replay]
+start_tick = 20
+end_tick = 80
+
+[[replay.time_keyframes]]
+time_ms = 0
+tick = 20
+
+[[replay.time_keyframes]]
+time_ms = 1500
+tick = 80
+
+[replay.camera]
+interpolation = "cubic"
+
+[[replay.camera.keyframes]]
+time_ms = 0
+f3 = "/execute in minecraft:overworld run tp @s -1.5 75.0 3.25 -65.0 16.0"
+
+[[replay.camera.keyframes]]
+time_ms = 1500
+position = [1.0, 80.0, 4.0]
+yaw = 30.0
+pitch = 25.0
+roll = 5.0
+
+[source]
+path = "machine.nbt"
+"#,
+        )
+        .unwrap();
+        let replay = scenario.replay.unwrap();
+
+        assert_eq!(replay.time_keyframes.len(), 2);
+        assert_eq!(replay.time_keyframes[0].tick, 20);
+        assert_eq!(
+            replay.camera.interpolation,
+            ScenarioReplayCameraInterpolation::Cubic
+        );
+        assert_eq!(replay.camera.keyframes.len(), 2);
+        assert!(replay.camera.keyframes[0].f3.is_some());
+        assert_eq!(replay.camera.keyframes[1].roll, 5.0);
     }
 
     #[test]

@@ -19,8 +19,9 @@ use redstone_java_26::{
     JAVA_DATA_VERSION, JAVA_VERSION, Java26Registry, Java26Rules, StateResolveError, StateResolver,
 };
 use redstone_replay_26::{
-    ReplayOptions, ReplayRegion, ReplayStats, ReplayTimeline, ReplayWriter,
+    ReplayOptions, ReplayRegion, ReplayStats, ReplayTimeKeyframe, ReplayTimeline, ReplayWriter,
 };
+use redstone_render_26::{RenderOptions, VideoEncoderKind, render_replay};
 use tokio::io::{AsyncBufReadExt, AsyncRead, BufReader};
 use tokio::process::Command as ProcessCommand;
 use tokio::sync::Semaphore;
@@ -47,6 +48,30 @@ enum EngineArg {
     Auto,
     Interpreted,
     Compiled,
+}
+
+#[derive(Clone, Copy, Debug, Default, ValueEnum)]
+enum VideoEncoderArg {
+    #[default]
+    Auto,
+    Libx264,
+    H264Videotoolbox,
+    H264Nvenc,
+    H264Qsv,
+    H264Amf,
+}
+
+impl From<VideoEncoderArg> for VideoEncoderKind {
+    fn from(value: VideoEncoderArg) -> Self {
+        match value {
+            VideoEncoderArg::Auto => Self::Auto,
+            VideoEncoderArg::Libx264 => Self::Libx264,
+            VideoEncoderArg::H264Videotoolbox => Self::H264VideoToolbox,
+            VideoEncoderArg::H264Nvenc => Self::H264Nvenc,
+            VideoEncoderArg::H264Qsv => Self::H264Qsv,
+            VideoEncoderArg::H264Amf => Self::H264Amf,
+        }
+    }
 }
 
 impl From<EngineArg> for ExecutionMode {
@@ -186,6 +211,35 @@ enum Command {
         )]
         skip_old_regions: bool,
     },
+    Render {
+        #[arg(help = "本项目生成且包含渲染轨迹的 MCPR")]
+        input: PathBuf,
+        #[arg(help = "MP4 输出路径")]
+        output: PathBuf,
+        #[arg(long, default_value_t = 1920)]
+        width: u32,
+        #[arg(long, default_value_t = 1080)]
+        height: u32,
+        #[arg(long, default_value_t = 60)]
+        fps: u32,
+        #[arg(long, default_value_t = 20)]
+        bitrate_mbps: u32,
+        #[arg(long, default_value_t = 70.0)]
+        fov: f32,
+        #[arg(long, default_value_t = 4)]
+        aa: u32,
+        #[arg(long, default_value_t = 32)]
+        view_distance: i32,
+        #[arg(long, value_enum, default_value = "auto")]
+        encoder: VideoEncoderArg,
+        #[arg(long, default_value = "ffmpeg")]
+        ffmpeg: PathBuf,
+        #[arg(
+            long,
+            help = "忽略 TIME path 变速, 按录制时的模拟 walltime 还原实际 TPS"
+        )]
+        original_speed: bool,
+    },
 }
 
 #[tokio::main]
@@ -292,7 +346,63 @@ async fn main() -> Result<()> {
             inspect::region_from_corners(&region),
             skip_old_regions,
         ),
+        Command::Render {
+            input,
+            output,
+            width,
+            height,
+            fps,
+            bitrate_mbps,
+            fov,
+            aa,
+            view_distance,
+            encoder,
+            ffmpeg,
+            original_speed,
+        } => render_video(
+            &input,
+            &output,
+            RenderOptions {
+                width,
+                height,
+                fps,
+                bitrate_mbps,
+                fov_degrees: fov,
+                antialiasing: aa,
+                encoder: encoder.into(),
+                ffmpeg,
+                original_speed,
+                view_distance_chunks: view_distance,
+            },
+        )
+        .await,
     }
+}
+
+async fn render_video(input: &Path, output: &Path, options: RenderOptions) -> Result<()> {
+    let progress = tracing::info_span!("replay_video");
+    progress.pb_set_style(&simulation_progress_style()?);
+    progress.pb_set_message("渲染 replay 视频");
+    progress.pb_start();
+    let stats = render_replay(input, output, &options, |position, length| {
+        progress.pb_set_length(length);
+        progress.pb_set_position(position);
+    })
+    .instrument(progress.clone())
+    .await?;
+    progress.pb_set_position(stats.frames);
+    info!(
+        input = %input.display(),
+        output = %output.display(),
+        frames = stats.frames,
+        duration_ms = stats.duration_ms,
+        encoder = stats.encoder,
+        output_size = stats.output_size,
+        elapsed_ms = stats.elapsed.as_secs_f64() * 1_000.0,
+        original_speed = options.original_speed,
+        "完成 replay 视频渲染"
+    );
+    Ok(())
 }
 
 fn bench(blocks: usize, active: usize, ticks: usize, engine: EngineArg) -> Result<()> {
@@ -797,7 +907,8 @@ fn execute_scenario(
             ));
         }
     }
-    if let Some(replay) = replay {
+    if let Some(mut replay) = replay {
+        replay.set_simulation_walltime(tick_elapsed);
         let path = replay_path.expect("replay path must exist");
         let progress = tracing::info_span!("replay_export");
         progress.pb_set_style(&replay_export_progress_style()?);
@@ -928,6 +1039,49 @@ fn resolve_replay_timeline(scenario: &Scenario) -> Result<ReplayTimeline> {
             scenario.max_ticks
         );
     }
+    if replay.is_some_and(|replay| !replay.time_keyframes.is_empty()) {
+        let replay = replay.expect("replay configuration is present");
+        if replay.duration_ms.is_some() {
+            bail!("[replay].duration_ms 不能与 time_keyframes 同时设置");
+        }
+        let first = replay
+            .time_keyframes
+            .first()
+            .expect("time keyframes are not empty");
+        let last = replay
+            .time_keyframes
+            .last()
+            .expect("time keyframes are not empty");
+        if first.time_ms != 0 || first.tick != start_tick {
+            bail!(
+                "[replay].time_keyframes 首帧必须是 time_ms=0, tick={start_tick}"
+            );
+        }
+        if last.tick != end_tick {
+            bail!("[replay].time_keyframes 末帧 tick 必须是 end_tick={end_tick}");
+        }
+        if replay
+            .time_keyframes
+            .iter()
+            .any(|keyframe| keyframe.tick < start_tick || keyframe.tick > end_tick)
+        {
+            bail!(
+                "[replay].time_keyframes 的 tick 必须位于 {start_tick}..={end_tick}"
+            );
+        }
+        let keyframes = replay
+            .time_keyframes
+            .iter()
+            .map(|keyframe| {
+                Ok(ReplayTimeKeyframe {
+                    time_ms: i64::try_from(keyframe.time_ms)
+                        .context("时间关键帧 time_ms 超出 ReplayMod long 范围")?,
+                    tick: keyframe.tick,
+                })
+            })
+            .collect::<Result<Vec<_>>>()?;
+        return ReplayTimeline::from_keyframes(keyframes).context("[replay] 时间关键帧无效");
+    }
     let duration_ms = replay.and_then(|replay| replay.duration_ms).map_or_else(
         || {
             (end_tick - start_tick)
@@ -953,6 +1107,7 @@ fn create_replay_writer(
         |name| name.to_string_lossy().into_owned(),
     );
     let camera = replay_camera::options(scenario);
+    let camera_path = replay_camera::path(scenario, timeline.duration_ms())?;
     let camera_hints = replay_camera::hints(
         scenario,
         [simulation.world()],
@@ -970,7 +1125,8 @@ fn create_replay_writer(
         .with_environment(simulation.environment())
         .with_piston_animation(replay_anim)
         .with_camera(camera)
-        .with_camera_hints(camera_hints),
+        .with_camera_hints(camera_hints)
+        .with_camera_path(camera_path),
         simulation.world(),
     )
     .with_context(|| format!("初始化 Replay Mod 录像失败: {}", replay_path.display()))

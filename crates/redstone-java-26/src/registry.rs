@@ -218,6 +218,23 @@ impl Java26Registry {
         self.states.get(id.0 as usize)?.as_ref()
     }
 
+    pub fn resolve_state_id(
+        &mut self,
+        id: BlockStateId,
+    ) -> Result<&StateDefinition, StateResolveError> {
+        if self.state(id).is_none() {
+            let (name, properties) = self
+                .catalog
+                .states_by_id
+                .get(id.0 as usize)
+                .and_then(Option::as_ref)
+                .cloned()
+                .ok_or(StateResolveError::UnknownState(id))?;
+            self.resolve_state(&name, &properties)?;
+        }
+        self.state(id).ok_or(StateResolveError::UnknownState(id))
+    }
+
     pub fn states(&self) -> impl Iterator<Item = &StateDefinition> {
         self.states.iter().filter_map(Option::as_ref)
     }
@@ -392,6 +409,7 @@ impl StateResolver for Java26Registry {
 #[derive(Debug)]
 struct OfficialStateCatalog {
     states_by_key: HashMap<String, BlockStateId>,
+    states_by_id: Vec<Option<(String, BTreeMap<String, String>)>>,
     default_properties_by_name: HashMap<String, BTreeMap<String, String>>,
     blocks_with_entities: HashSet<String>,
     max_state_id: u32,
@@ -427,6 +445,7 @@ fn official_catalog() -> Arc<OfficialStateCatalog> {
             ))
             .expect("官方 26.1.2 blocks.json 必须可解析");
             let mut states_by_key = HashMap::new();
+            let mut states_by_id = Vec::new();
             let mut default_properties_by_name = HashMap::new();
             let mut blocks_with_entities = HashSet::new();
             let mut max_state_id = 0;
@@ -436,6 +455,13 @@ fn official_catalog() -> Arc<OfficialStateCatalog> {
                 }
                 for state in entry.states {
                     max_state_id = max_state_id.max(state.id);
+                    let state_index = state.id as usize;
+                    if states_by_id.len() <= state_index {
+                        states_by_id.resize_with(state_index + 1, || None);
+                    }
+                    let old_by_id = states_by_id[state_index]
+                        .replace((name.clone(), state.properties.clone()));
+                    assert!(old_by_id.is_none(), "官方方块状态 ID 重复: {}", state.id);
                     if state.is_default {
                         let old = default_properties_by_name
                             .insert(name.clone(), state.properties.clone());
@@ -448,6 +474,7 @@ fn official_catalog() -> Arc<OfficialStateCatalog> {
             }
             Arc::new(OfficialStateCatalog {
                 states_by_key,
+                states_by_id,
                 default_properties_by_name,
                 blocks_with_entities,
                 max_state_id,

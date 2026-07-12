@@ -31,8 +31,11 @@ use crate::protocol::registry::{registry_packets, required_tags_packet};
 
 mod camera;
 mod protocol;
+mod trace;
 
 pub use camera::{DEFAULT_VIEW_DISTANCE, ReplayCameraHint, ReplayCameraOptions};
+pub use trace::{RENDER_TRACE_ENTRY, RenderTrace, RenderTraceBlock, RenderTraceFrame};
+use trace::RenderTraceWriter;
 
 pub const MINECRAFT_VERSION: &str = "26.1.2";
 pub const PROTOCOL_VERSION: i32 = 775;
@@ -40,10 +43,14 @@ pub const FILE_FORMAT_VERSION: i32 = 14;
 pub const TICK_MILLIS: u64 = 50;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct ReplayTimeKeyframe {
+    pub time_ms: i64,
+    pub tick: u64,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ReplayTimeline {
-    start_tick: u64,
-    end_tick: u64,
-    duration_ms: i64,
+    keyframes: Vec<ReplayTimeKeyframe>,
 }
 
 impl ReplayTimeline {
@@ -75,27 +82,124 @@ impl ReplayTimeline {
         timestamp_for_tick(end_tick)?;
         let duration_ms = i64::try_from(duration_ms)
             .map_err(|_| ReplayError::TimelineDurationOverflow { duration_ms })?;
+        let mut keyframes = vec![ReplayTimeKeyframe {
+            time_ms: 0,
+            tick: start_tick,
+        }];
+        if duration_ms > 0 {
+            keyframes.push(ReplayTimeKeyframe {
+                time_ms: duration_ms,
+                tick: end_tick,
+            });
+        }
+        Ok(Self { keyframes })
+    }
+
+    pub fn from_keyframes(keyframes: Vec<ReplayTimeKeyframe>) -> Result<Self, ReplayError> {
+        if keyframes.is_empty() {
+            return Err(ReplayError::MissingTimeKeyframes);
+        }
+        if keyframes[0].time_ms != 0 {
+            return Err(ReplayError::TimelineMustStartAtZero {
+                time_ms: keyframes[0].time_ms,
+            });
+        }
+        for pair in keyframes.windows(2) {
+            if pair[1].time_ms <= pair[0].time_ms {
+                return Err(ReplayError::TimelineTimeOrder {
+                    previous: pair[0].time_ms,
+                    next: pair[1].time_ms,
+                });
+            }
+            if pair[1].tick < pair[0].tick {
+                return Err(ReplayError::TimelineTickOrder {
+                    previous: pair[0].tick,
+                    next: pair[1].tick,
+                });
+            }
+        }
+        for keyframe in &keyframes {
+            timestamp_for_tick(keyframe.tick)?;
+        }
+        Ok(Self { keyframes })
+    }
+
+    pub fn start_tick(&self) -> u64 {
+        self.keyframes[0].tick
+    }
+
+    pub fn end_tick(&self) -> u64 {
+        self.keyframes.last().expect("timeline is not empty").tick
+    }
+
+    pub fn source_ticks(&self) -> u64 {
+        self.end_tick() - self.start_tick()
+    }
+
+    pub fn duration_ms(&self) -> i64 {
+        self.keyframes
+            .last()
+            .expect("timeline is not empty")
+            .time_ms
+    }
+
+    pub fn keyframes(&self) -> &[ReplayTimeKeyframe] {
+        &self.keyframes
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub enum ReplayCameraInterpolation {
+    Linear,
+    Cubic,
+    #[default]
+    CatmullRom,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct ReplayCameraKeyframe {
+    pub time_ms: i64,
+    pub position: [f64; 3],
+    pub yaw: f32,
+    pub pitch: f32,
+    pub roll: f32,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct ReplayCameraPath {
+    pub interpolation: ReplayCameraInterpolation,
+    pub keyframes: Vec<ReplayCameraKeyframe>,
+}
+
+impl ReplayCameraPath {
+    pub fn new(
+        interpolation: ReplayCameraInterpolation,
+        keyframes: Vec<ReplayCameraKeyframe>,
+        duration_ms: i64,
+    ) -> Result<Self, ReplayError> {
+        if keyframes.len() < 2 {
+            return Err(ReplayError::InsufficientCameraKeyframes);
+        }
+        if keyframes[0].time_ms != 0
+            || keyframes.last().expect("camera path is not empty").time_ms != duration_ms
+        {
+            return Err(ReplayError::CameraPathEndpoints { duration_ms });
+        }
+        for keyframe in &keyframes {
+            validate_camera_keyframe(*keyframe)?;
+        }
+        for pair in keyframes.windows(2) {
+            if pair[1].time_ms <= pair[0].time_ms {
+                return Err(ReplayError::CameraTimeOrder {
+                    previous: pair[0].time_ms,
+                    next: pair[1].time_ms,
+                });
+            }
+        }
         Ok(Self {
-            start_tick,
-            end_tick,
-            duration_ms,
+            interpolation,
+            keyframes,
         })
-    }
-
-    pub fn start_tick(self) -> u64 {
-        self.start_tick
-    }
-
-    pub fn end_tick(self) -> u64 {
-        self.end_tick
-    }
-
-    pub fn source_ticks(self) -> u64 {
-        self.end_tick - self.start_tick
-    }
-
-    pub fn duration_ms(self) -> i64 {
-        self.duration_ms
     }
 }
 
@@ -134,6 +238,7 @@ pub struct ReplayOptions {
     pub piston_animation: bool,
     pub camera: ReplayCameraOptions,
     pub camera_hints: Vec<ReplayCameraHint>,
+    pub camera_path: Option<ReplayCameraPath>,
 }
 
 impl ReplayOptions {
@@ -155,6 +260,7 @@ impl ReplayOptions {
             piston_animation: false,
             camera: ReplayCameraOptions::default(),
             camera_hints: Vec::new(),
+            camera_path: None,
         }
     }
 
@@ -177,6 +283,11 @@ impl ReplayOptions {
         self.camera_hints = hints;
         self
     }
+
+    pub fn with_camera_path(mut self, path: Option<ReplayCameraPath>) -> Self {
+        self.camera_path = path;
+        self
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -195,8 +306,10 @@ pub struct ReplayWriter {
     output_path: PathBuf,
     recording_path: PathBuf,
     archive_path: PathBuf,
+    render_trace_path: PathBuf,
     recording: Option<BufWriter<File>>,
     archive: Option<File>,
+    render_trace: Option<RenderTraceWriter>,
     crc: Hasher,
     state: PacketState,
     loaded_chunks: BTreeSet<(i32, i32)>,
@@ -208,6 +321,7 @@ pub struct ReplayWriter {
     last_timestamp: i32,
     last_packet_timestamp: i32,
     initial_camera: Option<Camera>,
+    simulation_walltime: Duration,
     options: ReplayOptions,
     started: Instant,
     finished: bool,
@@ -220,6 +334,13 @@ impl ReplayWriter {
         initial_world: &SparseWorld,
     ) -> Result<Self, ReplayError> {
         options.camera.validate()?;
+        if let Some(path) = &options.camera_path {
+            ReplayCameraPath::new(
+                path.interpolation,
+                path.keyframes.clone(),
+                options.timeline.duration_ms(),
+            )?;
+        }
         i64::try_from(options.environment.game_time).map_err(|_| {
             ReplayError::EnvironmentTimeOutOfRange {
                 name: "game_time",
@@ -246,6 +367,7 @@ impl ReplayWriter {
         let prefix = format!(".{file_name}.redstone-{}-{nonce}", std::process::id());
         let recording_path = parent.join(format!("{prefix}.tmcpr.tmp"));
         let archive_path = parent.join(format!("{prefix}.mcpr.tmp"));
+        let render_trace_path = parent.join(format!("{prefix}.render.tmp"));
         let recording_file = OpenOptions::new()
             .write(true)
             .create_new(true)
@@ -261,12 +383,22 @@ impl ReplayWriter {
                 return Err(error.into());
             }
         };
+        let render_trace = match RenderTraceWriter::new(render_trace_path.clone(), initial_world) {
+            Ok(writer) => writer,
+            Err(error) => {
+                let _ = std::fs::remove_file(&recording_path);
+                let _ = std::fs::remove_file(&archive_path);
+                return Err(error);
+            }
+        };
         let mut writer = Self {
             output_path,
             recording_path,
             archive_path,
+            render_trace_path,
             recording: Some(BufWriter::new(recording_file)),
             archive: Some(archive_file),
+            render_trace: Some(render_trace),
             crc: Hasher::new(),
             state: PacketState::Login,
             loaded_chunks: BTreeSet::new(),
@@ -278,6 +410,7 @@ impl ReplayWriter {
             last_timestamp: 0,
             last_packet_timestamp: 0,
             initial_camera: None,
+            simulation_walltime: Duration::ZERO,
             options,
             started: Instant::now(),
             finished: false,
@@ -294,12 +427,20 @@ impl ReplayWriter {
             });
         }
         let timestamp = timestamp_for_tick(delta.tick.0)?;
+        self.render_trace
+            .as_mut()
+            .ok_or(ReplayError::AlreadyFinished)?
+            .record_delta(timestamp, delta)?;
         for event in &delta.events {
             self.record_event(timestamp, event)?;
         }
         self.last_tick = delta.tick.0;
         self.last_timestamp = timestamp;
         Ok(())
+    }
+
+    pub fn set_simulation_walltime(&mut self, elapsed: Duration) {
+        self.simulation_walltime = elapsed;
     }
 
     fn record_event(&mut self, timestamp: i32, event: &WorldEvent) -> Result<(), ReplayError> {
@@ -383,6 +524,13 @@ impl ReplayWriter {
         recording.flush()?;
         let recording_file = recording.into_inner().map_err(|error| error.into_error())?;
         recording_file.sync_all()?;
+        let render_trace_file = self
+            .render_trace
+            .as_mut()
+            .ok_or(ReplayError::AlreadyFinished)?
+            .finish(self.simulation_walltime, self.last_tick)?;
+        let render_trace_size = render_trace_file.metadata()?.len();
+        drop(render_trace_file);
 
         let archive_file = self.archive.take().ok_or(ReplayError::AlreadyFinished)?;
         let mut archive = ZipWriter::new(archive_file);
@@ -392,7 +540,8 @@ impl ReplayWriter {
         archive.start_file("recording.tmcpr", options)?;
         let mut recording_input = File::open(&self.recording_path)?;
         let recording_size = recording_input.metadata()?.len();
-        report_progress(0, recording_size);
+        let total_size = recording_size.saturating_add(render_trace_size);
+        report_progress(0, total_size);
         let mut copied = 0;
         let mut buffer = [0; 256 * 1024];
         loop {
@@ -402,7 +551,7 @@ impl ReplayWriter {
             }
             archive.write_all(&buffer[..read])?;
             copied += read as u64;
-            report_progress(copied, recording_size);
+            report_progress(copied, total_size);
         }
         archive.start_file("recording.tmcpr.crc32", options)?;
         write!(archive, "{}", self.crc.clone().finalize())?;
@@ -415,8 +564,23 @@ impl ReplayWriter {
             .expect("initial world encoding must determine the camera");
         serde_json::to_writer(
             &mut archive,
-            &serialized_timelines(self.options.timeline, camera)?,
+            &serialized_timelines(
+                &self.options.timeline,
+                camera,
+                self.options.camera_path.as_ref(),
+            )?,
         )?;
+        archive.start_file(RENDER_TRACE_ENTRY, options)?;
+        let mut render_trace_input = File::open(&self.render_trace_path)?;
+        loop {
+            let read = render_trace_input.read(&mut buffer)?;
+            if read == 0 {
+                break;
+            }
+            archive.write_all(&buffer[..read])?;
+            copied += read as u64;
+            report_progress(copied, total_size);
+        }
         let archive_file = archive.finish()?;
         archive_file.sync_all()?;
         let file_size = archive_file.metadata()?.len();
@@ -424,6 +588,7 @@ impl ReplayWriter {
 
         std::fs::rename(&self.archive_path, &self.output_path)?;
         let _ = std::fs::remove_file(&self.recording_path);
+        let _ = std::fs::remove_file(&self.render_trace_path);
         self.finished = true;
         Ok(ReplayStats {
             ticks: self.last_tick,
@@ -474,11 +639,19 @@ impl ReplayWriter {
             (Some(min), Some(max)) => ReplayRegion::new(min, max),
             _ => region,
         };
-        let camera = camera_for_region(
-            camera_region,
+        let camera_options = self.options.camera_path.as_ref().map_or(
             self.options.camera,
-            &self.options.camera_hints,
-        )?;
+            |path| {
+                let first = path.keyframes[0];
+                ReplayCameraOptions {
+                    view_distance: self.options.camera.view_distance,
+                    position: Some(first.position),
+                    yaw: Some(first.yaw),
+                    pitch: Some(first.pitch),
+                }
+            },
+        );
+        let camera = camera_for_region(camera_region, camera_options, &self.options.camera_hints)?;
         self.initial_camera = Some(camera);
         let camera_chunk = (
             floor_to_i32(camera.position[0]).div_euclid(16),
@@ -700,6 +873,7 @@ impl Drop for ReplayWriter {
         }
         let _ = std::fs::remove_file(&self.recording_path);
         let _ = std::fs::remove_file(&self.archive_path);
+        let _ = std::fs::remove_file(&self.render_trace_path);
     }
 }
 
@@ -805,48 +979,89 @@ struct SerializedPositionInterpolator {
 }
 
 #[derive(Serialize)]
-struct SerializedPositionInterpolatorKind {
+#[serde(untagged)]
+enum SerializedPositionInterpolatorKind {
+    Named(&'static str),
+    CatmullRom(SerializedCatmullRomInterpolator),
+}
+
+#[derive(Serialize)]
+struct SerializedCatmullRomInterpolator {
     #[serde(rename = "type")]
     kind: &'static str,
     alpha: f64,
 }
 
 fn serialized_timelines(
-    timeline: ReplayTimeline,
+    timeline: &ReplayTimeline,
     camera: Camera,
+    camera_path: Option<&ReplayCameraPath>,
 ) -> Result<BTreeMap<String, Vec<SerializedTimelinePath>>, ReplayError> {
-    let mut time_keyframes = vec![SerializedTimeKeyframe {
-        time: 0,
-        properties: SerializedTimeProperties {
-            timestamp: timestamp_for_tick(timeline.start_tick())?,
-        },
-    }];
+    let time_keyframes = timeline
+        .keyframes()
+        .iter()
+        .map(|keyframe| {
+            Ok(SerializedTimeKeyframe {
+                time: keyframe.time_ms,
+                properties: SerializedTimeProperties {
+                    timestamp: timestamp_for_tick(keyframe.tick)?,
+                },
+            })
+        })
+        .collect::<Result<Vec<_>, ReplayError>>()?;
     let camera_properties = SerializedCameraProperties {
         rotation: [camera.yaw, camera.pitch, 0.0],
         position: camera.position,
     };
-    let mut position_keyframes = vec![SerializedPositionKeyframe {
-        time: 0,
-        properties: camera_properties,
-    }];
-    let has_segment = timeline.duration_ms() > 0;
-    if has_segment {
-        time_keyframes.push(SerializedTimeKeyframe {
-            time: timeline.duration_ms(),
-            properties: SerializedTimeProperties {
-                timestamp: timestamp_for_tick(timeline.end_tick())?,
-            },
-        });
-        position_keyframes.push(SerializedPositionKeyframe {
-            time: timeline.duration_ms(),
-            properties: camera_properties,
-        });
-    }
+    let (position_keyframes, camera_interpolation) = camera_path.map_or_else(
+        || {
+            let mut keyframes = vec![SerializedPositionKeyframe {
+                time: 0,
+                properties: camera_properties,
+            }];
+            if timeline.duration_ms() > 0 {
+                keyframes.push(SerializedPositionKeyframe {
+                    time: timeline.duration_ms(),
+                    properties: camera_properties,
+                });
+            }
+            (keyframes, ReplayCameraInterpolation::CatmullRom)
+        },
+        |path| {
+            (
+                path.keyframes
+                    .iter()
+                    .map(|keyframe| SerializedPositionKeyframe {
+                        time: keyframe.time_ms,
+                        properties: SerializedCameraProperties {
+                            rotation: [keyframe.yaw, keyframe.pitch, keyframe.roll],
+                            position: keyframe.position,
+                        },
+                    })
+                    .collect(),
+                path.interpolation,
+            )
+        },
+    );
+    let time_segments = time_keyframes.len().saturating_sub(1);
+    let position_segments = position_keyframes.len().saturating_sub(1);
+    let position_kind = match camera_interpolation {
+        ReplayCameraInterpolation::Linear => SerializedPositionInterpolatorKind::Named("linear"),
+        ReplayCameraInterpolation::Cubic => {
+            SerializedPositionInterpolatorKind::Named("cubic-spline")
+        }
+        ReplayCameraInterpolation::CatmullRom => {
+            SerializedPositionInterpolatorKind::CatmullRom(SerializedCatmullRomInterpolator {
+                kind: "catmull-rom-spline",
+                alpha: 0.5,
+            })
+        }
+    };
     let paths = vec![
         SerializedTimelinePath::Time(SerializedTimePath {
             keyframes: time_keyframes,
-            segments: has_segment.then_some(0).into_iter().collect(),
-            interpolators: has_segment
+            segments: vec![0; time_segments],
+            interpolators: (time_segments > 0)
                 .then_some(SerializedTimeInterpolator {
                     kind: "linear",
                     properties: ["timestamp"],
@@ -856,13 +1071,10 @@ fn serialized_timelines(
         }),
         SerializedTimelinePath::Position(SerializedPositionPath {
             keyframes: position_keyframes,
-            segments: has_segment.then_some(0).into_iter().collect(),
-            interpolators: has_segment
+            segments: vec![0; position_segments],
+            interpolators: (position_segments > 0)
                 .then_some(SerializedPositionInterpolator {
-                    kind: SerializedPositionInterpolatorKind {
-                        kind: "catmull-rom-spline",
-                        alpha: 0.5,
-                    },
+                    kind: position_kind,
                     properties: ["camera:rotation", "camera:position"],
                 })
                 .into_iter()
@@ -968,6 +1180,27 @@ fn timestamp_for_tick(tick: u64) -> Result<i32, ReplayError> {
     i32::try_from(timestamp).map_err(|_| ReplayError::TimestampOverflow { tick })
 }
 
+fn validate_camera_keyframe(keyframe: ReplayCameraKeyframe) -> Result<(), ReplayError> {
+    if keyframe.position.iter().any(|value| !value.is_finite()) {
+        return Err(ReplayError::CameraPositionNotFinite {
+            position: keyframe.position,
+        });
+    }
+    if !keyframe.yaw.is_finite() || !keyframe.pitch.is_finite() || !keyframe.roll.is_finite() {
+        return Err(ReplayError::CameraPathAnglesNotFinite {
+            yaw: keyframe.yaw,
+            pitch: keyframe.pitch,
+            roll: keyframe.roll,
+        });
+    }
+    if !(-90.0..=90.0).contains(&keyframe.pitch) {
+        return Err(ReplayError::CameraPitchOutOfRange {
+            pitch: keyframe.pitch,
+        });
+    }
+    Ok(())
+}
+
 fn state_name(state: PacketState) -> &'static str {
     match state {
         PacketState::Login => "login",
@@ -1008,6 +1241,22 @@ pub enum ReplayError {
     StaticTimelineDuration { tick: u64, duration_ms: u64 },
     #[error("Replay duration_ms 超出编辑时间轴范围: {duration_ms}")]
     TimelineDurationOverflow { duration_ms: u64 },
+    #[error("Replay 时间关键帧不能为空")]
+    MissingTimeKeyframes,
+    #[error("Replay 时间路径必须从 0 ms 开始, 收到 {time_ms}")]
+    TimelineMustStartAtZero { time_ms: i64 },
+    #[error("Replay 编辑时间必须严格递增: {previous} -> {next}")]
+    TimelineTimeOrder { previous: i64, next: i64 },
+    #[error("Replay 时间关键帧不支持倒放: tick {previous} -> {next}")]
+    TimelineTickOrder { previous: u64, next: u64 },
+    #[error("Replay 位置路径至少需要两个关键帧")]
+    InsufficientCameraKeyframes,
+    #[error("Replay 位置路径必须从 0 ms 覆盖到 {duration_ms} ms")]
+    CameraPathEndpoints { duration_ms: i64 },
+    #[error("Replay 位置关键帧时间必须严格递增: {previous} -> {next}")]
+    CameraTimeOrder { previous: i64, next: i64 },
+    #[error("Replay 位置关键帧角度包含非有限值: yaw={yaw}, pitch={pitch}, roll={roll}")]
+    CameraPathAnglesNotFinite { yaw: f32, pitch: f32, roll: f32 },
     #[error("tick {tick} 无法转换为 MCPR 毫秒时间戳")]
     TimestampOverflow { tick: u64 },
     #[error("录像时间戳倒退: {previous} -> {next}")]
@@ -1025,6 +1274,22 @@ pub enum ReplayError {
     PacketTooLarge,
     #[error("录像 writer 已经完成")]
     AlreadyFinished,
+    #[error("Replay 渲染轨迹过大")]
+    RenderTraceTooLarge,
+    #[error("Replay 模拟 walltime 超出渲染轨迹范围")]
+    RenderTraceWalltimeOverflow,
+    #[error("MCPR 缺少 redstone/render-v1.bin, 请用当前版本重新生成 replay")]
+    MissingRenderTrace,
+    #[error("Replay 渲染轨迹 magic 无效")]
+    InvalidRenderTraceMagic,
+    #[error("不支持 Replay 渲染轨迹版本 {version}")]
+    UnsupportedRenderTraceVersion { version: u16 },
+    #[error("Replay 渲染轨迹协议不匹配: 需要 {expected}, 收到 {actual}")]
+    RenderTraceProtocol { expected: i32, actual: i32 },
+    #[error("Replay 渲染轨迹结束标记无效")]
+    InvalidRenderTraceEnd,
+    #[error("Replay 渲染轨迹包含负时间戳 {timestamp_ms}")]
+    InvalidRenderTraceTimestamp { timestamp_ms: i32 },
     #[error(transparent)]
     Io(#[from] std::io::Error),
     #[error(transparent)]
@@ -1065,7 +1330,7 @@ mod tests {
         };
 
         assert_eq!(
-            serde_json::to_value(serialized_timelines(timeline, camera).unwrap()).unwrap(),
+            serde_json::to_value(serialized_timelines(&timeline, camera, None).unwrap()).unwrap(),
             serde_json::json!({
                 "": [
                     {
@@ -1131,6 +1396,58 @@ mod tests {
     }
 
     #[test]
+    fn multiple_time_and_camera_keyframes_match_replay_mod_format() {
+        let timeline = ReplayTimeline::from_keyframes(vec![
+            ReplayTimeKeyframe { time_ms: 0, tick: 2 },
+            ReplayTimeKeyframe { time_ms: 40, tick: 3 },
+            ReplayTimeKeyframe { time_ms: 80, tick: 3 },
+            ReplayTimeKeyframe { time_ms: 120, tick: 6 },
+        ])
+        .unwrap();
+        let path = ReplayCameraPath::new(
+            ReplayCameraInterpolation::Cubic,
+            vec![
+                ReplayCameraKeyframe {
+                    time_ms: 0,
+                    position: [1.0, 2.0, 3.0],
+                    yaw: 170.0,
+                    pitch: 10.0,
+                    roll: 0.0,
+                },
+                ReplayCameraKeyframe {
+                    time_ms: 120,
+                    position: [4.0, 5.0, 6.0],
+                    yaw: -170.0,
+                    pitch: 20.0,
+                    roll: 5.0,
+                },
+            ],
+            120,
+        )
+        .unwrap();
+        let camera = Camera {
+            position: [1.0, 2.0, 3.0],
+            yaw: 170.0,
+            pitch: 10.0,
+            target: BlockPos::ZERO,
+        };
+        let value = serde_json::to_value(
+            serialized_timelines(&timeline, camera, Some(&path)).unwrap(),
+        )
+        .unwrap();
+        let paths = value[""].as_array().unwrap();
+
+        assert_eq!(paths[0]["segments"], serde_json::json!([0, 0, 0]));
+        assert_eq!(paths[0]["keyframes"][2]["properties"]["timestamp"], 150);
+        assert_eq!(paths[1]["segments"], serde_json::json!([0]));
+        assert_eq!(paths[1]["interpolators"][0]["type"], "cubic-spline");
+        assert_eq!(
+            paths[1]["keyframes"][1]["properties"]["camera:rotation"],
+            serde_json::json!([-170.0, 20.0, 5.0])
+        );
+    }
+
+    #[test]
     fn replay_contains_metadata_crc_and_ordered_state_transitions() {
         let directory = TestDirectory::new();
         let output = directory.path.join("sample.mcpr");
@@ -1151,6 +1468,7 @@ mod tests {
                 piston_animation: false,
                 camera: ReplayCameraOptions::default(),
                 camera_hints: Vec::new(),
+                camera_path: None,
             },
             &world,
         )
@@ -1175,6 +1493,7 @@ mod tests {
                 probes: Vec::new(),
             })
             .unwrap();
+        writer.set_simulation_walltime(Duration::from_millis(12));
         let mut export_progress = Vec::new();
         let stats = writer
             .finish_with_progress(|copied, total| export_progress.push((copied, total)))
@@ -1189,7 +1508,7 @@ mod tests {
             .windows(2)
             .all(|samples| samples[0].0 <= samples[1].0));
 
-        let mut archive = ZipArchive::new(File::open(output).unwrap()).unwrap();
+        let mut archive = ZipArchive::new(File::open(&output).unwrap()).unwrap();
         assert!(archive.by_name("recording.tmcpr").is_ok());
         assert!(archive.by_name("recording.tmcpr.crc32").is_ok());
         assert!(archive.by_name("timelines.json").is_ok());
@@ -1214,6 +1533,16 @@ mod tests {
         assert!(packets.iter().any(|packet| packet.1 == PLAY_LOGIN));
         assert_eq!(packets.last().unwrap().0, metadata["duration"]);
         assert_eq!(packets.last().unwrap().1, PLAY_SET_CHUNK_CACHE_RADIUS);
+        drop(archive);
+
+        let trace = RenderTrace::read_mcpr(&output).unwrap();
+        assert_eq!(trace.simulation_walltime, Duration::from_millis(12));
+        assert_eq!(trace.recorded_ticks, 3);
+        assert_eq!(trace.initial_blocks.len(), 1);
+        assert_eq!(trace.initial_blocks[0].pos, BlockPos::new(-1, -64, 16));
+        assert_eq!(trace.frames.len(), 1);
+        assert_eq!(trace.frames[0].timestamp_ms, 100);
+        assert_eq!(trace.frames[0].changes[0].pos, BlockPos::new(32, 0, -1));
     }
 
     #[test]

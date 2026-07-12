@@ -203,6 +203,85 @@ fn replay_timeline_keeps_recording_time_and_writes_editing_paths() {
 }
 
 #[test]
+fn replay_writes_multiple_time_and_f3_camera_keyframes() {
+    let directory = TestDirectory::new("replay-keyframes");
+    let structure_path = directory.path().join("machine.nbt");
+    let scenario_path = directory.path().join("keyframes.toml");
+    let replay = directory.path().join("keyframes.mcpr");
+    fs::write(structure_path, structure()).unwrap();
+    fs::write(
+        &scenario_path,
+        r#"version = "26.1.2"
+mode = "default"
+max_ticks = 4
+
+[replay]
+start_tick = 0
+end_tick = 4
+
+[[replay.time_keyframes]]
+time_ms = 0
+tick = 0
+
+[[replay.time_keyframes]]
+time_ms = 100
+tick = 1
+
+[[replay.time_keyframes]]
+time_ms = 200
+tick = 1
+
+[[replay.time_keyframes]]
+time_ms = 400
+tick = 4
+
+[replay.camera]
+interpolation = "cubic"
+
+[[replay.camera.keyframes]]
+time_ms = 0
+f3 = "/execute in minecraft:overworld run tp @s -195.81 75.78 38.54 -65.90 16.93"
+
+[[replay.camera.keyframes]]
+time_ms = 400
+position = [-180.0, 82.0, 30.0]
+yaw = -30.0
+pitch = 25.0
+
+[source]
+path = "machine.nbt"
+initialization = "raw"
+"#,
+    )
+    .unwrap();
+
+    let output = run_command("run", &scenario_path, &replay);
+    assert_success(&output);
+    let timelines = read_timelines(&replay);
+    let paths = timelines[""].as_array().unwrap();
+
+    assert_eq!(
+        paths[0]["keyframes"],
+        serde_json::json!([
+            {"time": 0, "properties": {"timestamp": 0}},
+            {"time": 100, "properties": {"timestamp": 50}},
+            {"time": 200, "properties": {"timestamp": 50}},
+            {"time": 400, "properties": {"timestamp": 200}}
+        ])
+    );
+    assert_eq!(paths[0]["segments"], serde_json::json!([0, 0, 0]));
+    assert_eq!(paths[1]["interpolators"][0]["type"], "cubic-spline");
+    assert_eq!(
+        paths[1]["keyframes"][0]["properties"]["camera:position"],
+        serde_json::json!([-195.81, 75.78, 38.54])
+    );
+    assert_eq!(
+        paths[1]["keyframes"][0]["properties"]["camera:rotation"],
+        serde_json::json!([-65.9, 16.93, 0.0])
+    );
+}
+
+#[test]
 fn replay_timeline_rejects_invalid_scenario_ranges_and_durations() {
     let directory = TestDirectory::new("replay-timeline-invalid");
     fs::write(directory.path().join("machine.nbt"), structure()).unwrap();
@@ -211,6 +290,10 @@ fn replay_timeline_rejects_invalid_scenario_ranges_and_durations() {
         (4, "start_tick = 0\nend_tick = 5"),
         (4, "start_tick = 1\nend_tick = 2\nduration_ms = 0"),
         (4, "start_tick = 2\nend_tick = 2\nduration_ms = 1"),
+        (
+            4,
+            "start_tick = 0\nend_tick = 4\nduration_ms = 200\ntime_keyframes = [{ time_ms = 0, tick = 0 }, { time_ms = 200, tick = 4 }]",
+        ),
         (
             42_949_673,
             "start_tick = 0\nend_tick = 42949673\nduration_ms = 1",

@@ -18,7 +18,8 @@
 | `redstone-java-26` | Java `26.1.2` 方块状态注册表, 支撑面数据, 红石与相关方块规则 |
 | `redstone-io` | TOML 场景, Litematic, Sponge schematic, vanilla structure 读写和 Minecraft 世界读取 |
 | `redstone-replay-26` | Minecraft `26.1.2` 网络包编码和 Replay Mod MCPR 生成 |
-| `redstone-cli` | `inspect`, `run`, `test`, `trace`, `bench`, `convert` 命令和 Java oracle 编排 |
+| `redstone-render-26` | Replay 时间轴读取, 简化 3D 离屏渲染和 FFmpeg H.264 编码 |
+| `redstone-cli` | `inspect`, `run`, `test`, `trace`, `bench`, `convert`, `render` 命令和 Java oracle 编排 |
 
 ## 仿真内核
 
@@ -324,7 +325,7 @@ wire 有序传播使用 `Compiled`, `Interpreted` 和 `FellBack` 三种内部结
 ### 协议和区块
 
 - 生成完整 Login -> Configuration -> Play 包序列, 包含 known pack, 28 组内嵌注册表, 必需 tags, feature flags, play login, 时间, 摄像机和初始区块.
-- MCPR 归档包含 `recording.tmcpr`, 十进制 CRC32, `metaData.json` 和 `timelines.json`.
+- MCPR 归档包含 `recording.tmcpr`, 十进制 CRC32, `metaData.json`, `timelines.json` 和 `redstone/render-v1.bin`.
 - 录像包时间始终按 `tick * 50 ms` 记录, 协议状态与 timestamp 单调性会显式校验.
 - 区块编码覆盖 Overworld `Y=-64..319` 的 24 个 section, 支持单值, 局部 palette 和 15 bit 全局 palette. biome 固定为 plains, 天空光固定全亮, block light 为空.
 - 初始源 region 和全部已占用区块向外扩 1 个区块作为渲染范围. 运行中变化进入未加载区域时, 先扩大缓存半径并发送目标周围的区块批次, 再发送更新.
@@ -341,20 +342,32 @@ wire 有序传播使用 `Compiled`, `Interpreted` 和 `FellBack` 三种内部结
 
 ### 时间轴和摄像机
 
-- `ReplayTimeline` 不改写底层 packet 时间. `timelines.json` 将源 `[start_tick,end_tick]` 线性映射到编辑 `duration_ms`, 用于 Replay Mod 内选段和变速.
+- `ReplayTimeline` 不改写底层 packet 时间. 简单模式将源 `[start_tick,end_tick]` 线性映射到 `duration_ms`; 多关键帧模式支持分段变速和相同 tick 暂停, 但不允许倒放.
 - 静态区间只允许 `duration_ms=0`, 非空区间必须大于 0, tick 与时长都检查溢出.
-- 当前 Position Path 的起止 pose 相同, 即生成固定机位, 不自动生成运镜.
+- Position Path 支持 linear, cubic-spline 和 Catmull-Rom 全路径插值. 位置关键帧可使用结构化 pose 或 F3+C 的 Overworld 绝对传送命令.
+- 未配置 Position keyframe 时起止 pose 相同, 继续生成固定机位.
 - 自动取景使用实际非空气内容边界. 平面结构从薄轴观察, 普通体积使用斜上方候选位, 并按 expectation 引用的方块 probe, 其他 probe, 红石灯和铜灯泡的权重选择观察面.
 - 可完全指定 position, 或同时指定 yaw 和 pitch. pitch 限制为 `-90..90`, view distance 限制为 `2..32`.
 
 ### 落盘语义
 
-- 在目标同目录使用 `create_new` 建立 recording 和 archive 临时文件.
-- recording flush 和 `sync_all` 后, 使用 256 KiB buffer 流式压缩进 ZIP. archive finish 和 `sync_all` 完成后才 rename 到目标.
-- 成功后删除 recording 临时文件. 任意未 finish 的 writer 在 Drop 中清理两个临时文件.
+- 在目标同目录使用 `create_new` 建立 recording, render trace 和 archive 临时文件.
+- recording 与 render trace flush 和 `sync_all` 后, 使用 256 KiB buffer 流式压缩进 ZIP. archive finish 和 `sync_all` 完成后才 rename 到目标.
+- 成功后删除两个内容临时文件. 任意未 finish 的 writer 在 Drop 中清理全部临时文件.
 - 断言在 Replay finish 之后检查, 因此断言失败仍保留已完成录像. 编码失败不会用半成品替换目标.
 
 主要实现位于 `crates/redstone-replay-26/src`.
+
+## 原生 Replay 视频
+
+- `redstone render INPUT.mcpr OUTPUT.mp4` 只接受本项目新生成且包含 `redstone/render-v1.bin` 的 Replay.
+- 渲染轨迹保存初始非空气方块, 按 replay timestamp 排列的方块状态变化, 总 tick 数和 tick 阶段实测 walltime. 轨迹不保存实体, 粒子或音频.
+- wgpu 优先选择高性能图形适配器, 不可用时尝试软件适配器. 场景按 chunk 缓存网格, 方块变化只使相关 chunk 和水平邻居失效.
+- 红石线, 二极管, 火把, 拉杆, 按钮, 活塞, 铁轨和压力板使用简化方向模型. 供电与点亮状态使用高亮材质, 其他方块使用分类色模型.
+- 默认输出 `1920x1080`, `60 FPS`, `20 Mbps`, `70` 度 FOV, `4x MSAA` 和 32 chunk 渲染距离. 宽高, FPS, 码率, FOV, AA, 渲染距离, FFmpeg 路径和 H.264 编码器均可配置.
+- 自动编码器会用单帧 probe 选择平台硬件 H.264, 然后回退到 `libx264`. 视频固定为静音 MP4 和 `yuv420p`.
+- 默认按 `timelines.json` 的 TIME path 渲染. `--original-speed` 按录制时测得的模拟 walltime 还原实际吞吐速度. 例如模拟达到 3000 TPS 时, 视频中的游戏时间以标准 20 TPS 的 150 倍推进.
+- 摄像机在 walltime 模式下按总时长比例重映射, 因而仍会完整走完 Position Path.
 
 ## Java vanilla oracle
 
@@ -406,7 +419,7 @@ wire 有序传播使用 `Compiled`, `Interpreted` 和 `FellBack` 三种内部结
 - 通用 voxel shape 和精确实体碰撞几何. 现有 shape 逻辑只覆盖会影响红石, 支撑和连接 properties 的方块族.
 - Minecraft 世界写回, 非 Overworld 维度, 旧版本数据修复和多版本兼容层.
 - 保留源结构文件的所有容器形态与 metadata. 转换器目标是保留世界内容语义, Litematic 固定写为单 region, Sponge 固定写为 v3.
-- Replay 中的完整实体时间线, 自动运镜, 原版动态光照和生物群系分区.
+- Replay 中的完整实体时间线, 原版纹理, 动态光照, 生物群系分区, 粒子和音频.
 - Java oracle 的全量原版内部轨迹. 当前 ASM 范围专注于邻居更新, 计划刻, 方块事件和方块写入.
 
 ## 实现与测试索引

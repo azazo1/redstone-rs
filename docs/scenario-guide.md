@@ -107,7 +107,53 @@ duration_ms = 1500
 
 exporter 始终按 `tick * 50 ms` 将完整仿真写入 `recording.tmcpr`, metadata duration 也保持原录像时长. 时间轴设置写入 MCPR 根目录的 `timelines.json`, 默认时间轴名称为空字符串. 第 0 条 path 是 TIME, 使用 linear 插值, 在编辑时间 0 写入 `start_tick * 50` 的 timestamp, 在编辑时间 `duration_ms` 写入 `end_tick * 50` 的 timestamp. Replay Mod 在剪辑和渲染时通过这条 path 完成变速和剪切, 不修改第一条 packet 时间轴.
 
-第 1 条 path 是 POSITION, 在编辑时间 0 和 `duration_ms` 自动写入初始摄像机的位置和角度, roll 固定为 0, 使用 `catmull-rom-spline` 和 `alpha = 0.5`. 因为起止位置相同, 默认生成固定机位; 用户可以在 Replay Mod 中继续移动或增加位置关键帧.
+需要分段变速或暂停时, 使用显式时间关键帧并省略 `duration_ms`:
+
+```toml
+[replay]
+start_tick = 20
+end_tick = 100
+
+[[replay.time_keyframes]]
+time_ms = 0
+tick = 20
+
+[[replay.time_keyframes]]
+time_ms = 2000
+tick = 40
+
+[[replay.time_keyframes]]
+time_ms = 3000
+tick = 40
+
+[[replay.time_keyframes]]
+time_ms = 7000
+tick = 100
+```
+
+`time_ms` 必须严格递增, `tick` 必须非递减并位于 `start_tick..=end_tick`. 首帧必须为 `time_ms = 0` 和 `tick = start_tick`, 末帧必须映射到 `end_tick`. 相邻关键帧使用相同 tick 时, Replay 在该段暂停. 倒放和同时设置 `duration_ms` 会直接报错.
+
+第 1 条 path 是 POSITION. 未配置位置关键帧时, exporter 在编辑时间 0 和 TIME path 总时长处写入相同的初始摄像机 pose, roll 固定为 0, 使用 `catmull-rom-spline` 和 `alpha = 0.5`, 因而默认生成固定机位.
+
+位置关键帧可以直接粘贴 F3+C 命令, 也可以使用结构化 pose:
+
+```toml
+[replay.camera]
+interpolation = "catmull_rom"
+
+[[replay.camera.keyframes]]
+time_ms = 0
+f3 = "/execute in minecraft:overworld run tp @s -195.81 75.78 38.54 -65.90 16.93"
+
+[[replay.camera.keyframes]]
+time_ms = 7000
+position = [-180.0, 82.0, 30.0]
+yaw = -30.0
+pitch = 25.0
+roll = 0.0
+```
+
+`interpolation` 可取 `linear`, `cubic` 或 `catmull_rom`, 并应用到整条路径. F3+C 只接受 `minecraft:overworld`, `@s` 和绝对数值坐标. 每个位置关键帧必须在 `f3` 与结构化字段之间二选一. 显式路径至少需要两帧, 第一帧必须为 0 ms, 最后一帧必须等于 TIME path 总时长.
 
 配置必须满足 `start_tick <= end_tick <= max_ticks`. 非空源区间要求 `duration_ms > 0`. 当起止 tick 相同时, 只能省略 `duration_ms` 或将其设为 0, 此时 TIME 和 POSITION 各只写一个 0 ms 关键帧. 源 tick 转换后的 timestamp 必须处于 Replay Mod 的 `i32` 毫秒范围, `duration_ms` 必须处于 Java long 范围.
 
@@ -139,6 +185,20 @@ pitch = 35.0
 自动取景会对候选观察面评分. 被断言引用的方块探针权重最高, 其他方块探针次之, 初始世界中的红石灯和铜灯提供较低权重. 这使摄像头倾向于朝向观测结果和输出元件较集中的一面. 没有足够提示或两面得分相同时使用稳定的默认侧.
 
 录像仍会按内容需要扩大服务端 chunk cache radius, 不会按 `view_distance` 裁剪远端录像数据. 播放端最终有效渲染距离还会受到本地视频设置限制.
+
+## Replay 原生视频
+
+新生成的 MCPR 会包含版本化简化渲染轨迹. 安装 FFmpeg 后可以直接生成静音 H.264 MP4:
+
+```shell
+redstone render recording.mcpr recording.mp4
+redstone render recording.mcpr walltime.mp4 --original-speed
+redstone render recording.mcpr preview.mp4 --width 1280 --height 720 --fps 30 --aa 2
+```
+
+默认模式遵循 TIME path 的剪辑, 变速和暂停. `--original-speed` 使用场景 tick 阶段记录的实际 walltime, 让视频速度与本次仿真的真实 TPS 对应, 而不是恢复为 Minecraft 标准 20 TPS. 例如 3000 TPS 等于 150 倍游戏时间速度. 摄像机路径会按压缩后的总时长重映射.
+
+默认参数为 1920x1080, 60 FPS, 20 Mbps, 70 度 FOV, 4x MSAA 和 32 chunk 渲染距离. 可通过 `--encoder`, `--ffmpeg`, `--bitrate-mbps`, `--fov`, `--aa` 和 `--view-distance` 调整. 大型 replay 只会为摄像机附近的 chunk 建立 GPU buffer. 旧 MCPR 和外部 ReplayMod 文件没有 `redstone/render-v1.bin`, 需要使用当前版本重新生成.
 
 ## 结构来源
 

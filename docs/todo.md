@@ -45,6 +45,7 @@
 - [x] 为 Replay Mod 录像导出告示牌等方块实体, 包含 block entity type, `front_text`/`back_text` NBT 和运行中的方块实体更新包. 并且支持容器方块内容导出等信息.
 - [x] 编写 litematica, nbt 等文件的更详细的方块信息 inspect, 而不只是汇总信息, 要能查询包括方块自身 nbt / components 等标签的详细信息.
 - [x] 将 oracle 场景准备提取为通用 convert, 支持结构格式互转和 Java 26.1.2 主世界范围导入.
+- [ ] 热力渲染功能, 按照最近刷新的方块使用热力图的方式渲染 (方块边界仍然清晰).
 
 ## 真实游戏探针
 

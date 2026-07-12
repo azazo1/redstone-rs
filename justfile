@@ -37,6 +37,11 @@ test:
 run scenario *args:
     cargo run --release -p redstone-cli -- run {{ scenario }} {{ args }}
 
+# just render-replay recording.mcpr recording.mp4 --original-speed
+# 使用原生离屏渲染器将本项目生成的 Replay 转换为 MP4.
+render-replay replay output *args:
+    cargo run --release -p redstone-cli -- render {{ replay }} {{ output }} {{ args }}
+
 # just inspect path/to/structure.litematic --block 0,0,0 --json
 # 检查结构内容和未支持方块.
 inspect structure *args:
