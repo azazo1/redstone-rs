@@ -66,7 +66,7 @@
 | 世界及 schematic 输入 | 世界目录/ZIP, Litematic, Sponge, vanilla structure | 世界和 oracle 生成的 structure | plot 和 Sponge schematic | 从 plot/选区编译 | 自有浏览器世界持久化 |
 | 场景动作和断言 | TOML action, probe, expectation | GameTest 适配全部场景动作和 probe | 基准适配器支持按钮和最终灯断言 | 同左 | 无可复现红石断言协议 |
 | 运行中修改结构 | action, 定时 paste 和编译拓扑同步, 失败时按执行模式回退或报错 | 支持 | WorldEdit 和玩家修改 | 修改会 reset 并停用 Redpiler | 支持浏览器放置/破坏方块 |
-| 回放和可视化 | Replay Mod MCPR, 原生简化 3D MP4, JSONL/VCD | 原版客户端, oracle JSONL | Minecraft 客户端 | Minecraft 客户端 | 浏览器三维可视化和世界历史 |
+| 回放和可视化 | Replay Mod MCPR, 原生纯色结构 3D MP4 和连续活塞动画, JSONL/VCD | 原版客户端, oracle JSONL | Minecraft 客户端 | Minecraft 客户端 | 浏览器三维可视化和世界历史 |
 
 `redstone-rs` 的 compiled 后端保留 `SparseWorld`, 计划刻, 方块事件和 Java 26.1.2 规则作为权威状态, 编译图只加速电气传播. 活塞及其动态拓扑变化仍通过现有 Java 规则执行并同步回编译拓扑. MCHPRS 普通引擎确实在三维世界中计算红石, 但当前红石执行入口没有活塞和观察者行为. Redpiler 通过预搜索 wire 路径和保存连接换取高吞吐, 运行时改建会使编译结果失效. 3D Redstone Simulator 当前主要是浏览器三维世界项目, 其 README 把 redstone simulation 和 piston simulation 列为后续目标, 因而不进入性能表.
 

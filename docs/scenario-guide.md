@@ -198,7 +198,7 @@ redstone render recording.mcpr preview.mp4 --width 1280 --height 720 --fps 30 --
 
 默认模式遵循 TIME path 的剪辑, 变速和暂停. `--original-speed` 使用场景 tick 阶段记录的实际 walltime, 让视频速度与本次仿真的真实 TPS 对应, 而不是恢复为 Minecraft 标准 20 TPS. 例如 3000 TPS 等于 150 倍游戏时间速度. 摄像机路径会按压缩后的总时长重映射.
 
-默认参数为 1920x1080, 60 FPS, 20 Mbps, 70 度 FOV, 4x MSAA 和 32 chunk 渲染距离. 可通过 `--encoder`, `--ffmpeg`, `--bitrate-mbps`, `--fov`, `--aa` 和 `--view-distance` 调整. 大型 replay 只会为摄像机附近的 chunk 建立 GPU buffer. 旧 MCPR 和外部 ReplayMod 文件没有 `redstone/render-v1.bin`, 需要使用当前版本重新生成.
+默认参数为 1920x1080, 60 FPS, 20 Mbps, 70 度 FOV, 4x MSAA 和 32 chunk 渲染距离. 可通过 `--encoder`, `--ffmpeg`, `--bitrate-mbps`, `--fov`, `--aa` 和 `--view-distance` 调整. 大型 replay 只会为摄像机附近的 chunk 建立 GPU buffer. 关键红石设备使用纯色程序化结构模型, moving piston 按 2 tick 连续插值. 旧 MCPR 和外部 ReplayMod 文件没有 `redstone/render-v2.bin`, 需要使用当前版本重新生成.
 
 ## 结构来源
 

@@ -21,6 +21,7 @@ pub(crate) struct GpuRenderer {
     scene_bind_group: wgpu::BindGroup,
     shadow_bind_group: wgpu::BindGroup,
     chunk_buffers: BTreeMap<(i32, i32), Vec<GpuMesh>>,
+    dynamic_buffers: Vec<GpuMesh>,
     color: wgpu::Texture,
     multisample: Option<wgpu::Texture>,
     depth: wgpu::Texture,
@@ -334,6 +335,7 @@ impl GpuRenderer {
             scene_bind_group,
             shadow_bind_group,
             chunk_buffers: BTreeMap::new(),
+            dynamic_buffers: Vec::new(),
             color,
             multisample,
             depth,
@@ -347,35 +349,45 @@ impl GpuRenderer {
     }
 
     pub(crate) fn update_meshes(&mut self, updates: Vec<ChunkMeshUpdate>) -> Result<()> {
-        let vertex_size = std::mem::size_of::<Vertex>();
-        let limit = usize::try_from(self.device.limits().max_buffer_size)
-            .unwrap_or(usize::MAX)
-            / vertex_size;
-        let vertices_per_buffer = (limit / 3 * 3).max(3);
         for update in updates {
             if update.vertices.is_empty() {
                 self.chunk_buffers.remove(&update.chunk);
                 continue;
             }
-            let mut meshes = Vec::new();
-            for vertices in update.vertices.chunks(vertices_per_buffer) {
-                let vertex_count = u32::try_from(vertices.len())
-                    .context("单个 chunk 顶点数量超过 u32")?;
-                let buffer = self
-                    .device
-                    .create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                        label: Some("chunk scene vertices"),
-                        contents: bytemuck::cast_slice(vertices),
-                        usage: wgpu::BufferUsages::VERTEX,
-                    });
-                meshes.push(GpuMesh {
-                    buffer,
-                    vertex_count,
-                });
-            }
+            let meshes = self.create_meshes(&update.vertices, "chunk scene vertices")?;
             self.chunk_buffers.insert(update.chunk, meshes);
         }
         Ok(())
+    }
+
+    pub(crate) fn update_dynamic_mesh(&mut self, vertices: &[Vertex]) -> Result<()> {
+        self.dynamic_buffers = self.create_meshes(vertices, "dynamic scene vertices")?;
+        Ok(())
+    }
+
+    fn create_meshes(&self, vertices: &[Vertex], label: &'static str) -> Result<Vec<GpuMesh>> {
+        let vertex_size = std::mem::size_of::<Vertex>();
+        let limit = usize::try_from(self.device.limits().max_buffer_size)
+            .unwrap_or(usize::MAX)
+            / vertex_size;
+        let vertices_per_buffer = (limit / 3 * 3).max(3);
+        let mut meshes = Vec::new();
+        for vertices in vertices.chunks(vertices_per_buffer) {
+            let vertex_count = u32::try_from(vertices.len())
+                .context("单个渲染 buffer 顶点数量超过 u32")?;
+            let buffer = self
+                .device
+                .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                    label: Some(label),
+                    contents: bytemuck::cast_slice(vertices),
+                    usage: wgpu::BufferUsages::VERTEX,
+                });
+            meshes.push(GpuMesh {
+                buffer,
+                vertex_count,
+            });
+        }
+        Ok(meshes)
     }
 
     pub(crate) fn render(&self, pose: CameraPose) -> Result<Vec<u8>> {
@@ -427,6 +439,10 @@ impl GpuRenderer {
                     pass.draw(0..mesh.vertex_count, 0..1);
                 }
             }
+            for mesh in &self.dynamic_buffers {
+                pass.set_vertex_buffer(0, mesh.buffer.slice(..));
+                pass.draw(0..mesh.vertex_count, 0..1);
+            }
         }
         {
             let attachment_view = multisample_view.as_ref().unwrap_or(&color_view);
@@ -465,6 +481,10 @@ impl GpuRenderer {
                     pass.set_vertex_buffer(0, mesh.buffer.slice(..));
                     pass.draw(0..mesh.vertex_count, 0..1);
                 }
+            }
+            for mesh in &self.dynamic_buffers {
+                pass.set_vertex_buffer(0, mesh.buffer.slice(..));
+                pass.draw(0..mesh.vertex_count, 0..1);
             }
         }
         encoder.copy_texture_to_buffer(

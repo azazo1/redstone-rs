@@ -1,37 +1,23 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use anyhow::{Context, Result};
-use bytemuck::{Pod, Zeroable};
-use redstone_core::{BlockPos, BlockStateId, Direction};
-use redstone_java_26::{BlockBehavior, Java26Registry, StateDefinition};
-use redstone_replay_26::{RenderTrace, RenderTraceBlock};
+use redstone_core::{BlockPos, BlockStateId};
+use redstone_java_26::Java26Registry;
+use redstone_replay_26::{
+    RenderTrace, RenderTraceBlock, RenderTracePiston, RenderTracePistonEvent,
+};
 
-#[repr(C)]
-#[derive(Clone, Copy, Debug, Pod, Zeroable)]
-pub(crate) struct Vertex {
-    pub position: [f32; 3],
-    pub normal: [f32; 3],
-    pub color: [f32; 4],
-}
+mod mesh;
+mod models;
 
-impl Vertex {
-    pub(crate) const ATTRIBUTES: [wgpu::VertexAttribute; 3] =
-        wgpu::vertex_attr_array![0 => Float32x3, 1 => Float32x3, 2 => Float32x4];
-
-    pub(crate) fn layout() -> wgpu::VertexBufferLayout<'static> {
-        wgpu::VertexBufferLayout {
-            array_stride: std::mem::size_of::<Self>() as u64,
-            step_mode: wgpu::VertexStepMode::Vertex,
-            attributes: &Self::ATTRIBUTES,
-        }
-    }
-}
+pub(crate) use mesh::Vertex;
 
 pub(crate) struct Scene {
     air: BlockStateId,
     chunks: BTreeMap<(i32, i32), BTreeMap<BlockPos, BlockStateId>>,
     dirty: BTreeSet<(i32, i32)>,
     visible: BTreeSet<(i32, i32)>,
+    pistons: BTreeMap<BlockPos, RenderTracePiston>,
 }
 
 pub(crate) struct ChunkMeshUpdate {
@@ -46,6 +32,11 @@ impl Scene {
             chunks: BTreeMap::new(),
             dirty: BTreeSet::new(),
             visible: BTreeSet::new(),
+            pistons: trace
+                .initial_pistons
+                .iter()
+                .map(|piston| (piston.pos, *piston))
+                .collect(),
         };
         for block in &trace.initial_blocks {
             scene.set(*block);
@@ -53,9 +44,23 @@ impl Scene {
         scene
     }
 
-    pub(crate) fn apply(&mut self, changes: &[RenderTraceBlock]) {
+    pub(crate) fn apply(
+        &mut self,
+        changes: &[RenderTraceBlock],
+        pistons: &[RenderTracePistonEvent],
+    ) {
         for change in changes {
             self.set(*change);
+        }
+        for event in pistons {
+            match event {
+                RenderTracePistonEvent::Upsert(piston) => {
+                    self.pistons.insert(piston.pos, *piston);
+                }
+                RenderTracePistonEvent::Remove { pos } => {
+                    self.pistons.remove(pos);
+                }
+            }
         }
     }
 
@@ -122,7 +127,11 @@ impl Scene {
                         .resolve_state_id(state_id)
                         .with_context(|| format!("解析渲染方块状态失败: {}", state_id.0))?
                         .clone();
-                    append_block(&mut vertices, self, pos, &state);
+                    if state.name.as_ref() == "minecraft:moving_piston" {
+                        continue;
+                    }
+                    let visible = self.visible_faces(pos, state.collision_full_block, registry)?;
+                    models::append_block(&mut vertices, pos, &state, visible);
                 }
             }
             updates.push(ChunkMeshUpdate { chunk, vertices });
@@ -132,138 +141,73 @@ impl Scene {
         Ok(updates)
     }
 
-    fn occupied(&self, pos: BlockPos) -> bool {
-        self.chunks
-            .get(&chunk_pos(pos))
-            .is_some_and(|blocks| blocks.contains_key(&pos))
+    pub(crate) fn dynamic_vertices(
+        &self,
+        replay_ms: i32,
+        camera_position: [f64; 3],
+        view_distance: i32,
+        registry: &mut Java26Registry,
+    ) -> Result<Vec<Vertex>> {
+        let camera_chunk = (
+            floor_to_i32(camera_position[0]).div_euclid(16),
+            floor_to_i32(camera_position[2]).div_euclid(16),
+        );
+        let mut vertices = Vec::new();
+        for piston in self.pistons.values() {
+            let chunk = chunk_pos(piston.pos);
+            if (chunk.0 - camera_chunk.0).abs() > view_distance
+                || (chunk.1 - camera_chunk.1).abs() > view_distance
+            {
+                continue;
+            }
+            let moved_state = registry
+                .resolve_state_id(piston.moved_state)
+                .with_context(|| {
+                    format!(
+                        "解析 moving piston 方块状态失败: {}",
+                        piston.moved_state.0
+                    )
+                })?
+                .clone();
+            let progress = piston_progress(piston, replay_ms);
+            models::append_moving_piston(&mut vertices, piston, progress, &moved_state);
+        }
+        Ok(vertices)
     }
-}
 
-fn append_block(output: &mut Vec<Vertex>, scene: &Scene, pos: BlockPos, state: &StateDefinition) {
-    let color = block_color(state);
-    match state.behavior {
-        BlockBehavior::Wire => append_wire(output, pos, state, color),
-        BlockBehavior::Repeater | BlockBehavior::Comparator => {
-            append_cuboid(output, pos, [0.0, 0.0, 0.0], [1.0, 0.125, 1.0], color, None);
-            append_direction_marker(output, pos, state.facing, color);
+    fn visible_faces(
+        &self,
+        pos: BlockPos,
+        full_block: bool,
+        registry: &mut Java26Registry,
+    ) -> Result<[bool; 6]> {
+        if !full_block {
+            return Ok([true; 6]);
         }
-        BlockBehavior::Torch { wall: false } => {
-            append_cuboid(output, pos, [0.42, 0.0, 0.42], [0.58, 0.72, 0.58], color, None);
+        let neighbors = [
+            pos.offset(-1, 0, 0),
+            pos.offset(1, 0, 0),
+            pos.offset(0, -1, 0),
+            pos.offset(0, 1, 0),
+            pos.offset(0, 0, -1),
+            pos.offset(0, 0, 1),
+        ];
+        let mut visible = [true; 6];
+        for (index, neighbor) in neighbors.into_iter().enumerate() {
+            let Some(state_id) = self
+                .chunks
+                .get(&chunk_pos(neighbor))
+                .and_then(|blocks| blocks.get(&neighbor))
+            else {
+                continue;
+            };
+            visible[index] = !registry
+                .resolve_state_id(*state_id)
+                .with_context(|| format!("解析相邻渲染方块状态失败: {}", state_id.0))?
+                .collision_full_block;
         }
-        BlockBehavior::Lever
-        | BlockBehavior::Button { .. }
-        | BlockBehavior::PressurePlate { .. }
-        | BlockBehavior::PoweredRail
-        | BlockBehavior::DetectorRail => {
-            append_cuboid(output, pos, [0.08, 0.0, 0.08], [0.92, 0.1, 0.92], color, None);
-            append_direction_marker(output, pos, state.facing, color);
-        }
-        BlockBehavior::Piston { .. } => {
-            append_full_cube(output, scene, pos, color);
-            append_direction_marker(output, pos, state.facing, [0.85, 0.75, 0.45, color[3]]);
-        }
-        _ if state.is_rail => {
-            append_cuboid(output, pos, [0.02, 0.0, 0.02], [0.98, 0.06, 0.98], color, None);
-        }
-        _ => append_full_cube(output, scene, pos, color),
+        Ok(visible)
     }
-}
-
-fn append_wire(output: &mut Vec<Vertex>, pos: BlockPos, state: &StateDefinition, color: [f32; 4]) {
-    append_cuboid(output, pos, [0.38, 0.0, 0.38], [0.62, 0.035, 0.62], color, None);
-    for (name, min, max) in [
-        ("north", [0.44, 0.0, 0.0], [0.56, 0.035, 0.5]),
-        ("south", [0.44, 0.0, 0.5], [0.56, 0.035, 1.0]),
-        ("west", [0.0, 0.0, 0.44], [0.5, 0.035, 0.56]),
-        ("east", [0.5, 0.0, 0.44], [1.0, 0.035, 0.56]),
-    ] {
-        if state.property(name).is_some_and(|value| value != "none") {
-            append_cuboid(output, pos, min, max, color, None);
-        }
-    }
-}
-
-fn append_direction_marker(
-    output: &mut Vec<Vertex>,
-    pos: BlockPos,
-    facing: Option<Direction>,
-    color: [f32; 4],
-) {
-    let (min, max) = match facing.unwrap_or(Direction::North) {
-        Direction::North => ([0.44, 0.13, 0.08], [0.56, 0.22, 0.52]),
-        Direction::South => ([0.44, 0.13, 0.48], [0.56, 0.22, 0.92]),
-        Direction::West => ([0.08, 0.13, 0.44], [0.52, 0.22, 0.56]),
-        Direction::East => ([0.48, 0.13, 0.44], [0.92, 0.22, 0.56]),
-        Direction::Down | Direction::Up => ([0.4, 0.13, 0.4], [0.6, 0.22, 0.6]),
-    };
-    append_cuboid(output, pos, min, max, color, None);
-}
-
-fn append_full_cube(output: &mut Vec<Vertex>, scene: &Scene, pos: BlockPos, color: [f32; 4]) {
-    let visible = [
-        !scene.occupied(pos.offset(-1, 0, 0)),
-        !scene.occupied(pos.offset(1, 0, 0)),
-        !scene.occupied(pos.offset(0, -1, 0)),
-        !scene.occupied(pos.offset(0, 1, 0)),
-        !scene.occupied(pos.offset(0, 0, -1)),
-        !scene.occupied(pos.offset(0, 0, 1)),
-    ];
-    append_cuboid(output, pos, [0.0; 3], [1.0; 3], color, Some(visible));
-}
-
-fn append_cuboid(
-    output: &mut Vec<Vertex>,
-    pos: BlockPos,
-    min: [f32; 3],
-    max: [f32; 3],
-    color: [f32; 4],
-    visible: Option<[bool; 6]>,
-) {
-    let base = [pos.x as f32, pos.y as f32, pos.z as f32];
-    let point = |x: f32, y: f32, z: f32| [base[0] + x, base[1] + y, base[2] + z];
-    let faces = [
-        ([-1.0, 0.0, 0.0], [point(min[0], min[1], min[2]), point(min[0], min[1], max[2]), point(min[0], max[1], max[2]), point(min[0], max[1], min[2])]),
-        ([1.0, 0.0, 0.0], [point(max[0], min[1], max[2]), point(max[0], min[1], min[2]), point(max[0], max[1], min[2]), point(max[0], max[1], max[2])]),
-        ([0.0, -1.0, 0.0], [point(min[0], min[1], max[2]), point(min[0], min[1], min[2]), point(max[0], min[1], min[2]), point(max[0], min[1], max[2])]),
-        ([0.0, 1.0, 0.0], [point(min[0], max[1], min[2]), point(min[0], max[1], max[2]), point(max[0], max[1], max[2]), point(max[0], max[1], min[2])]),
-        ([0.0, 0.0, -1.0], [point(max[0], min[1], min[2]), point(min[0], min[1], min[2]), point(min[0], max[1], min[2]), point(max[0], max[1], min[2])]),
-        ([0.0, 0.0, 1.0], [point(min[0], min[1], max[2]), point(max[0], min[1], max[2]), point(max[0], max[1], max[2]), point(min[0], max[1], max[2])]),
-    ];
-    for (index, (normal, corners)) in faces.into_iter().enumerate() {
-        if visible.is_some_and(|visible| !visible[index]) {
-            continue;
-        }
-        for corner in [corners[0], corners[1], corners[2], corners[0], corners[2], corners[3]] {
-            output.push(Vertex {
-                position: corner,
-                normal,
-                color,
-            });
-        }
-    }
-}
-
-fn block_color(state: &StateDefinition) -> [f32; 4] {
-    let active = state.power > 0 || state.powered || state.lit;
-    let emission = if active { 0.72 } else { 0.0 };
-    let path = state.name.strip_prefix("minecraft:").unwrap_or(&state.name);
-    let rgb = match state.behavior {
-        BlockBehavior::Wire => if active { [0.95, 0.06, 0.03] } else { [0.32, 0.03, 0.02] },
-        BlockBehavior::RedstoneBlock => [0.72, 0.03, 0.03],
-        BlockBehavior::Torch { .. } => [0.96, 0.28, 0.08],
-        BlockBehavior::Repeater | BlockBehavior::Comparator => [0.83, 0.78, 0.68],
-        BlockBehavior::Lamp | BlockBehavior::CopperBulb => if state.lit { [1.0, 0.68, 0.16] } else { [0.35, 0.24, 0.12] },
-        BlockBehavior::Piston { sticky: true } => [0.34, 0.58, 0.24],
-        BlockBehavior::Piston { sticky: false } => [0.62, 0.48, 0.27],
-        BlockBehavior::Lever | BlockBehavior::Button { .. } => [0.58, 0.52, 0.43],
-        _ if path.contains("glass") => [0.42, 0.68, 0.72],
-        _ if path.contains("copper") => [0.62, 0.42, 0.24],
-        _ if path.contains("quartz") => [0.84, 0.82, 0.76],
-        _ if path.contains("wood") || path.contains("planks") || path.contains("log") => [0.48, 0.32, 0.16],
-        _ if path.contains("stone") || path.contains("deepslate") => [0.42, 0.43, 0.44],
-        _ => [0.52, 0.56, 0.58],
-    };
-    [rgb[0], rgb[1], rgb[2], emission]
 }
 
 fn chunk_pos(pos: BlockPos) -> (i32, i32) {
@@ -274,13 +218,40 @@ fn floor_to_i32(value: f64) -> i32 {
     value.floor().clamp(i32::MIN as f64, i32::MAX as f64) as i32
 }
 
+fn piston_progress(piston: &RenderTracePiston, replay_ms: i32) -> f32 {
+    let duration = (piston.settle_timestamp_ms - piston.start_timestamp_ms) as f32;
+    ((replay_ms - piston.start_timestamp_ms) as f32 / duration).clamp(0.0, 1.0)
+}
+
 #[cfg(test)]
 mod tests {
+    use std::collections::BTreeMap;
     use std::time::Duration;
 
-    use redstone_replay_26::RenderTraceFrame;
+    use redstone_java_26::StateResolver;
 
     use super::*;
+
+    #[test]
+    fn piston_progress_matches_two_tick_interpolation() {
+        let piston = RenderTracePiston {
+            pos: BlockPos::ZERO,
+            moved_state: BlockStateId(1),
+            direction: redstone_core::Direction::East,
+            extending: true,
+            source: false,
+            start_timestamp_ms: 100,
+            settle_timestamp_ms: 200,
+        };
+
+        assert_eq!(piston_progress(&piston, 75), 0.0);
+        assert_eq!(piston_progress(&piston, 100), 0.0);
+        assert_eq!(piston_progress(&piston, 125), 0.25);
+        assert_eq!(piston_progress(&piston, 150), 0.5);
+        assert_eq!(piston_progress(&piston, 175), 0.75);
+        assert_eq!(piston_progress(&piston, 200), 1.0);
+        assert_eq!(piston_progress(&piston, 225), 1.0);
+    }
 
     #[test]
     fn scene_only_builds_chunks_near_the_camera() {
@@ -297,7 +268,8 @@ mod tests {
                     state: BlockStateId(1),
                 },
             ],
-            frames: Vec::<RenderTraceFrame>::new(),
+            initial_pistons: Vec::new(),
+            frames: Vec::new(),
         };
         let mut registry = Java26Registry::new();
         let mut scene = Scene::from_trace(&trace, registry.air_state());
@@ -315,5 +287,56 @@ mod tests {
         assert_eq!(far.len(), 2);
         assert!(far.iter().any(|update| update.chunk == (0, 0) && update.vertices.is_empty()));
         assert!(far.iter().any(|update| update.chunk == (100, 0) && !update.vertices.is_empty()));
+    }
+
+    #[test]
+    fn thin_redstone_device_does_not_occlude_a_full_cube_face() {
+        let mut registry = Java26Registry::new();
+        let stone = state_id(&mut registry, "minecraft:stone", []);
+        let wire = state_id(&mut registry, "minecraft:redstone_wire", []);
+        let trace = RenderTrace {
+            simulation_walltime: Duration::from_secs(1),
+            recorded_ticks: 1,
+            initial_blocks: vec![
+                RenderTraceBlock {
+                    pos: BlockPos::ZERO,
+                    state: stone,
+                },
+                RenderTraceBlock {
+                    pos: BlockPos::new(1, 0, 0),
+                    state: wire,
+                },
+            ],
+            initial_pistons: Vec::new(),
+            frames: Vec::new(),
+        };
+        let mut scene = Scene::from_trace(&trace, registry.air_state());
+        let updates = scene
+            .rebuild_visible([0.0, 2.0, 0.0], 2, &mut registry)
+            .unwrap();
+        let east_face_vertices = updates[0]
+            .vertices
+            .iter()
+            .filter(|vertex| {
+                vertex.position[0] == 1.0 && vertex.normal == [1.0, 0.0, 0.0]
+            })
+            .count();
+
+        assert_eq!(east_face_vertices, 6);
+    }
+
+    fn state_id<const N: usize>(
+        registry: &mut Java26Registry,
+        name: &str,
+        overrides: [(&str, &str); N],
+    ) -> BlockStateId {
+        let overrides = overrides
+            .into_iter()
+            .map(|(name, value)| (name.to_owned(), value.to_owned()))
+            .collect::<BTreeMap<_, _>>();
+        let properties = registry
+            .complete_state_properties(name, &overrides)
+            .unwrap();
+        registry.resolve_state(name, &properties).unwrap()
     }
 }

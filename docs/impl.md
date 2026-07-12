@@ -325,7 +325,7 @@ wire 有序传播使用 `Compiled`, `Interpreted` 和 `FellBack` 三种内部结
 ### 协议和区块
 
 - 生成完整 Login -> Configuration -> Play 包序列, 包含 known pack, 28 组内嵌注册表, 必需 tags, feature flags, play login, 时间, 摄像机和初始区块.
-- MCPR 归档包含 `recording.tmcpr`, 十进制 CRC32, `metaData.json`, `timelines.json` 和 `redstone/render-v1.bin`.
+- MCPR 归档包含 `recording.tmcpr`, 十进制 CRC32, `metaData.json`, `timelines.json` 和 `redstone/render-v2.bin`.
 - 录像包时间始终按 `tick * 50 ms` 记录, 协议状态与 timestamp 单调性会显式校验.
 - 区块编码覆盖 Overworld `Y=-64..319` 的 24 个 section, 支持单值, 局部 palette 和 15 bit 全局 palette. biome 固定为 plains, 天空光固定全亮, block light 为空.
 - 初始源 region 和全部已占用区块向外扩 1 个区块作为渲染范围. 运行中变化进入未加载区域时, 先扩大缓存半径并发送目标周围的区块批次, 再发送更新.
@@ -360,10 +360,11 @@ wire 有序传播使用 `Compiled`, `Interpreted` 和 `FellBack` 三种内部结
 
 ## 原生 Replay 视频
 
-- `redstone render INPUT.mcpr OUTPUT.mp4` 只接受本项目新生成且包含 `redstone/render-v1.bin` 的 Replay.
-- 渲染轨迹保存初始非空气方块, 按 replay timestamp 排列的方块状态变化, 总 tick 数和 tick 阶段实测 walltime. 轨迹不保存实体, 粒子或音频.
+- `redstone render INPUT.mcpr OUTPUT.mp4` 只接受本项目新生成且包含 `redstone/render-v2.bin` 的 Replay. v1 不再读取, 需要重新生成 MCPR.
+- 渲染轨迹保存初始非空气方块, moving piston snapshot, 按 replay timestamp 排列的方块和 piston 变化, 总 tick 数和 tick 阶段实测 walltime. 轨迹不保存实体, 粒子或音频.
 - wgpu 优先选择高性能图形适配器, 不可用时尝试软件适配器. 场景按 chunk 缓存网格, 方块变化只使相关 chunk 和水平邻居失效.
-- 红石线, 二极管, 火把, 拉杆, 按钮, 活塞, 铁轨和压力板使用简化方向模型. 供电与点亮状态使用高亮材质, 其他方块使用分类色模型.
+- 已分类红石设备使用按 26.1.2 方块状态驱动的程序化多部件模型. wire 连接和爬墙, 二极管档位与模式, 控件安装面, 门类开合, 铁轨形状, 活塞方向和容器轮廓均可辨识. 供电与点亮状态使用高亮材质, 其他方块使用分类色立方体.
+- moving piston 使用独立动态 GPU buffer, 按原版 2 tick 区间连续插值. TIME path 暂停会冻结活塞, 变速和 `--original-speed` 会同步改变动画速度.
 - 默认输出 `1920x1080`, `60 FPS`, `20 Mbps`, `70` 度 FOV, `4x MSAA` 和 32 chunk 渲染距离. 宽高, FPS, 码率, FOV, AA, 渲染距离, FFmpeg 路径和 H.264 编码器均可配置.
 - 自动编码器会用单帧 probe 选择平台硬件 H.264, 然后回退到 `libx264`. 视频固定为静音 MP4 和 `yuv420p`.
 - 默认按 `timelines.json` 的 TIME path 渲染. `--original-speed` 按录制时测得的模拟 walltime 还原实际吞吐速度. 例如模拟达到 3000 TPS 时, 视频中的游戏时间以标准 20 TPS 的 150 倍推进.

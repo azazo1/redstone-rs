@@ -103,6 +103,7 @@ pub async fn render_replay(
         .sum::<usize>();
     tracing::info!(
         blocks = trace.initial_blocks.len(),
+        pistons = trace.initial_pistons.len(),
         vertices = initial_vertices,
         chunks = initial_meshes.len(),
         updates = trace.frames.len(),
@@ -116,6 +117,13 @@ pub async fn render_replay(
     )
     .await?;
     gpu.update_meshes(initial_meshes)?;
+    let initial_dynamic = scene.dynamic_vertices(
+        timeline.source_start_ms(),
+        initial_pose.position,
+        options.view_distance_chunks,
+        &mut registry,
+    )?;
+    gpu.update_dynamic_mesh(&initial_dynamic)?;
     let mut video = VideoEncoder::start(
         &options.ffmpeg,
         encoder_name,
@@ -141,7 +149,7 @@ pub async fn render_replay(
             if frame.timestamp_ms > replay_ms {
                 break;
             }
-            scene.apply(&frame.changes);
+            scene.apply(&frame.changes, &frame.pistons);
             trace_index += 1;
         }
         let camera_ms = if options.original_speed {
@@ -156,6 +164,13 @@ pub async fn render_replay(
             &mut registry,
         )?;
         gpu.update_meshes(mesh_updates)?;
+        let dynamic_vertices = scene.dynamic_vertices(
+            replay_ms,
+            pose.position,
+            options.view_distance_chunks,
+            &mut registry,
+        )?;
+        gpu.update_dynamic_mesh(&dynamic_vertices)?;
         let frame = gpu.render(pose)?;
         video.write_frame(&frame).await?;
         progress(frame_index + 1, total_frames);

@@ -34,7 +34,10 @@ mod protocol;
 mod trace;
 
 pub use camera::{DEFAULT_VIEW_DISTANCE, ReplayCameraHint, ReplayCameraOptions};
-pub use trace::{RENDER_TRACE_ENTRY, RenderTrace, RenderTraceBlock, RenderTraceFrame};
+pub use trace::{
+    RENDER_TRACE_ENTRY, RenderTrace, RenderTraceBlock, RenderTraceFrame, RenderTracePiston,
+    RenderTracePistonEvent,
+};
 use trace::RenderTraceWriter;
 
 pub const MINECRAFT_VERSION: &str = "26.1.2";
@@ -383,7 +386,11 @@ impl ReplayWriter {
                 return Err(error.into());
             }
         };
-        let render_trace = match RenderTraceWriter::new(render_trace_path.clone(), initial_world) {
+        let render_trace = match RenderTraceWriter::new(
+            render_trace_path.clone(),
+            initial_world,
+            options.timeline.start_tick(),
+        ) {
             Ok(writer) => writer,
             Err(error) => {
                 let _ = std::fs::remove_file(&recording_path);
@@ -1278,7 +1285,7 @@ pub enum ReplayError {
     RenderTraceTooLarge,
     #[error("Replay 模拟 walltime 超出渲染轨迹范围")]
     RenderTraceWalltimeOverflow,
-    #[error("MCPR 缺少 redstone/render-v1.bin, 请用当前版本重新生成 replay")]
+    #[error("MCPR 缺少 redstone/render-v2.bin, 请用当前版本重新生成 replay")]
     MissingRenderTrace,
     #[error("Replay 渲染轨迹 magic 无效")]
     InvalidRenderTraceMagic,
@@ -1290,6 +1297,29 @@ pub enum ReplayError {
     InvalidRenderTraceEnd,
     #[error("Replay 渲染轨迹包含负时间戳 {timestamp_ms}")]
     InvalidRenderTraceTimestamp { timestamp_ms: i32 },
+    #[error("moving piston {pos:?} 的渲染字段 {field} 无效")]
+    InvalidRenderPistonField {
+        pos: BlockPos,
+        field: &'static str,
+    },
+    #[error("moving piston {pos:?} 的 tick 区间无效: {start_tick}..{settle_tick}")]
+    InvalidRenderPistonInterval {
+        pos: BlockPos,
+        start_tick: u64,
+        settle_tick: u64,
+    },
+    #[error("moving piston 方向 ID 无效: {direction}")]
+    InvalidRenderPistonDirection { direction: u8 },
+    #[error("moving piston flags 无效: {flags:#04x}")]
+    InvalidRenderPistonFlags { flags: u8 },
+    #[error("moving piston 事件 tag 无效: {tag}")]
+    InvalidRenderPistonEvent { tag: u8 },
+    #[error("moving piston {pos:?} 的时间区间无效: {start_timestamp_ms}..{settle_timestamp_ms} ms")]
+    InvalidRenderPistonTimestamps {
+        pos: BlockPos,
+        start_timestamp_ms: i32,
+        settle_timestamp_ms: i32,
+    },
     #[error(transparent)]
     Io(#[from] std::io::Error),
     #[error(transparent)]
@@ -1649,8 +1679,10 @@ mod tests {
                     "moved_state_name".to_owned(),
                     serde_json::Value::String("minecraft:orange_wool".to_owned()),
                 ),
+                ("moved_state".to_owned(), serde_json::Value::from(1)),
                 ("moved_state_properties".to_owned(), serde_json::json!({})),
                 ("progress".to_owned(), serde_json::Value::from(0.0)),
+                ("settle_tick".to_owned(), serde_json::Value::from(3)),
                 ("source".to_owned(), serde_json::Value::Bool(false)),
             ]),
         };
