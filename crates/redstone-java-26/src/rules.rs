@@ -1113,6 +1113,18 @@ impl BlockRules for Java26Rules {
         Ok(())
     }
 
+    fn apply_update_side_effects(
+        &mut self,
+        ctx: &mut EventContext<'_>,
+        pos: BlockPos,
+    ) -> Result<(), RulesError> {
+        self.initialize(ctx, &[pos])?;
+        self.update_neighbor_shapes(ctx, pos)?;
+        let source_block = self.block_kind(ctx.world.get_block(pos));
+        ctx.update_neighbors(pos, source_block, None, None);
+        Ok(())
+    }
+
     fn apply_action(
         &mut self,
         ctx: &mut EventContext<'_>,

@@ -1,0 +1,50 @@
+version = "26.1.2"
+mode = "default"
+seed = 0
+max_ticks = 100
+strict = true
+skip_oracle = true
+
+[source]
+path = "../schematics/observer-clock-100.schem"
+initialization = "raw"
+
+[[source.pastes]]
+path = "../schematics/observer-clock-100.schem"
+origin = { x = 99, y = 0, z = 0 }
+mirror = "front_back"
+ignore_air = true
+paste_entities = false
+update = true
+
+[[probes]]
+name = "pair_left_powered"
+type = "property"
+pos = { x = 0, y = 0, z = 0 }
+property = "powered"
+
+[[probes]]
+name = "pair_right_powered"
+type = "property"
+pos = { x = 1, y = 0, z = 0 }
+property = "powered"
+
+[[expectations]]
+tick = 1
+probe = "pair_left_powered"
+equals = "false"
+
+[[expectations]]
+tick = 1
+probe = "pair_right_powered"
+equals = "false"
+
+[[expectations]]
+tick = 2
+probe = "pair_left_powered"
+equals = "true"
+
+[[expectations]]
+tick = 2
+probe = "pair_right_powered"
+equals = "true"

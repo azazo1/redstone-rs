@@ -255,7 +255,7 @@
 - 初始 `game_time`, `overworld_time`, 时钟推进开关和 `sky_light`.
 - `raw` 或 `notify` 初始化.
 - 主结构的原点, 旋转, 镜像和世界 region.
-- 仿真开始前或指定 tick 执行的附加结构 paste, 可控制 `ignore_air`, `paste_entities` 和 `update`.
+- 仿真开始前或指定 tick 执行的附加结构 paste, 可控制 `ignore_air`, `paste_entities` 和 `update`. 逐块 update 同时执行形状更新和普通邻居更新.
 - 同 tick 按声明顺序执行的 action.
 - 每 tick `post_tick` 采样的 probe 和按 tick 检查的 expectation.
 - `monitor.skip_ticks`, Replay 时间轴, Replay 摄像机, `oracle_micro_trace` 和 `skip_oracle`.

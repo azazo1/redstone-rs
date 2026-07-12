@@ -225,3 +225,28 @@ Exporter 现在分别跟踪逻辑结束时间和实际 packet 结束时间. 如�
 | initial source paste Java 微轨迹 | 通过 |
 | default wire chain Java 微轨迹 | 通过 |
 | CPU+DVD 60 tick 完整 oracle | 通过, 7937630 条事件 |
+
+## 观察者面对面压力场景
+
+`assets/scenarios/observer-clock-100.toml` 最终使用 100x100x100 个观察者组成 50 万组面对面时钟. 原始原理图只在 X 轴偶数位置放置朝东的观察者, 每个观察者之间保留 1 格空气. 场景把同一原理图设置 `mirror = "front_back"`, 并向 X 轴平移 99 格后忽略空气粘贴. 镜像副本中的观察者朝西并落入原有空位, 最终每两个相邻方块组成一组面对面时钟.
+
+原理图由标准库 Python 脚本直接写出 Sponge schematic v3. 默认生成命令如下.
+
+```shell
+just generate-observer-clock
+```
+
+场景先以 `raw` 模式加载单侧结构, 再在第一个游戏刻之前粘贴镜像副本并执行选区更新. 镜像粘贴和选区更新会为全部观察者对建立初始计划刻, 但发生在场景 tick 计时开始之前. 因此 `ticking_elapsed_ms` 和 `ticks_per_second` 只衡量 100 tick 持续振荡阶段, 不包含结构解析, 镜像粘贴和启动更新耗时.
+
+普通 release 和带调试符号的采样命令如下.
+
+```shell
+just run assets/scenarios/observer-clock-100.toml
+cargo samply run assets/scenarios/observer-clock-100.toml
+```
+
+该场景设置 `skip_oracle = true`. 100 万观察者的 Java GameTest 微轨迹规模过大, 不适合作为日常性能基准的前置步骤. TOML 对第一组观察者在 tick 1 和 2 的状态进行断言, 用于确认镜像粘贴已经启动压力结构.
+
+当前模拟器默认每个游戏刻最多执行 65536 个计划方块刻. 100 万观察者启动后会持续达到该上限, 因此大规模场景不会保持小型观察者时钟的全局同步相位. 这个场景测量的是计划刻队列饱和时的持续吞吐, 不是无限制执行全部到期计划刻的理论耗时.
+
+首次完整 release 验证构建了 1000000 个观察者并通过全部断言. 100 tick 的 `ticking_elapsed_ms` 为 8839.001 ms, `ticks_per_second` 为 11.313. tick 2 到 tick 100 均达到 65536 个计划方块刻上限, 与原版 `ServerLevel.MAX_SCHEDULED_TICKS_PER_TICK` 一致.

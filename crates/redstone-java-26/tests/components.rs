@@ -150,6 +150,46 @@ fn raw_world_load_restores_comparator_output_signal() {
 }
 
 #[test]
+fn region_update_starts_face_to_face_observers() {
+    let mut registry = Java26Registry::new();
+    let east_idle = state(
+        &mut registry,
+        "minecraft:observer",
+        &[("facing", "east"), ("powered", "false")],
+    );
+    let west_idle = state(
+        &mut registry,
+        "minecraft:observer",
+        &[("facing", "west"), ("powered", "false")],
+    );
+    let east_powered = state(
+        &mut registry,
+        "minecraft:observer",
+        &[("facing", "east"), ("powered", "true")],
+    );
+    let west_powered = state(
+        &mut registry,
+        "minecraft:observer",
+        &[("facing", "west"), ("powered", "true")],
+    );
+    let right = BlockPos::new(1, 0, 0);
+    let mut world = SparseWorld::new(registry.air_state());
+    world.set_block(BlockPos::ZERO, east_idle).unwrap();
+    world.set_block(right, west_idle).unwrap();
+    let rules = Java26Rules::new(registry);
+    let mut simulation = Simulation::load(rules, world, SimulationConfig::default()).unwrap();
+
+    simulation.update_region(BlockPos::ZERO, right).unwrap();
+    assert_eq!(simulation.pending_scheduled_ticks(), 2);
+
+    simulation.step().unwrap();
+    simulation.step().unwrap();
+
+    assert_eq!(simulation.world().get_block(BlockPos::ZERO), east_powered);
+    assert_eq!(simulation.world().get_block(right), west_powered);
+}
+
+#[test]
 fn comparator_prioritizes_a_tick_when_its_output_faces_another_diode() {
     let mut registry = Java26Registry::new();
     let comparator = state(

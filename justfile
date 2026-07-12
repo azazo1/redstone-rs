@@ -47,6 +47,11 @@ inspect structure *args:
 bench *args:
     cargo run --release -p redstone-cli -- bench {{ args }}
 
+# just generate-observer-clock 100
+# 生成指定边长的观察者面对面高频时钟原理图.
+generate-observer-clock size="100":
+    uv run tools/generate-observer-clock.py --size "{{ size }}" --output "assets/schematics/observer-clock-{{ size }}.schem"
+
 # just decompile
 # 使用 Vineflower 反编译客户端 JAR.
 decompile-client: prepare-tools
