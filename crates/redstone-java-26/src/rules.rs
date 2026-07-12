@@ -1214,18 +1214,9 @@ impl BlockRules for Java26Rules {
         &mut self,
         ctx: &mut EventContext<'_>,
         update: NeighborUpdate,
+        current_state_id: BlockStateId,
     ) -> Result<(), RulesError> {
-        if Some(update.source_block) != self.wire_kind {
-            self.block_signal_cache.clear();
-        }
-        let current_state_id = ctx.world.get_block(update.pos);
         let current_state = self.state(current_state_id)?;
-        if !current_state.is_rail
-            && !current_state.is_piston_head
-            && !current_state.handles_neighbor_update
-        {
-            return Ok(());
-        }
         let loses_support = current_state.is_rail
             && self.rail_support_changed(update.pos, current_state, update.source_pos)
             && !self.rail_survives(ctx.world, update.pos, current_state);
@@ -1265,6 +1256,20 @@ impl BlockRules for Java26Rules {
             _ => {}
         }
         Ok(())
+    }
+
+    fn should_process_neighbor_update(
+        &mut self,
+        update: NeighborUpdate,
+        current_state_id: BlockStateId,
+    ) -> Result<bool, RulesError> {
+        if Some(update.source_block) != self.wire_kind {
+            self.block_signal_cache.clear();
+        }
+        let current_state = self.state(current_state_id)?;
+        Ok(current_state.is_rail
+            || current_state.is_piston_head
+            || current_state.handles_neighbor_update)
     }
 
     fn on_scheduled_tick(

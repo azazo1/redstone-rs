@@ -250,3 +250,31 @@ cargo samply run assets/scenarios/observer-clock-100.toml
 当前模拟器默认每个游戏刻最多执行 65536 个计划方块刻. 100 万观察者启动后会持续达到该上限, 因此大规模场景不会保持小型观察者时钟的全局同步相位. 这个场景测量的是计划刻队列饱和时的持续吞吐, 不是无限制执行全部到期计划刻的理论耗时.
 
 首次完整 release 验证构建了 1000000 个观察者并通过全部断言. 100 tick 的 `ticking_elapsed_ms` 为 8839.001 ms, `ticks_per_second` 为 11.313. tick 2 到 tick 100 均达到 65536 个计划方块刻上限, 与原版 `ServerLevel.MAX_SCHEDULED_TICKS_PER_TICK` 一致.
+
+## 16 位画线 CPU 场景
+
+`assets/scenarios/frostbyte-cpu-16bit-line-drawing.toml` 包含 1551125 个方块. 漏斗容器对齐最初引入了每 tick 扫描全部方块实体的碰撞路径, 使该场景的 `active_ticks_per_second` 降到约 478. 改为由存活物品实体枚举相交漏斗方块后, 活动速率恢复到约 1560-1640. 该场景区域内没有漏斗, 因此剩余差距来自原有红石活动路径, 而不是漏斗传输本身.
+
+30 秒主线程 profile 获得 56807 个加权样本. 主要包含热点如下. 路径互相包含, 不能相加.
+
+| 热点 | 包含占比 | 叶样本占比 |
+| --- | ---: | ---: |
+| `process_neighbor_tasks_with_changes` | 93.19% | 25.36% |
+| `on_neighbor_update` | 65.28% | 15.91% |
+| `update_wire` | 41.66% | 5.47% |
+| `wire_target_power` | 27.09% | 23.64% |
+
+第一轮把 `Multi` 邻居任务改为留在栈顶原地推进, 并在创建 `EventContext` 前读取一次目标状态. Java 规则在该阶段执行信号缓存失效和静态目标筛选, 活跃目标继续复用同一个状态 ID. 这避免了旧预筛选实验中的重复方块读取, 同时保持所有 neighbor trace, 连锁计数和嵌套任务优先顺序.
+
+完整 225000 tick 运行通过全部场景断言. `stable_tick` 为 191672, `active_ticks_per_second` 从修复漏斗回归后的约 1560-1640 提升到 1993.404. 总 `ticks_per_second` 为 2339.963, 但本场景只用活动速率作为验收指标.
+
+第二轮继续让 `Multi` 路径直接产生 `NeighborUpdate`, 不再临时构造大尺寸 `NeighborTask::Single`. 低频 deferred 任务的堆拥有数据改为 boxed slice 或 box, 缩小高频任务栈元素. trace 开关和连锁更新上限也移出循环重复读取.
+
+第二轮完成后连续两次完整运行的 `active_ticks_per_second` 为 2104.210 和 2165.149, 中位数为 2134.680. 两次 `stable_tick` 均为 191672, 全部场景断言通过. 相对第一轮 1993.404 提升约 7.1%, 相对漏斗碰撞修复后的 1560-1640 区间提升约 30%-37%, 并稳定超过 2000 目标.
+
+| 完整 drawline 验证 | 第一次 | 第二次 |
+| --- | ---: | ---: |
+| `stable_tick` | 191672 | 191672 |
+| `active_ticks_per_second` | 2104.210 | 2165.149 |
+| `ticks_per_second` | 2470.036 | 2541.568 |
+| 场景断言 | 通过 | 通过 |

@@ -121,6 +121,7 @@ impl BlockRules for MockRules {
         &mut self,
         ctx: &mut EventContext<'_>,
         update: NeighborUpdate,
+        _current_state: BlockStateId,
     ) -> Result<(), RulesError> {
         self.neighbor_positions.push(update.pos);
         self.side_effect_order.push(("neighbor", update.pos));

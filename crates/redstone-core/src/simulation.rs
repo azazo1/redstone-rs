@@ -583,139 +583,137 @@ impl<R: BlockRules> Simulation<R> {
         tasks.reverse();
         let mut stack = tasks;
         let mut count = 0usize;
-        while let Some(task) = stack.pop() {
-            let task = match task {
-                NeighborTask::ScheduleTickAfterNeighbors {
-                    pos,
-                    block,
-                    delay,
-                    priority,
-                } => {
-                    self.append_context_tasks(
-                        phase,
-                        changes,
-                        &mut stack,
-                        |_rules, ctx| {
-                            ctx.schedule_tick(pos, block, delay, priority);
-                            Ok(())
-                        },
-                    )?;
-                    continue;
-                }
-                NeighborTask::SetBlockAndUpdateNeighborsAfterNeighbors {
-                    pos,
-                    state,
-                    cause,
-                    source_block,
-                } => {
-                    self.append_context_tasks(
-                        phase,
-                        changes,
-                        &mut stack,
-                        |_rules, ctx| {
-                            let old = ctx.set_block(pos, state, cause)?;
-                            if old != state {
-                                ctx.update_neighbors(pos, source_block, None, None);
-                            }
-                            Ok(())
-                        },
-                    )?;
-                    continue;
-                }
-                NeighborTask::ApplyBlockChangesAfterNeighbors {
-                    changes: deferred_changes,
-                    follow_up,
-                } => {
-                    for task in follow_up.into_iter().rev() {
-                        stack.push(task);
-                    }
-                    self.append_context_tasks(
-                        phase,
-                        changes,
-                        &mut stack,
-                        |_rules, ctx| {
-                            for change in deferred_changes {
-                                ctx.set_block(change.pos, change.state, change.cause)?;
-                                match change.block_entity {
-                                    DeferredBlockEntityUpdate::Keep => {}
-                                    DeferredBlockEntityUpdate::Remove => {
-                                        ctx.remove_block_entity(change.pos);
-                                    }
-                                    DeferredBlockEntityUpdate::Set(data) => {
-                                        ctx.set_block_entity(change.pos, data);
-                                    }
-                                }
-                            }
-                            Ok(())
-                        },
-                    )?;
-                    continue;
-                }
-                NeighborTask::RunRuleTaskAfterNeighbors(task) => {
-                    self.append_context_tasks(
-                        phase,
-                        changes,
-                        &mut stack,
-                        |rules, ctx| rules.on_deferred_task(ctx, task),
-                    )?;
-                    continue;
-                }
-                task => task,
-            };
-            count += 1;
-            if count > self.config.max_chained_neighbor_updates {
-                warn!(
-                    tick = self.tick.0,
-                    limit = self.config.max_chained_neighbor_updates,
-                    "连锁邻居更新达到上限"
-                );
-                break;
-            }
-
-            let (update, continuation) = match task {
-                NeighborTask::Single(update) => (update, None),
+        let max_chained_neighbor_updates = self.config.max_chained_neighbor_updates;
+        let trace_enabled = self.config.trace;
+        while !stack.is_empty() {
+            let multi_update = match stack.last_mut().expect("任务栈非空") {
                 NeighborTask::Multi {
                     source_pos,
                     source_block,
                     skip_direction,
                     orientation,
-                    mut next_index,
+                    next_index,
                 } => {
-                    while next_index < Direction::UPDATE_ORDER.len()
-                        && Some(Direction::UPDATE_ORDER[next_index]) == skip_direction
+                    while *next_index < Direction::UPDATE_ORDER.len()
+                        && Some(Direction::UPDATE_ORDER[*next_index]) == *skip_direction
                     {
-                        next_index += 1;
+                        *next_index += 1;
                     }
-                    if next_index >= Direction::UPDATE_ORDER.len() {
+                    if *next_index >= Direction::UPDATE_ORDER.len() {
+                        stack.pop();
                         continue;
                     }
-                    let direction = Direction::UPDATE_ORDER[next_index];
+                    let direction = Direction::UPDATE_ORDER[*next_index];
                     let update = NeighborUpdate {
                         pos: source_pos.relative(direction),
-                        source_pos,
-                        source_block,
-                        orientation,
+                        source_pos: *source_pos,
+                        source_block: *source_block,
+                        orientation: *orientation,
                         moved_by_piston: false,
                     };
-                    next_index += 1;
-                    let continuation = (next_index < Direction::UPDATE_ORDER.len()).then_some(
-                        NeighborTask::Multi {
-                            source_pos,
-                            source_block,
-                            skip_direction,
-                            orientation,
-                            next_index,
-                        },
-                    );
-                    (update, continuation)
+                    *next_index += 1;
+                    if *next_index >= Direction::UPDATE_ORDER.len() {
+                        stack.pop();
+                    }
+                    Some(update)
                 }
-                NeighborTask::ScheduleTickAfterNeighbors { .. } => unreachable!(),
-                NeighborTask::SetBlockAndUpdateNeighborsAfterNeighbors { .. } => unreachable!(),
-                NeighborTask::ApplyBlockChangesAfterNeighbors { .. } => unreachable!(),
-                NeighborTask::RunRuleTaskAfterNeighbors(_) => unreachable!(),
+                _ => None,
             };
+            let update = if let Some(update) = multi_update {
+                update
+            } else {
+                let task = stack.pop().expect("任务栈非空");
+                match task {
+                    NeighborTask::ScheduleTickAfterNeighbors {
+                        pos,
+                        block,
+                        delay,
+                        priority,
+                    } => {
+                        self.append_context_tasks(
+                            phase,
+                            changes,
+                            &mut stack,
+                            |_rules, ctx| {
+                                ctx.schedule_tick(pos, block, delay, priority);
+                                Ok(())
+                            },
+                        )?;
+                        continue;
+                    }
+                    NeighborTask::SetBlockAndUpdateNeighborsAfterNeighbors {
+                        pos,
+                        state,
+                        cause,
+                        source_block,
+                    } => {
+                        self.append_context_tasks(
+                            phase,
+                            changes,
+                            &mut stack,
+                            |_rules, ctx| {
+                                let old = ctx.set_block(pos, state, cause)?;
+                                if old != state {
+                                    ctx.update_neighbors(pos, source_block, None, None);
+                                }
+                                Ok(())
+                            },
+                        )?;
+                        continue;
+                    }
+                    NeighborTask::ApplyBlockChangesAfterNeighbors {
+                        changes: deferred_changes,
+                        follow_up,
+                    } => {
+                        for task in follow_up.into_vec().into_iter().rev() {
+                            stack.push(task);
+                        }
+                        self.append_context_tasks(
+                            phase,
+                            changes,
+                            &mut stack,
+                            |_rules, ctx| {
+                                for change in deferred_changes.into_vec() {
+                                    ctx.set_block(change.pos, change.state, change.cause)?;
+                                    match change.block_entity {
+                                        DeferredBlockEntityUpdate::Keep => {}
+                                        DeferredBlockEntityUpdate::Remove => {
+                                            ctx.remove_block_entity(change.pos);
+                                        }
+                                        DeferredBlockEntityUpdate::Set(data) => {
+                                            ctx.set_block_entity(change.pos, data);
+                                        }
+                                    }
+                                }
+                                Ok(())
+                            },
+                        )?;
+                        continue;
+                    }
+                    NeighborTask::RunRuleTaskAfterNeighbors(task) => {
+                        self.append_context_tasks(
+                            phase,
+                            changes,
+                            &mut stack,
+                            |rules, ctx| rules.on_deferred_task(ctx, *task),
+                        )?;
+                        continue;
+                    }
+                    NeighborTask::Single(update) => update,
+                    NeighborTask::Multi { .. } => unreachable!(),
+                }
+            };
+            count += 1;
+            if count > max_chained_neighbor_updates {
+                warn!(
+                    tick = self.tick.0,
+                    limit = max_chained_neighbor_updates,
+                    "连锁邻居更新达到上限"
+                );
+                break;
+            }
 
-            if self.config.trace {
+            if trace_enabled {
                 self.push_trace(
                     phase,
                     TraceKind::NeighborUpdate {
@@ -727,14 +725,18 @@ impl<R: BlockRules> Simulation<R> {
                     },
                 );
             }
-            if let Some(continuation) = continuation {
-                stack.push(continuation);
+            let current_state = self.world.get_block(update.pos);
+            if !self
+                .rules
+                .should_process_neighbor_update(update, current_state)?
+            {
+                continue;
             }
             self.append_context_tasks(
                 phase,
                 changes,
                 &mut stack,
-                |rules, ctx| rules.on_neighbor_update(ctx, update),
+                |rules, ctx| rules.on_neighbor_update(ctx, update, current_state),
             )?;
         }
         debug!(tick = self.tick.0, count, "完成邻居更新链");

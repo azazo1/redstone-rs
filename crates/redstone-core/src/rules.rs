@@ -56,7 +56,16 @@ pub trait BlockRules: Send {
         &mut self,
         ctx: &mut EventContext<'_>,
         update: NeighborUpdate,
+        current_state: BlockStateId,
     ) -> Result<(), RulesError>;
+
+    fn should_process_neighbor_update(
+        &mut self,
+        _update: NeighborUpdate,
+        _current_state: BlockStateId,
+    ) -> Result<bool, RulesError> {
+        Ok(true)
+    }
 
     fn on_scheduled_tick(
         &mut self,
@@ -338,7 +347,7 @@ impl<'a> EventContext<'a> {
             .push(NeighborTask::SetBlockAndUpdateNeighborsAfterNeighbors {
                 pos,
                 state,
-                cause: cause.into(),
+                cause: cause.into().into_boxed_str(),
                 source_block,
             });
     }
@@ -349,12 +358,15 @@ impl<'a> EventContext<'a> {
         follow_up: Vec<NeighborTask>,
     ) {
         self.neighbor_tasks
-            .push(NeighborTask::ApplyBlockChangesAfterNeighbors { changes, follow_up });
+            .push(NeighborTask::ApplyBlockChangesAfterNeighbors {
+                changes: changes.into_boxed_slice(),
+                follow_up: follow_up.into_boxed_slice(),
+            });
     }
 
     pub fn run_rule_task_after_neighbors(&mut self, task: DeferredRuleTask) {
         self.neighbor_tasks
-            .push(NeighborTask::RunRuleTaskAfterNeighbors(task));
+            .push(NeighborTask::RunRuleTaskAfterNeighbors(Box::new(task)));
     }
 
     pub fn queue_block_event(&mut self, event: BlockEvent) -> bool {

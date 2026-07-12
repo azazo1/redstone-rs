@@ -119,12 +119,12 @@ pub enum NeighborTask {
     SetBlockAndUpdateNeighborsAfterNeighbors {
         pos: BlockPos,
         state: BlockStateId,
-        cause: String,
+        cause: Box<str>,
         source_block: BlockKindId,
     },
     ApplyBlockChangesAfterNeighbors {
-        changes: Vec<DeferredBlockChange>,
-        follow_up: Vec<NeighborTask>,
+        changes: Box<[DeferredBlockChange]>,
+        follow_up: Box<[NeighborTask]>,
     },
-    RunRuleTaskAfterNeighbors(DeferredRuleTask),
+    RunRuleTaskAfterNeighbors(Box<DeferredRuleTask>),
 }
