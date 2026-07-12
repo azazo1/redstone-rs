@@ -143,7 +143,7 @@ fn comparator_reads_and_tracks_a_unique_item_frame_through_a_conductor() {
 }
 
 #[test]
-fn hopper_minecart_absorbs_one_item_per_entity_tick() {
+fn hopper_minecart_absorbs_a_complete_item_stack_per_entity_tick() {
     let registry = Java26Registry::new();
     let mut world = SparseWorld::new(registry.air_state());
     world
@@ -185,13 +185,7 @@ fn hopper_minecart_absorbs_one_item_per_entity_tick() {
     );
 
     let first = simulation.step().unwrap();
-    assert_eq!(first.probes[0].value, ProbeValue::Integer(1));
-    assert_eq!(
-        simulation.world().entity(EntityId(2)).unwrap().fields["item_count"],
-        1
-    );
-    let second = simulation.step().unwrap();
-    assert_eq!(second.probes[0].value, ProbeValue::Integer(2));
+    assert_eq!(first.probes[0].value, ProbeValue::Integer(2));
     assert!(simulation.world().entity(EntityId(2)).is_none());
 }
 

@@ -122,6 +122,8 @@ generate-reports: download-client oracle-build
     oracle_classpath="{{ ORACLE_DIR }}/build/vanilla-oracle.jar:$classpath:$(find "{{ ORACLE_LIB_DIR }}" -name '*.jar' -type f | sort | paste -sd ':' -)"
     echo "生成 Minecraft 26.1.2 方块特征报告"
     java -Xmx2g -cp "$oracle_classpath" redstone.oracle.Main --block-traits-report "{{ REPORT_DIR }}/reports/block-traits.json"
+    echo "生成 Minecraft 26.1.2 物品特征报告"
+    java -Xmx2g -cp "$oracle_classpath" redstone.oracle.Main --item-traits-report "{{ REPORT_DIR }}/reports/item-traits.json"
 
 # 下载 Java oracle 的 TOML 解析运行库.
 download-oracle-deps:

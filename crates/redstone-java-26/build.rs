@@ -6,7 +6,89 @@ use serde_json::Value;
 
 fn main() {
     generate_item_stack_sizes();
+    generate_item_traits();
     generate_block_traits();
+}
+
+fn generate_item_traits() {
+    const VERSION: &str = "26.1.2";
+    const DATA_VERSION: i64 = 4790;
+
+    let path = PathBuf::from("data/26.1.2/reports/item-traits.json");
+    println!("cargo:rerun-if-changed={}", path.display());
+    let report = read_json(&path, "item traits report");
+    assert_eq!(
+        report.get("version").and_then(Value::as_str),
+        Some(VERSION),
+        "item traits report version must match"
+    );
+    assert_eq!(
+        report.get("data_version").and_then(Value::as_i64),
+        Some(DATA_VERSION),
+        "item traits report data version must match"
+    );
+    let items = report
+        .get("items")
+        .and_then(Value::as_array)
+        .expect("item traits report must contain items");
+    let mut fuels = Vec::new();
+    let mut brewing = Vec::new();
+    let mut compost = Vec::new();
+    for item in items {
+        let id = item
+            .get("id")
+            .and_then(Value::as_str)
+            .expect("item trait must contain id");
+        if item
+            .get("furnace_fuel")
+            .and_then(Value::as_bool)
+            .expect("item trait must contain furnace_fuel")
+        {
+            fuels.push(id);
+        }
+        if item
+            .get("brewing_ingredient")
+            .and_then(Value::as_bool)
+            .expect("item trait must contain brewing_ingredient")
+        {
+            brewing.push(id);
+        }
+        let chance = item
+            .get("compost_chance")
+            .and_then(Value::as_f64)
+            .expect("item trait must contain compost_chance");
+        if chance >= 0.0 {
+            compost.push((id, chance));
+        }
+    }
+    let mut generated = String::new();
+    generated.push_str(&match_bool_function("official_furnace_fuel", &fuels));
+    generated.push_str(&match_bool_function("official_brewing_ingredient", &brewing));
+    generated.push_str(
+        "pub(super) fn official_compost_chance(item_id: &str) -> Option<f64> {\n    match item_id {\n",
+    );
+    for (id, chance) in compost {
+        generated.push_str(&format!("        \"{id}\" => Some({chance:?}),\n"));
+    }
+    generated.push_str("        _ => None,\n    }\n}\n");
+    let output = PathBuf::from(env::var_os("OUT_DIR").expect("OUT_DIR must be set"))
+        .join("item_traits.rs");
+    fs::write(output, generated).expect("generated item traits must be writable");
+}
+
+fn match_bool_function(name: &str, items: &[&str]) -> String {
+    if items.is_empty() {
+        return format!("pub(super) fn {name}(_item_id: &str) -> bool {{\n    false\n}}\n");
+    }
+    let mut generated = format!(
+        "pub(super) fn {name}(item_id: &str) -> bool {{\n    matches!(item_id,\n"
+    );
+    for (index, item) in items.iter().enumerate() {
+        let separator = if index == 0 { "        " } else { "            | " };
+        generated.push_str(&format!("{separator}\"{item}\"\n"));
+    }
+    generated.push_str("    )\n}\n");
+    generated
 }
 
 fn generate_item_stack_sizes() {
@@ -127,7 +209,7 @@ fn generate_block_traits() {
         official_ids.len(),
         "block traits report must cover every official state"
     );
-    let mut packed = Vec::with_capacity(states.len() * 4);
+    let mut packed = Vec::with_capacity(states.len() * 6);
     for (expected_id, state) in states.iter().enumerate() {
         let id = state
             .get("id")
@@ -144,6 +226,20 @@ fn generate_block_traits() {
                 .get("redstone_conductor")
                 .and_then(Value::as_bool)
                 .expect("block trait state must contain redstone_conductor")
+                as u8,
+        );
+        packed.push(
+            state
+                .get("collision_full_block")
+                .and_then(Value::as_bool)
+                .expect("block trait state must contain collision_full_block")
+                as u8,
+        );
+        packed.push(
+            state
+                .get("does_not_block_hoppers")
+                .and_then(Value::as_bool)
+                .expect("block trait state must contain does_not_block_hoppers")
                 as u8,
         );
         for field in ["full_support", "center_support", "rigid_support"] {

@@ -1,4 +1,4 @@
-use std::collections::{BTreeMap, BTreeSet, HashMap, VecDeque};
+use std::collections::{BTreeMap, HashMap, VecDeque};
 use std::hash::{BuildHasherDefault, Hasher};
 
 use indexmap::IndexSet;
@@ -31,7 +31,7 @@ pub struct Java26Rules {
     wire_kind: Option<BlockKindId>,
     torch_toggles: VecDeque<(u64, BlockPos)>,
     event_counts: BTreeMap<String, i64>,
-    ticked_hoppers: BTreeSet<BlockPos>,
+    hopper_last_tick: BTreeMap<BlockPos, u64>,
     active_hopper: Option<BlockPos>,
 }
 
@@ -48,7 +48,7 @@ impl Java26Rules {
             wire_kind,
             torch_toggles: VecDeque::new(),
             event_counts: BTreeMap::new(),
-            ticked_hoppers: BTreeSet::new(),
+            hopper_last_tick: BTreeMap::new(),
             active_hopper: None,
         }
     }
@@ -1055,6 +1055,7 @@ impl BlockRules for Java26Rules {
     fn load_world(&mut self, world: &SparseWorld) -> Result<(), RulesError> {
         self.block_signal_cache.clear();
         self.comparator_outputs.clear();
+        self.hopper_last_tick.clear();
         for (pos, data) in world.block_entities() {
             let state = self.state(world.get_block(*pos))?;
             if !matches!(state.behavior, BlockBehavior::Comparator) {
@@ -1074,7 +1075,6 @@ impl BlockRules for Java26Rules {
 
     fn begin_tick(&mut self, _tick: redstone_core::GameTick) {
         self.block_signal_cache.clear();
-        self.ticked_hoppers.clear();
         self.active_hopper = None;
     }
 
@@ -1094,6 +1094,7 @@ impl BlockRules for Java26Rules {
                 BlockBehavior::Torch { .. } => self.refresh_torch(ctx, *pos, state_id)?,
                 BlockBehavior::Repeater => self.refresh_repeater(ctx, *pos, state_id)?,
                 BlockBehavior::Comparator => self.refresh_comparator(ctx, *pos, state_id)?,
+                BlockBehavior::Hopper => self.refresh_hopper_enabled(ctx, *pos, state_id)?,
                 BlockBehavior::Piston { .. } => self.refresh_piston(ctx, *pos, state_id)?,
                 BlockBehavior::Dropper | BlockBehavior::Dispenser | BlockBehavior::Crafter => {
                     self.refresh_triggered_container(ctx, *pos, state_id, false)?
@@ -1120,7 +1121,16 @@ impl BlockRules for Java26Rules {
         self.block_signal_cache.clear();
         match action {
             Action::SetBlock { pos, state } => {
-                self.set_state_and_notify(ctx, *pos, *state, "action_set_block", None)?;
+                let state = if self
+                    .state(*state)
+                    .is_ok_and(|state| matches!(state.behavior, BlockBehavior::Hopper))
+                {
+                    let enabled = !self.is_powered(ctx.world, *pos);
+                    self.changed_state(*state, "enabled", enabled.to_string())?
+                } else {
+                    *state
+                };
+                self.set_state_and_notify(ctx, *pos, state, "action_set_block", None)?;
                 self.repair_shape(ctx, *pos, true)?;
             }
             Action::BreakBlock { pos } => {
@@ -1225,6 +1235,9 @@ impl BlockRules for Java26Rules {
             BlockBehavior::Repeater => self.refresh_repeater(ctx, update.pos, state_id)?,
             BlockBehavior::Comparator => self.refresh_comparator(ctx, update.pos, state_id)?,
             BlockBehavior::Observer => {}
+            BlockBehavior::Hopper => {
+                self.refresh_hopper_enabled(ctx, update.pos, state_id)?
+            }
             BlockBehavior::Dropper | BlockBehavior::Dispenser | BlockBehavior::Crafter => {
                 self.refresh_triggered_container(ctx, update.pos, state_id, true)?
             }
@@ -1425,6 +1438,7 @@ impl BlockRules for Java26Rules {
 
     fn tick_entities(&mut self, ctx: &mut EventContext<'_>) -> Result<(), RulesError> {
         self.tick_minimal_entities(ctx)?;
+        self.tick_hopper_entity_collisions(ctx)?;
         let mut occupied_positions = ctx
             .world
             .entities()
@@ -1644,10 +1658,10 @@ impl Java26Rules {
                         expired.push(id);
                     }
                 }
-                Some("minecraft:hopper_minecart")
-                    if minecart_enabled(ctx.world, id)
-                        && absorb_into_hopper_minecart(ctx.world, id) =>
-                {
+                Some("minecraft:hopper_minecart") => {
+                    if !self.tick_hopper_minecart(ctx, id)? {
+                        continue;
+                    }
                     if let Some(pos) = ctx
                         .world
                         .entity(id)
@@ -1892,126 +1906,6 @@ fn entity_container_count(entity: &redstone_core::EntityData) -> i64 {
                 .and_then(serde_json::Value::as_i64)
         })
         .unwrap_or(0)
-}
-
-fn minecart_enabled(world: &SparseWorld, id: EntityId) -> bool {
-    world
-        .entity(id)
-        .and_then(|entity| entity.fields.get("enabled"))
-        .and_then(serde_json::Value::as_bool)
-        .unwrap_or(true)
-}
-
-fn absorb_into_hopper_minecart(world: &mut SparseWorld, id: EntityId) -> bool {
-    let Some(position) = world.entity(id).map(|entity| entity.position) else {
-        return false;
-    };
-    let item = world
-        .entity_ids_in_aabb(
-            [position[0] - 0.75, position[1] - 0.25, position[2] - 0.75],
-            [position[0] + 0.75, position[1] + 1.25, position[2] + 0.75],
-        )
-        .into_iter()
-        .filter(|candidate| *candidate != id)
-        .find_map(|candidate| {
-            let entity = world.entity(candidate)?;
-            (entity.kind == "minecraft:item").then(|| {
-                (
-                    candidate,
-                    entity
-                        .fields
-                        .get("item_id")
-                        .and_then(serde_json::Value::as_str)
-                        .map(ToOwned::to_owned),
-                    entity
-                        .fields
-                        .get("item_count")
-                        .and_then(serde_json::Value::as_i64)
-                        .unwrap_or(1),
-                )
-            })
-        });
-    let Some((item_id, Some(item_name), item_count)) = item else {
-        return false;
-    };
-    if !insert_entity_item(world, id, &item_name) {
-        return false;
-    }
-    if item_count <= 1 {
-        world.remove_entity(item_id);
-    } else if let Some(fields) = world.entity_fields_mut(item_id) {
-        fields.insert(
-            "item_count".to_owned(),
-            serde_json::Value::from(item_count - 1),
-        );
-    }
-    true
-}
-
-fn insert_entity_item(world: &mut SparseWorld, id: EntityId, item_id: &str) -> bool {
-    let Some(entity) = world.entity(id) else {
-        return false;
-    };
-    let mut inventory = entity
-        .fields
-        .get("inventory")
-        .and_then(serde_json::Value::as_array)
-        .cloned()
-        .unwrap_or_default();
-    let capacity = entity
-        .fields
-        .get("capacity")
-        .and_then(serde_json::Value::as_i64)
-        .unwrap_or(5 * 64);
-    if entity_container_count(entity) >= capacity {
-        return false;
-    }
-    if let Some(stack) = inventory.iter_mut().find(|stack| {
-        stack.get("item_id").and_then(serde_json::Value::as_str) == Some(item_id)
-            && stack
-                .get("count")
-                .and_then(serde_json::Value::as_i64)
-                .unwrap_or(0)
-                < 64
-    }) {
-        let count = stack
-            .get("count")
-            .and_then(serde_json::Value::as_i64)
-            .unwrap_or(0)
-            + 1;
-        stack["count"] = serde_json::Value::from(count);
-    } else {
-        let used = inventory
-            .iter()
-            .filter_map(|stack| stack.get("slot").and_then(serde_json::Value::as_u64))
-            .collect::<BTreeSet<_>>();
-        let Some(slot) = (0..5u64).find(|slot| !used.contains(slot)) else {
-            return false;
-        };
-        inventory.push(serde_json::json!({
-            "slot": slot,
-            "item_id": item_id,
-            "count": 1,
-        }));
-        inventory.sort_by_key(|stack| {
-            stack
-                .get("slot")
-                .and_then(serde_json::Value::as_u64)
-                .unwrap_or(u64::MAX)
-        });
-    }
-    let count = inventory
-        .iter()
-        .filter_map(|stack| stack.get("count").and_then(serde_json::Value::as_i64))
-        .sum::<i64>();
-    if let Some(fields) = world.entity_fields_mut(id) {
-        fields.insert("inventory".to_owned(), serde_json::Value::Array(inventory));
-        fields.insert("item_count".to_owned(), serde_json::Value::from(count));
-        fields
-            .entry("capacity".to_owned())
-            .or_insert_with(|| serde_json::Value::from(320));
-    }
-    true
 }
 
 fn tracks_entity_collisions(behavior: &BlockBehavior) -> bool {

@@ -1,7 +1,8 @@
 use std::collections::BTreeMap;
 
 use redstone_core::{
-    BlockEntityData, BlockPos, BlockStateId, Simulation, SimulationConfig, SparseWorld,
+    Action, BlockEntityData, BlockPos, BlockStateId, Direction, EntityData, EntityId, Simulation,
+    SimulationConfig, SparseWorld,
 };
 use redstone_java_26::{Java26Registry, Java26Rules, StateResolver};
 
@@ -14,6 +15,12 @@ fn state(registry: &mut Java26Registry, name: &str, properties: &[(&str, &str)])
                 .map(|(name, value)| ((*name).to_owned(), (*value).to_owned()))
                 .collect::<BTreeMap<_, _>>(),
         )
+        .unwrap()
+}
+
+fn item_count(world: &SparseWorld, pos: BlockPos) -> i64 {
+    world.block_entity(pos).unwrap().fields["item_count"]
+        .as_i64()
         .unwrap()
 }
 
@@ -260,6 +267,436 @@ fn hopper_insertion_skips_disabled_crafter_slots() {
     assert_eq!(
         slot_item(simulation.world(), crafter_pos, 1),
         Some(("minecraft:stone", 1))
+    );
+}
+
+#[test]
+fn hopper_pushes_and_pulls_during_the_same_tick() {
+    let mut registry = Java26Registry::new();
+    let hopper = state(
+        &mut registry,
+        "minecraft:hopper",
+        &[("enabled", "true"), ("facing", "east")],
+    );
+    let chest = state(
+        &mut registry,
+        "minecraft:chest",
+        &[
+            ("facing", "south"),
+            ("type", "single"),
+            ("waterlogged", "false"),
+        ],
+    );
+    let hopper_pos = BlockPos::ZERO;
+    let source_pos = hopper_pos.relative(Direction::Up);
+    let target_pos = hopper_pos.relative(Direction::East);
+    let mut world = SparseWorld::new(registry.air_state());
+    world.set_block(hopper_pos, hopper).unwrap();
+    world.set_block(source_pos, chest).unwrap();
+    world.set_block(target_pos, chest).unwrap();
+    world.set_block_entity(
+        hopper_pos,
+        container("minecraft:hopper", 5, &[(0, "minecraft:stone", 1)]),
+    );
+    world.set_block_entity(
+        source_pos,
+        container("minecraft:chest", 27, &[(0, "minecraft:iron_ingot", 1)]),
+    );
+    world.set_block_entity(target_pos, container("minecraft:chest", 27, &[]));
+    let mut simulation = Simulation::load(
+        Java26Rules::new(registry),
+        world,
+        SimulationConfig::default(),
+    )
+    .unwrap();
+
+    simulation.step().unwrap();
+
+    assert_eq!(slot_item(simulation.world(), target_pos, 0), Some(("minecraft:stone", 1)));
+    assert_eq!(slot_item(simulation.world(), hopper_pos, 0), Some(("minecraft:iron_ingot", 1)));
+    assert_eq!(item_count(simulation.world(), source_pos), 0);
+}
+
+#[test]
+fn powered_hopper_continues_to_reduce_its_cooldown() {
+    let mut registry = Java26Registry::new();
+    let hopper = state(
+        &mut registry,
+        "minecraft:hopper",
+        &[("enabled", "false"), ("facing", "down")],
+    );
+    let power = state(&mut registry, "minecraft:redstone_block", &[]);
+    let hopper_pos = BlockPos::ZERO;
+    let mut world = SparseWorld::new(registry.air_state());
+    world.set_block(hopper_pos, hopper).unwrap();
+    world
+        .set_block(hopper_pos.relative(Direction::East), power)
+        .unwrap();
+    let mut data = container("minecraft:hopper", 5, &[]);
+    data.fields
+        .insert("cooldown".to_owned(), serde_json::Value::from(3));
+    world.set_block_entity(hopper_pos, data);
+    let mut simulation = Simulation::load(
+        Java26Rules::new(registry),
+        world,
+        SimulationConfig::default(),
+    )
+    .unwrap();
+
+    simulation.step().unwrap();
+
+    assert_eq!(
+        simulation.world().block_entity(hopper_pos).unwrap().fields["cooldown"],
+        2
+    );
+}
+
+#[test]
+fn hopper_enabled_state_changes_during_neighbor_updates() {
+    let mut registry = Java26Registry::new();
+    let hopper = state(
+        &mut registry,
+        "minecraft:hopper",
+        &[("enabled", "true"), ("facing", "down")],
+    );
+    let power = state(&mut registry, "minecraft:redstone_block", &[]);
+    let hopper_pos = BlockPos::ZERO;
+    let power_pos = hopper_pos.relative(Direction::East);
+    let mut world = SparseWorld::new(registry.air_state());
+    world.set_block(hopper_pos, hopper).unwrap();
+    world.set_block_entity(hopper_pos, container("minecraft:hopper", 5, &[]));
+    let mut simulation = Simulation::load(
+        Java26Rules::new(registry),
+        world,
+        SimulationConfig::default(),
+    )
+    .unwrap();
+
+    simulation
+        .step_with_actions(&[Action::SetBlock {
+            pos: power_pos,
+            state: power,
+        }])
+        .unwrap();
+
+    let state = simulation
+        .rules()
+        .registry()
+        .state(simulation.world().get_block(hopper_pos))
+        .unwrap();
+    assert_eq!(state.property("enabled"), Some("false"));
+}
+
+#[test]
+fn source_container_prevents_fallback_to_item_entities() {
+    let mut registry = Java26Registry::new();
+    let hopper = state(
+        &mut registry,
+        "minecraft:hopper",
+        &[("enabled", "true"), ("facing", "down")],
+    );
+    let chest = state(
+        &mut registry,
+        "minecraft:chest",
+        &[
+            ("facing", "south"),
+            ("type", "single"),
+            ("waterlogged", "false"),
+        ],
+    );
+    let hopper_pos = BlockPos::ZERO;
+    let source_pos = hopper_pos.relative(Direction::Up);
+    let mut world = SparseWorld::new(registry.air_state());
+    world.set_block(hopper_pos, hopper).unwrap();
+    world.set_block(source_pos, chest).unwrap();
+    world.set_block_entity(hopper_pos, container("minecraft:hopper", 5, &[]));
+    world.set_block_entity(source_pos, container("minecraft:chest", 27, &[]));
+    world
+        .spawn_entity_with_id(
+            EntityId(10),
+            EntityData {
+                kind: "minecraft:item".to_owned(),
+                position: [0.5, 1.1, 0.5],
+                fields: BTreeMap::from([
+                    (
+                        "item_id".to_owned(),
+                        serde_json::Value::String("minecraft:diamond".to_owned()),
+                    ),
+                    ("item_count".to_owned(), serde_json::Value::from(3)),
+                ]),
+            },
+        )
+        .unwrap();
+    let mut simulation = Simulation::load(
+        Java26Rules::new(registry),
+        world,
+        SimulationConfig::default(),
+    )
+    .unwrap();
+
+    simulation.step().unwrap();
+
+    assert_eq!(item_count(simulation.world(), hopper_pos), 0);
+    assert_eq!(simulation.world().entity(EntityId(10)).unwrap().fields["item_count"], 3);
+}
+
+#[test]
+fn hopper_absorbs_complete_and_partial_item_stacks() {
+    let mut registry = Java26Registry::new();
+    let hopper = state(
+        &mut registry,
+        "minecraft:hopper",
+        &[("enabled", "true"), ("facing", "down")],
+    );
+    let mut world = SparseWorld::new(registry.air_state());
+    world.set_block(BlockPos::ZERO, hopper).unwrap();
+    world.set_block_entity(
+        BlockPos::ZERO,
+        container(
+            "minecraft:hopper",
+            5,
+            &[
+                (0, "minecraft:stone", 63),
+                (1, "minecraft:dirt", 64),
+                (2, "minecraft:dirt", 64),
+                (3, "minecraft:dirt", 64),
+                (4, "minecraft:dirt", 64),
+            ],
+        ),
+    );
+    world
+        .spawn_entity_with_id(
+            EntityId(11),
+            EntityData {
+                kind: "minecraft:item".to_owned(),
+                position: [0.5, 1.1, 0.5],
+                fields: BTreeMap::from([
+                    (
+                        "item_id".to_owned(),
+                        serde_json::Value::String("minecraft:stone".to_owned()),
+                    ),
+                    ("item_count".to_owned(), serde_json::Value::from(3)),
+                ]),
+            },
+        )
+        .unwrap();
+    let mut simulation = Simulation::load(
+        Java26Rules::new(registry),
+        world,
+        SimulationConfig::default(),
+    )
+    .unwrap();
+
+    simulation.step().unwrap();
+
+    assert_eq!(slot_item(simulation.world(), BlockPos::ZERO, 0), Some(("minecraft:stone", 64)));
+    assert_eq!(simulation.world().entity(EntityId(11)).unwrap().fields["item_count"], 2);
+    assert_eq!(
+        simulation.world().block_entity(BlockPos::ZERO).unwrap().fields["cooldown"],
+        0
+    );
+}
+
+#[test]
+fn full_block_above_hopper_blocks_periodic_item_absorption() {
+    let mut registry = Java26Registry::new();
+    let hopper = state(
+        &mut registry,
+        "minecraft:hopper",
+        &[("enabled", "true"), ("facing", "down")],
+    );
+    let stone = state(&mut registry, "minecraft:stone", &[]);
+    let mut world = SparseWorld::new(registry.air_state());
+    world.set_block(BlockPos::ZERO, hopper).unwrap();
+    world.set_block(BlockPos::new(0, 1, 0), stone).unwrap();
+    world.set_block_entity(BlockPos::ZERO, container("minecraft:hopper", 5, &[]));
+    world
+        .spawn_entity_with_id(
+            EntityId(12),
+            EntityData {
+                kind: "minecraft:item".to_owned(),
+                position: [0.5, 1.7, 0.5],
+                fields: BTreeMap::from([
+                    (
+                        "item_id".to_owned(),
+                        serde_json::Value::String("minecraft:stone".to_owned()),
+                    ),
+                    ("item_count".to_owned(), serde_json::Value::from(1)),
+                ]),
+            },
+        )
+        .unwrap();
+    let mut simulation = Simulation::load(
+        Java26Rules::new(registry),
+        world,
+        SimulationConfig::default(),
+    )
+    .unwrap();
+
+    simulation.step().unwrap();
+
+    assert_eq!(item_count(simulation.world(), BlockPos::ZERO), 0);
+    assert!(simulation.world().entity(EntityId(12)).is_some());
+}
+
+#[test]
+fn hopper_uses_double_chest_and_container_entity_targets() {
+    let mut registry = Java26Registry::new();
+    let hopper_east = state(
+        &mut registry,
+        "minecraft:hopper",
+        &[("enabled", "true"), ("facing", "east")],
+    );
+    let chest_right = state(
+        &mut registry,
+        "minecraft:chest",
+        &[
+            ("facing", "south"),
+            ("type", "right"),
+            ("waterlogged", "false"),
+        ],
+    );
+    let chest_left = state(
+        &mut registry,
+        "minecraft:chest",
+        &[
+            ("facing", "south"),
+            ("type", "left"),
+            ("waterlogged", "false"),
+        ],
+    );
+    let hopper_pos = BlockPos::ZERO;
+    let right_pos = BlockPos::new(1, 0, 0);
+    let left_pos = BlockPos::new(2, 0, 0);
+    let entity_hopper_pos = BlockPos::new(5, 0, 0);
+    let mut world = SparseWorld::new(registry.air_state());
+    world.set_block(hopper_pos, hopper_east).unwrap();
+    world.set_block(right_pos, chest_right).unwrap();
+    world.set_block(left_pos, chest_left).unwrap();
+    world.set_block(entity_hopper_pos, hopper_east).unwrap();
+    world.set_block_entity(
+        hopper_pos,
+        container("minecraft:hopper", 5, &[(0, "minecraft:stone", 1)]),
+    );
+    let full_right = (0..27)
+        .map(|slot| (slot, "minecraft:dirt", 64))
+        .collect::<Vec<_>>();
+    world.set_block_entity(
+        right_pos,
+        container("minecraft:chest", 27, &full_right),
+    );
+    world.set_block_entity(left_pos, container("minecraft:chest", 27, &[]));
+    world.set_block_entity(
+        entity_hopper_pos,
+        container("minecraft:hopper", 5, &[(0, "minecraft:iron_ingot", 1)]),
+    );
+    world
+        .spawn_entity_with_id(
+            EntityId(13),
+            EntityData {
+                kind: "minecraft:chest_minecart".to_owned(),
+                position: [6.5, 0.5, 0.5],
+                fields: container("minecraft:chest_minecart", 27, &[]).fields,
+            },
+        )
+        .unwrap();
+    let mut simulation = Simulation::load(
+        Java26Rules::new(registry),
+        world,
+        SimulationConfig::default(),
+    )
+    .unwrap();
+
+    simulation.step().unwrap();
+
+    assert_eq!(slot_item(simulation.world(), left_pos, 0), Some(("minecraft:stone", 1)));
+    assert_eq!(
+        simulation.world().entity(EntityId(13)).unwrap().fields["item_count"],
+        1
+    );
+}
+
+#[test]
+fn hopper_updates_jukebox_and_chiseled_bookshelf_states() {
+    let mut registry = Java26Registry::new();
+    let hopper_east = state(
+        &mut registry,
+        "minecraft:hopper",
+        &[("enabled", "true"), ("facing", "east")],
+    );
+    let jukebox = state(
+        &mut registry,
+        "minecraft:jukebox",
+        &[("has_record", "false")],
+    );
+    let bookshelf = state(
+        &mut registry,
+        "minecraft:chiseled_bookshelf",
+        &[
+            ("facing", "north"),
+            ("slot_0_occupied", "false"),
+            ("slot_1_occupied", "false"),
+            ("slot_2_occupied", "false"),
+            ("slot_3_occupied", "false"),
+            ("slot_4_occupied", "false"),
+            ("slot_5_occupied", "false"),
+        ],
+    );
+    let jukebox_hopper = BlockPos::ZERO;
+    let jukebox_pos = BlockPos::new(1, 0, 0);
+    let bookshelf_hopper = BlockPos::new(4, 0, 0);
+    let bookshelf_pos = BlockPos::new(5, 0, 0);
+    let mut world = SparseWorld::new(registry.air_state());
+    for (pos, block) in [
+        (jukebox_hopper, hopper_east),
+        (jukebox_pos, jukebox),
+        (bookshelf_hopper, hopper_east),
+        (bookshelf_pos, bookshelf),
+    ] {
+        world.set_block(pos, block).unwrap();
+    }
+    world.set_block_entity(
+        jukebox_hopper,
+        container(
+            "minecraft:hopper",
+            5,
+            &[(0, "minecraft:music_disc_cat", 1)],
+        ),
+    );
+    world.set_block_entity(jukebox_pos, container("minecraft:jukebox", 1, &[]));
+    world.set_block_entity(
+        bookshelf_hopper,
+        container("minecraft:hopper", 5, &[(0, "minecraft:book", 1)]),
+    );
+    world.set_block_entity(
+        bookshelf_pos,
+        container("minecraft:chiseled_bookshelf", 6, &[]),
+    );
+    let mut simulation = Simulation::load(
+        Java26Rules::new(registry),
+        world,
+        SimulationConfig::default(),
+    )
+    .unwrap();
+
+    simulation.step().unwrap();
+
+    let jukebox_state = simulation
+        .rules()
+        .registry()
+        .state(simulation.world().get_block(jukebox_pos))
+        .unwrap();
+    assert_eq!(jukebox_state.property("has_record"), Some("true"));
+    let bookshelf_state = simulation
+        .rules()
+        .registry()
+        .state(simulation.world().get_block(bookshelf_pos))
+        .unwrap();
+    assert_eq!(bookshelf_state.property("slot_0_occupied"), Some("true"));
+    assert_eq!(
+        simulation.world().block_entity(bookshelf_pos).unwrap().fields
+            ["last_interacted_slot"],
+        0
     );
 }
 

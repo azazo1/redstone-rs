@@ -49,12 +49,18 @@ public final class Main {
             BlockTraitsReport.write(Path.of(args[1]), EXPECTED_VERSION, EXPECTED_DATA_VERSION);
             return;
         }
+        if (args.length == 2 && args[0].equals("--item-traits-report")) {
+            initializeMinecraft();
+            ItemTraitsReport.write(Path.of(args[1]), EXPECTED_VERSION, EXPECTED_DATA_VERSION);
+            return;
+        }
         if (args.length != 2) {
             System.err.println("usage: vanilla-oracle SCENARIO OUTPUT_JSONL");
             System.err.println("       vanilla-oracle --self-test");
             System.err.println("       vanilla-oracle --server-self-test");
             System.err.println("       vanilla-oracle --scenario-self-test");
             System.err.println("       vanilla-oracle --block-traits-report OUTPUT_JSON");
+            System.err.println("       vanilla-oracle --item-traits-report OUTPUT_JSON");
             System.exit(2);
         }
         Path scenario = Path.of(args[0]).toAbsolutePath().normalize();

@@ -7,6 +7,8 @@ use serde_json::{Map, Value};
 
 use super::{BlockBehavior, Java26Rules, StateDefinition};
 
+mod hopper;
+
 const DEFAULT_STACK_SIZE: i64 = 64;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -26,63 +28,6 @@ struct ItemInsertion<'a> {
 }
 
 impl Java26Rules {
-    pub(super) fn tick_container(
-        &mut self,
-        ctx: &mut EventContext<'_>,
-        pos: BlockPos,
-        state: &StateDefinition,
-    ) -> Result<(), RulesError> {
-        let powered = self.is_powered(ctx.world, pos);
-        if matches!(state.behavior, BlockBehavior::Hopper) {
-            self.ticked_hoppers.insert(pos);
-            self.active_hopper = Some(pos);
-            let enabled = !powered;
-            if state.bool_property("enabled") != enabled {
-                let next = self.changed_state(state.id, "enabled", enabled.to_string())?;
-                self.set_state_and_notify(ctx, pos, next, "hopper_enabled", None)?;
-            }
-            if !enabled {
-                self.active_hopper = None;
-                return Ok(());
-            }
-            let previous_cooldown = block_entity_i64(ctx.world, pos, "cooldown").unwrap_or(0);
-            let cooldown = previous_cooldown - 1;
-            if cooldown > 0 {
-                set_block_entity_i64(ctx, pos, "cooldown", cooldown);
-                self.active_hopper = None;
-                return Ok(());
-            }
-            if previous_cooldown > 0 {
-                set_block_entity_i64(ctx, pos, "cooldown", 0);
-            }
-            let facing = state
-                .direction_property("facing")
-                .unwrap_or(Direction::Down);
-            let target = pos.relative(facing);
-            let moved = self.transfer_one_item(ctx, pos, target, None, Some(facing.opposite()))
-                || self.transfer_one_item(
-                    ctx,
-                    pos.relative(Direction::Up),
-                    pos,
-                    Some(Direction::Down),
-                    None,
-                )
-                || self.absorb_item_entity(ctx, pos);
-            if moved {
-                set_block_entity_i64(ctx, pos, "cooldown", 8);
-                self.refresh_comparators_near(ctx, pos)?;
-                self.refresh_comparators_near(ctx, target)?;
-                self.refresh_comparators_near(ctx, pos.relative(Direction::Up))?;
-                *self
-                    .event_counts
-                    .entry("hopper_transfer".to_owned())
-                    .or_default() += 1;
-            }
-            self.active_hopper = None;
-        }
-        Ok(())
-    }
-
     pub(super) fn execute_container_tick(
         &mut self,
         ctx: &mut EventContext<'_>,
@@ -392,41 +337,6 @@ fn container_signal_from_fill(fill: f32, slot_count: u32) -> u8 {
 }
 
 impl Java26Rules {
-    fn transfer_one_item(
-        &mut self,
-        ctx: &mut EventContext<'_>,
-        source: BlockPos,
-        target: BlockPos,
-        source_face: Option<Direction>,
-        target_face: Option<Direction>,
-    ) -> bool {
-        let stacks = inventory(ctx.world, source);
-        for slot in slots_for_face(ctx.world, source, source_face) {
-            let Some(stack) = stacks.iter().find(|stack| stack.slot == slot) else {
-                continue;
-            };
-            if !can_take_from_slot(ctx.world, source, stack, source_face) {
-                continue;
-            }
-            if self.insert_item_with_components(
-                ctx,
-                target,
-                ItemInsertion {
-                    item_id: &stack.item_id,
-                    count: 1,
-                    face: target_face,
-                    components: stack.components.as_ref(),
-                    source: Some(source),
-                },
-            ) != 1
-            {
-                continue;
-            }
-            return take_item_from_slot(ctx, source, stack.slot, 1).is_some();
-        }
-        false
-    }
-
     fn insert_item(
         &mut self,
         ctx: &mut EventContext<'_>,
@@ -508,7 +418,12 @@ impl Java26Rules {
                 .source
                 .and_then(|source| container_kind(ctx.world, source))
                 == Some("minecraft:hopper");
-            let skip_tick = source_is_hopper && self.ticked_hoppers.contains(&target);
+            let skip_tick = source_is_hopper
+                && self.hopper_last_tick.get(&target).copied().unwrap_or(0)
+                    >= insertion
+                        .source
+                        .and_then(|source| self.hopper_last_tick.get(&source).copied())
+                        .unwrap_or(0);
             set_block_entity_i64(ctx, target, "cooldown", 8 - i64::from(skip_tick));
         }
         inserted
@@ -713,29 +628,6 @@ fn can_place_in_slot(world: &SparseWorld, pos: BlockPos, slot: u32, item_id: &st
     }
 }
 
-fn can_take_from_slot(
-    world: &SparseWorld,
-    pos: BlockPos,
-    stack: &ItemStack,
-    face: Option<Direction>,
-) -> bool {
-    match (container_kind(world, pos), face) {
-        (
-            Some("minecraft:furnace" | "minecraft:blast_furnace" | "minecraft:smoker"),
-            Some(Direction::Down),
-        ) if stack.slot == 1 => {
-            matches!(
-                stack.item_id.as_str(),
-                "minecraft:bucket" | "minecraft:water_bucket"
-            )
-        }
-        (Some("minecraft:brewing_stand"), _) if stack.slot == 3 => {
-            stack.item_id == "minecraft:glass_bottle"
-        }
-        _ => true,
-    }
-}
-
 fn slot_stack_limit(world: &SparseWorld, pos: BlockPos, slot: u32, item_id: &str) -> i64 {
     item_stack_limit(container_kind(world, pos), slot, item_id)
 }
@@ -780,111 +672,7 @@ fn disabled_slots(world: &SparseWorld, pos: BlockPos) -> BTreeSet<u32> {
 }
 
 fn is_furnace_fuel(item_id: &str) -> bool {
-    matches!(
-        item_id,
-        "minecraft:lava_bucket"
-            | "minecraft:coal_block"
-            | "minecraft:blaze_rod"
-            | "minecraft:coal"
-            | "minecraft:charcoal"
-            | "minecraft:note_block"
-            | "minecraft:bookshelf"
-            | "minecraft:chiseled_bookshelf"
-            | "minecraft:lectern"
-            | "minecraft:jukebox"
-            | "minecraft:chest"
-            | "minecraft:trapped_chest"
-            | "minecraft:crafting_table"
-            | "minecraft:daylight_detector"
-            | "minecraft:bow"
-            | "minecraft:fishing_rod"
-            | "minecraft:ladder"
-            | "minecraft:wooden_shovel"
-            | "minecraft:wooden_sword"
-            | "minecraft:wooden_spear"
-            | "minecraft:wooden_hoe"
-            | "minecraft:wooden_axe"
-            | "minecraft:wooden_pickaxe"
-            | "minecraft:stick"
-            | "minecraft:bowl"
-            | "minecraft:crossbow"
-            | "minecraft:bamboo"
-            | "minecraft:dead_bush"
-            | "minecraft:short_dry_grass"
-            | "minecraft:tall_dry_grass"
-            | "minecraft:scaffolding"
-            | "minecraft:loom"
-            | "minecraft:barrel"
-            | "minecraft:cartography_table"
-            | "minecraft:fletching_table"
-            | "minecraft:smithing_table"
-            | "minecraft:composter"
-            | "minecraft:azalea"
-            | "minecraft:flowering_azalea"
-            | "minecraft:mangrove_roots"
-            | "minecraft:leaf_litter"
-            | "minecraft:dried_kelp_block"
-            | "minecraft:bamboo_mosaic"
-    ) || is_overworld_wood_item(item_id)
-        || item_id.ends_with("_wool")
-        || item_id.ends_with("_carpet")
-        || item_id.ends_with("_sapling")
-        || item_id.ends_with("_banner")
-}
-
-fn is_overworld_wood_item(item_id: &str) -> bool {
-    const WOOD_TYPES: [&str; 10] = [
-        "oak", "spruce", "birch", "jungle", "acacia", "dark_oak", "pale_oak", "mangrove", "cherry",
-        "bamboo",
-    ];
-    let path = item_id.strip_prefix("minecraft:").unwrap_or(item_id);
-    WOOD_TYPES.iter().any(|wood| {
-        path == format!("{wood}_planks")
-            || path == format!("{wood}_mosaic")
-            || path.starts_with(&format!("{wood}_"))
-                && matches!(
-                    path.strip_prefix(&format!("{wood}_")),
-                    Some(
-                        "stairs"
-                            | "slab"
-                            | "trapdoor"
-                            | "pressure_plate"
-                            | "shelf"
-                            | "fence"
-                            | "fence_gate"
-                            | "sign"
-                            | "hanging_sign"
-                            | "door"
-                            | "boat"
-                            | "chest_boat"
-                            | "raft"
-                            | "chest_raft"
-                            | "button"
-                    )
-                )
-    }) || matches!(
-        path,
-        "bamboo_block"
-            | "stripped_bamboo_block"
-            | "bamboo_mosaic"
-            | "bamboo_mosaic_stairs"
-            | "bamboo_mosaic_slab"
-    ) || is_overworld_log(path)
-}
-
-fn is_overworld_log(path: &str) -> bool {
-    const LOG_TYPES: [&str; 9] = [
-        "oak", "spruce", "birch", "jungle", "acacia", "dark_oak", "pale_oak", "mangrove", "cherry",
-    ];
-    LOG_TYPES.iter().any(|wood| {
-        matches!(
-            path,
-            value if value == format!("{wood}_log")
-                || value == format!("stripped_{wood}_log")
-                || value == format!("{wood}_wood")
-                || value == format!("stripped_{wood}_wood")
-        )
-    })
+    super::item::official_furnace_fuel(item_id)
 }
 
 fn is_brewing_bottle(item_id: &str) -> bool {
@@ -898,30 +686,7 @@ fn is_brewing_bottle(item_id: &str) -> bool {
 }
 
 fn is_brewing_ingredient(item_id: &str) -> bool {
-    matches!(
-        item_id,
-        "minecraft:nether_wart"
-            | "minecraft:redstone"
-            | "minecraft:glowstone_dust"
-            | "minecraft:fermented_spider_eye"
-            | "minecraft:gunpowder"
-            | "minecraft:dragon_breath"
-            | "minecraft:sugar"
-            | "minecraft:rabbit_foot"
-            | "minecraft:glistering_melon_slice"
-            | "minecraft:spider_eye"
-            | "minecraft:pufferfish"
-            | "minecraft:magma_cream"
-            | "minecraft:golden_carrot"
-            | "minecraft:blaze_powder"
-            | "minecraft:ghast_tear"
-            | "minecraft:turtle_helmet"
-            | "minecraft:phantom_membrane"
-            | "minecraft:stone"
-            | "minecraft:slime_block"
-            | "minecraft:cobweb"
-            | "minecraft:breeze_rod"
-    )
+    super::item::official_brewing_ingredient(item_id)
 }
 
 fn is_shulker_box_container(kind: &str) -> bool {
@@ -971,67 +736,6 @@ fn spawn_item(world: &mut SparseWorld, pos: BlockPos, item_id: String, count: i6
         position: block_center(pos),
         fields,
     });
-}
-
-impl Java26Rules {
-    fn absorb_item_entity(&mut self, ctx: &mut EventContext<'_>, hopper: BlockPos) -> bool {
-        let candidate = ctx
-            .world
-        .entity_ids_in_aabb(
-            [
-                hopper.x as f64 - 0.25,
-                hopper.y as f64,
-                hopper.z as f64 - 0.25,
-            ],
-            [
-                hopper.x as f64 + 1.25,
-                hopper.y as f64 + 1.5,
-                hopper.z as f64 + 1.25,
-            ],
-        )
-        .into_iter()
-        .find_map(|id| {
-            let entity = ctx.world.entity(id)?;
-            (entity.kind == "minecraft:item").then(|| {
-                (
-                    id,
-                    entity
-                        .fields
-                        .get("item_id")
-                        .and_then(Value::as_str)
-                        .map(ToOwned::to_owned),
-                    entity
-                        .fields
-                        .get("item_count")
-                        .and_then(Value::as_i64)
-                        .unwrap_or(1),
-                )
-            })
-        });
-        let Some((entity_id, Some(item_id), entity_count)) = candidate else {
-            return false;
-        };
-        if self.insert_item(
-            ctx,
-            hopper,
-            ItemInsertion {
-                item_id: &item_id,
-                count: 1,
-                face: None,
-                components: None,
-                source: None,
-            },
-        ) != 1
-        {
-            return false;
-        }
-        if entity_count <= 1 {
-            ctx.world.remove_entity(entity_id);
-        } else if let Some(fields) = ctx.world.entity_fields_mut(entity_id) {
-            fields.insert("item_count".to_owned(), Value::from(entity_count - 1));
-        }
-        true
-    }
 }
 
 fn block_center(pos: BlockPos) -> [f64; 3] {

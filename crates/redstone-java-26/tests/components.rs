@@ -1262,11 +1262,11 @@ fn hopper_pulls_one_item_and_starts_an_eight_tick_cooldown() {
         .collect::<Vec<_>>();
     assert_eq!(
         updates.iter().map(|(pos, _)| *pos).collect::<Vec<_>>(),
-        [hopper_pos, source_pos, hopper_pos]
+        [hopper_pos, source_pos]
     );
     assert_eq!(updates[0].1.fields["item_count"], 1);
+    assert_eq!(updates[0].1.fields["cooldown"], 8);
     assert_eq!(updates[1].1.fields["item_count"], 1);
-    assert_eq!(updates[2].1.fields["cooldown"], 8);
 }
 
 #[test]

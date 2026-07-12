@@ -511,6 +511,12 @@ fn normalize_item_entity_fields(
     {
         fields.insert("item_count".to_owned(), serde_json::Value::from(count));
     }
+    if let Some(components) = item.get("components") {
+        fields.insert(
+            "item_components".to_owned(),
+            nbt_value_to_json(components),
+        );
+    }
     if let Some(age) = nbt
         .get("Age")
         .or_else(|| nbt.get("age"))

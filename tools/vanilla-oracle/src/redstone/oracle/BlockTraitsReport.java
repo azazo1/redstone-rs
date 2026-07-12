@@ -11,6 +11,7 @@ import java.util.List;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.core.registries.BuiltInRegistries;
+import java.util.Set;
 import net.minecraft.world.level.EmptyBlockGetter;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.SupportType;
@@ -35,6 +36,8 @@ final class BlockTraitsReport {
             states.addAll(block.getStateDefinition().getPossibleStates())
         );
         states.sort(Comparator.comparingInt(Block::getId));
+        Set<String> doesNotBlockHoppers = new TagResourceLoader("block")
+            .resolve("minecraft:does_not_block_hoppers");
 
         JsonObject root = new JsonObject();
         root.addProperty("version", version);
@@ -59,6 +62,14 @@ final class BlockTraitsReport {
             entry.addProperty(
                 "redstone_conductor",
                 state.isRedstoneConductor(EmptyBlockGetter.INSTANCE, BlockPos.ZERO)
+            );
+            entry.addProperty(
+                "collision_full_block",
+                state.isCollisionShapeFullBlock(EmptyBlockGetter.INSTANCE, BlockPos.ZERO)
+            );
+            entry.addProperty(
+                "does_not_block_hoppers",
+                doesNotBlockHoppers.contains(BuiltInRegistries.BLOCK.getKey(state.getBlock()).toString())
             );
             entry.addProperty("full_support", supportMask(state, SupportType.FULL));
             entry.addProperty("center_support", supportMask(state, SupportType.CENTER));

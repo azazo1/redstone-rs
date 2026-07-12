@@ -246,6 +246,33 @@ fn real_java_oracle_matches_initial_source_paste() {
     );
 }
 
+#[test]
+#[ignore = "需要先执行 just oracle-build"]
+fn real_java_oracle_matches_digital_clock_hopper_timing() {
+    assert_workspace_scenario_matches("assets/scenarios/digital-clock.toml");
+}
+
+fn assert_workspace_scenario_matches(path: &str) {
+    let workspace = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let oracle = workspace.join("tools/vanilla-oracle/run.sh");
+    let output = Command::new(env!("CARGO_BIN_EXE_redstone"))
+        .current_dir(&workspace)
+        .env("REDSTONE_ORACLE", &oracle)
+        .arg("test")
+        .arg(path)
+        .arg("--oracle")
+        .output()
+        .unwrap();
+
+    assert!(
+        output.status.success(),
+        "stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(String::from_utf8(output.stdout).unwrap().contains("PASS"));
+}
+
 fn assert_oracle_matches(name: &str, structure: Vec<u8>, scenario: &str) {
     let directory = TestDirectory::new(name);
     let structure_path = directory.path().join("machine.nbt");

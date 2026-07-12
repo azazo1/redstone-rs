@@ -53,7 +53,6 @@ fn replay_exports_initial_and_runtime_block_entity_data() {
             SIGN_BLOCK_ENTITY_TYPE,
             HOPPER_BLOCK_ENTITY_TYPE,
             CHEST_BLOCK_ENTITY_TYPE,
-            HOPPER_BLOCK_ENTITY_TYPE,
         ]
     );
 
@@ -70,7 +69,7 @@ fn replay_exports_initial_and_runtime_block_entity_data() {
     assert!(contains(updates[2].nbt, b"minecraft:redstone"));
     assert!(contains(updates[1].nbt, b"minecraft:custom_name"));
     assert!(contains(updates[2].nbt, b"minecraft:custom_name"));
-    assert_eq!(nbt_int_field(updates[3].nbt, "TransferCooldown"), Some(8));
+    assert_eq!(nbt_int_field(updates[1].nbt, "TransferCooldown"), Some(8));
 }
 
 fn write_fixture(directory: &Path) -> PathBuf {

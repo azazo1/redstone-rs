@@ -5,7 +5,7 @@ use redstone_core::{BlockKindId, BlockStateId, Direction};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
-const BLOCK_TRAIT_WIDTH: usize = 4;
+const BLOCK_TRAIT_WIDTH: usize = 6;
 const OFFICIAL_BLOCK_TRAITS: &[u8] =
     include_bytes!(concat!(env!("OUT_DIR"), "/block_traits.bin"));
 
@@ -114,6 +114,8 @@ pub struct StateDefinition {
     pub properties: Arc<BTreeMap<String, String>>,
     pub behavior: BlockBehavior,
     pub redstone_conductor: bool,
+    pub collision_full_block: bool,
+    pub does_not_block_hoppers: bool,
     pub support_faces: SupportFaces,
     pub push_reaction: PushReaction,
     pub has_block_entity: bool,
@@ -325,6 +327,7 @@ impl StateResolver for Java26Registry {
                 | BlockBehavior::Torch { .. }
                 | BlockBehavior::Repeater
                 | BlockBehavior::Comparator
+                | BlockBehavior::Hopper
                 | BlockBehavior::Dropper
                 | BlockBehavior::Dispenser
                 | BlockBehavior::Crafter
@@ -345,6 +348,8 @@ impl StateResolver for Java26Registry {
             properties: Arc::new(properties.clone()),
             behavior: traits.behavior,
             redstone_conductor: official_traits.redstone_conductor,
+            collision_full_block: official_traits.collision_full_block,
+            does_not_block_hoppers: official_traits.does_not_block_hoppers,
             support_faces: official_traits.support_faces,
             push_reaction: traits.push_reaction,
             has_block_entity,
@@ -512,6 +517,8 @@ struct BlockTraits {
 #[derive(Clone, Copy)]
 struct OfficialBlockTraits {
     redstone_conductor: bool,
+    collision_full_block: bool,
+    does_not_block_hoppers: bool,
     support_faces: SupportFaces,
 }
 
@@ -522,7 +529,9 @@ fn official_block_traits(id: BlockStateId) -> OfficialBlockTraits {
         .unwrap_or_else(|| panic!("官方方块特征缺少状态 ID: {}", id.0));
     OfficialBlockTraits {
         redstone_conductor: bytes[0] != 0,
-        support_faces: SupportFaces::from_masks(bytes[1], bytes[2], bytes[3]),
+        collision_full_block: bytes[1] != 0,
+        does_not_block_hoppers: bytes[2] != 0,
+        support_faces: SupportFaces::from_masks(bytes[3], bytes[4], bytes[5]),
     }
 }
 
@@ -830,6 +839,18 @@ mod tests {
                     "{name} {:?}",
                     state.properties
                 );
+                assert_eq!(
+                    definition.collision_full_block,
+                    expected["collision_full_block"].as_bool().unwrap(),
+                    "{name} {:?}",
+                    state.properties
+                );
+                assert_eq!(
+                    definition.does_not_block_hoppers,
+                    expected["does_not_block_hoppers"].as_bool().unwrap(),
+                    "{name} {:?}",
+                    state.properties
+                );
                 for (support_type, field) in [
                     (SupportType::Full, "full_support"),
                     (SupportType::Center, "center_support"),
@@ -848,6 +869,14 @@ mod tests {
 
         assert_eq!(checked, 29_873);
         assert_eq!(trait_states.len(), checked);
+    }
+
+    #[test]
+    fn official_hopper_blocking_tag_matches_representative_blocks() {
+        let mut registry = Java26Registry::new();
+        assert!(default_state(&mut registry, "minecraft:bee_nest").does_not_block_hoppers);
+        assert!(default_state(&mut registry, "minecraft:beehive").does_not_block_hoppers);
+        assert!(!default_state(&mut registry, "minecraft:stone").does_not_block_hoppers);
     }
 
     fn default_state(registry: &mut Java26Registry, name: &str) -> StateDefinition {
