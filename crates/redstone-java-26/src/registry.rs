@@ -121,6 +121,9 @@ pub struct StateDefinition {
     pub has_block_entity: bool,
     pub supported: bool,
     pub power: u8,
+    pub facing: Option<Direction>,
+    pub powered: bool,
+    pub lit: bool,
     pub is_rail: bool,
     pub is_piston_head: bool,
     pub handles_neighbor_update: bool,
@@ -131,15 +134,24 @@ impl StateDefinition {
         self.properties.get(name).map(String::as_str)
     }
 
+    #[inline]
     pub fn bool_property(&self, name: &str) -> bool {
-        self.property(name) == Some("true")
+        match name {
+            "powered" => self.powered,
+            "lit" => self.lit,
+            _ => self.property(name) == Some("true"),
+        }
     }
 
     pub fn int_property(&self, name: &str) -> Option<i32> {
         self.property(name)?.parse().ok()
     }
 
+    #[inline]
     pub fn direction_property(&self, name: &str) -> Option<Direction> {
+        if name == "facing" {
+            return self.facing;
+        }
         match self.property(name)? {
             "west" => Some(Direction::West),
             "east" => Some(Direction::East),
@@ -318,6 +330,17 @@ impl StateResolver for Java26Registry {
             .and_then(|value| value.parse::<u8>().ok())
             .unwrap_or(0)
             .min(15);
+        let facing = properties.get("facing").and_then(|value| match value.as_str() {
+            "west" => Some(Direction::West),
+            "east" => Some(Direction::East),
+            "down" => Some(Direction::Down),
+            "up" => Some(Direction::Up),
+            "north" => Some(Direction::North),
+            "south" => Some(Direction::South),
+            _ => None,
+        });
+        let powered = properties.get("powered").is_some_and(|value| value == "true");
+        let lit = properties.get("lit").is_some_and(|value| value == "true");
         let path = name.strip_prefix("minecraft:").unwrap_or(name);
         let is_rail = path == "rail" || path.ends_with("_rail");
         let is_piston_head = name == "minecraft:piston_head";
@@ -355,6 +378,9 @@ impl StateResolver for Java26Registry {
             has_block_entity,
             supported: traits.supported,
             power,
+            facing,
+            powered,
+            lit,
             is_rail,
             is_piston_head,
             handles_neighbor_update,

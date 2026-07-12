@@ -1,11 +1,17 @@
 #[path = "components.rs"]
 mod components;
+#[path = "compiled.rs"]
+mod compiled;
+#[path = "compiled-network.rs"]
+mod compiled_network;
 #[path = "consumers.rs"]
 mod consumers;
 #[path = "dispenser.rs"]
 mod dispenser;
 #[path = "entities.rs"]
 mod entities;
+#[path = "execution.rs"]
+mod execution;
 #[path = "inventory_sides.rs"]
 mod inventory_sides;
 #[path = "one-chooser.rs"]

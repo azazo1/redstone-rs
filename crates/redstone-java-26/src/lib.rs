@@ -1,3 +1,4 @@
+mod compiled;
 mod environment;
 mod orientation;
 mod registry;

@@ -428,3 +428,42 @@ Hello-world 的 `redstone-rs` 稳定前中位数为 2428.251 tick/s, MCHPRS 普�
 7. 微基准和真实机器并存. 元件微基准用于定位局部热路径, Frostbyte 这类大型 CPU 用于验证组合行为和缓存压力.
 8. 保留原始值和异常轮次. 摘要使用中位数, 但不能静默删除调度抖动, 热降频或页面错误造成的慢轮次.
 9. 不生成跨语义范围的单一总排名. 完整原版规则, 计算红石子集, 预编译连接图和纯三维可视化项目应分别解释.
+
+## 动态编译执行器验收方法
+
+### 第一阶段实现证据
+
+最初的混合执行器在 `Simulation::load` 内立即构图. Frostbyte program paste 和 `update_region` 随后被当作动态拓扑逐项同步, 使 1 tick 的 8-bit CPU 缩短场景超过 30 s 仍无法完成. 执行器生命周期拆为 configure 和 prepare 后, CLI 在初始 initialize, paste 和 update 完成后只构图一次. 同一缩短场景的 compile 为 530.818 ms, tick 为 0.385 ms.
+
+第二个数量级瓶颈位于状态同步后的图校验. 旧实现即使只有 wire power 属性变化, 也会扫描完整 node 和 dependency 索引. Frostbyte 图约有 68.9 万 node 和 643 万 dependency, 每个规则回调因此退化为 O(E). StateOnly 同步移除全图校验后, 8-bit CPU 的 60 tick 编译运行恢复为 24.234 ms. 同轮独立解释运行为 29.564 ms. 这个阶段只证明灾难性回归已经消除, 不作为最终吞吐结果.
+
+逐 tick 差分随后发现 wire 批量固定点传播改变分支顺序并可能触发任务风暴. 该路径已经停用. 安全编译路径保留 core 邻居任务栈, 只使用预计算输入计划替代重复输入搜索. T 形 wire, wire-repeater-lamp, triple piston 和 flying machine 的完整 `WorldDelta` 差分通过.
+
+Frostbyte hello-world 的安全路径诊断同时发现一项输入计划错误. Redstone block 被错误当作可经普通导体转发的 strong source, 会使隔着 wool 的 wire 凭空获得 15 强度. 移除该常量折叠后, 8800 tick 的解释和强制编译运行在每一 tick 的 `WorldDelta`, probe 和 pending scheduled tick 数量上完全一致. 该次图包含 688931 个 node 和 6436394 条 dependency, compile 为 3.231 s. 此结果只作为正确性 oracle, 高速加权网络仍需单独验收.
+
+动态编译执行器的正式结果使用 release profile, 关闭 trace, VCD, replay 和 Java oracle. 每个场景启动 3 个独立进程, 保留全部原始输出, 并对每项指标分别取中位数. Frostbyte 基准统一使用以下命令:
+
+```shell
+just bench-frostbyte compiled 3
+```
+
+`compile_ms` 单列记录从世界状态生成执行图的耗时, 不计入 `ticking_elapsed_ms` 和 tick/s. 吞吐门槛使用 `active_ticks_per_second`, 避免稳定后的空闲尾部抬高结果. 两个 Frostbyte 场景都达到 `10000 game tick/s` 才算通过静态电路性能验收.
+
+| 场景 | 轮次 | engine | compile ms | nodes | edges | stable tick | 稳定前 tick/s | 断言 |
+| --- | ---: | --- | ---: | ---: | ---: | ---: | ---: | --- |
+| hello-world | 1 | compiled | 待测 | 待测 | 待测 | 待测 | 待测 | 待测 |
+| hello-world | 2 | compiled | 待测 | 待测 | 待测 | 待测 | 待测 | 待测 |
+| hello-world | 3 | compiled | 待测 | 待测 | 待测 | 待测 | 待测 | 待测 |
+| hello-world 中位数 | - | compiled | 待测 | 待测 | 待测 | 待测 | 待测 | 待测 |
+| line-drawing | 1 | compiled | 待测 | 待测 | 待测 | 待测 | 待测 | 待测 |
+| line-drawing | 2 | compiled | 待测 | 待测 | 待测 | 待测 | 待测 | 待测 |
+| line-drawing | 3 | compiled | 待测 | 待测 | 待测 | 待测 | 待测 | 待测 |
+| line-drawing 中位数 | - | compiled | 待测 | 待测 | 待测 | 待测 | 待测 | 待测 |
+
+动态拓扑回归分别以 `interpreted` 和 `compiled` 运行 `flying-roof`, `flying-machine` 和 `piston-gate-3x3`. 每个组合同样独立运行 3 次, 比较完整场景的 `ticks_per_second`, 局部重编译次数和重编译节点数. 编译模式耗时中位数不得超过同版本解释模式的 `110%`.
+
+| 场景 | interpreted tick/s 中位数 | compiled tick/s 中位数 | compiled / interpreted 耗时 | topology rebuilds | recompiled nodes | 断言 |
+| --- | ---: | ---: | ---: | ---: | ---: | --- |
+| flying-roof | 待测 | 待测 | 待测 | 待测 | 待测 | 待测 |
+| flying-machine | 待测 | 待测 | 待测 | 待测 | 待测 | 待测 |
+| piston-gate-3x3 | 待测 | 待测 | 待测 | 待测 | 待测 | 待测 |

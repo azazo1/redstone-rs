@@ -52,9 +52,7 @@ impl Java26Rules {
         let Some(index) = random_stack_index(ctx, pos) else {
             return Ok(());
         };
-        let facing = state
-            .direction_property("facing")
-            .unwrap_or(Direction::North);
+        let facing = state.facing.unwrap_or(Direction::North);
         let target = pos.relative(facing);
         let item = inventory(ctx.world, pos)[index].item_id.clone();
         if self.insert_item(
@@ -97,9 +95,7 @@ impl Java26Rules {
             return Ok(());
         };
         let item = inventory(ctx.world, pos)[index].item_id.clone();
-        let facing = state
-            .direction_property("facing")
-            .unwrap_or(Direction::North);
+        let facing = state.facing.unwrap_or(Direction::North);
         let target = pos.relative(facing);
         match dispenser_behavior(&item) {
             Some(DispenserBehavior::Projectile) => {

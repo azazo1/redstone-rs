@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::process::Command;
+use std::process::{Command, Output};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use fastnbt::Value;
@@ -26,9 +26,39 @@ fn run_executes_entity_and_target_actions_through_the_cli() {
         String::from_utf8_lossy(&output.stdout),
         String::from_utf8_lossy(&output.stderr)
     );
+    assert_auto_fallback_warning(
+        &output,
+        "trace recording requires interpreted execution",
+    );
     let stdout = String::from_utf8(output.stdout).unwrap();
     assert!(stdout.contains("ticks: 9"));
     assert!(stdout.contains("expectations: passed"));
+    let summary = stdout
+        .lines()
+        .filter_map(|line| line.split_once(": "))
+        .collect::<HashMap<_, _>>();
+    assert_eq!(summary.get("requested_engine"), Some(&"auto"));
+    assert_eq!(summary.get("engine"), Some(&"interpreted"));
+    assert_ne!(
+        *summary.get("fallback_reason").expect("fallback reason"),
+        "none"
+    );
+    for key in [
+        "compile_ms",
+        "nodes",
+        "edges",
+        "compiled_updates",
+        "interpreted_updates",
+        "compiled_hit_rate",
+        "partial_recompilations",
+        "full_recompilations",
+        "dense_full_rebuilds",
+        "topology_rebuilds",
+        "recompiled_nodes",
+        "recompile_ms",
+    ] {
+        assert!(summary.contains_key(key), "missing summary field {key}");
+    }
 
     let action_types = fs::read_to_string(&trace_path)
         .unwrap()
@@ -56,6 +86,148 @@ fn run_executes_entity_and_target_actions_through_the_cli() {
     assert_eq!(
         fs::read(vcd_path).unwrap(),
         fs::read(repeated_vcd_path).unwrap()
+    );
+}
+
+#[test]
+fn vcd_alone_uses_the_interpreted_backend() {
+    let directory = TestDirectory::new("scenario-vcd-engine");
+    let structure_path = directory.path().join("machine.nbt");
+    let scenario_path = directory.path().join("scenario.toml");
+    let vcd_path = directory.path().join("signals.vcd");
+    fs::write(structure_path, structure()).unwrap();
+    fs::write(&scenario_path, scenario()).unwrap();
+
+    let output = Command::new(env!("CARGO_BIN_EXE_redstone"))
+        .arg("run")
+        .arg(&scenario_path)
+        .arg("--vcd")
+        .arg(&vcd_path)
+        .output()
+        .unwrap();
+
+    assert!(output.status.success());
+    assert_auto_fallback_warning(
+        &output,
+        "trace recording requires interpreted execution",
+    );
+    let summary = String::from_utf8(output.stdout)
+        .unwrap()
+        .lines()
+        .filter_map(|line| line.split_once(": "))
+        .map(|(key, value)| (key.to_owned(), value.to_owned()))
+        .collect::<HashMap<_, _>>();
+    assert_eq!(summary.get("engine").map(String::as_str), Some("interpreted"));
+    assert!(vcd_path.is_file());
+}
+
+#[test]
+fn experimental_mode_uses_the_interpreted_backend() {
+    let directory = TestDirectory::new("scenario-experimental-engine");
+    let structure_path = directory.path().join("machine.nbt");
+    let scenario_path = directory.path().join("scenario.toml");
+    fs::write(structure_path, structure()).unwrap();
+    fs::write(
+        &scenario_path,
+        scenario().replace("mode = \"default\"", "mode = \"experimental\""),
+    )
+    .unwrap();
+
+    let output = Command::new(env!("CARGO_BIN_EXE_redstone"))
+        .arg("run")
+        .arg(&scenario_path)
+        .output()
+        .unwrap();
+
+    assert!(output.status.success());
+    assert_auto_fallback_warning(
+        &output,
+        "experimental redstone requires interpreted execution",
+    );
+    let summary = String::from_utf8(output.stdout)
+        .unwrap()
+        .lines()
+        .filter_map(|line| line.split_once(": "))
+        .map(|(key, value)| (key.to_owned(), value.to_owned()))
+        .collect::<HashMap<_, _>>();
+    assert_eq!(summary.get("engine").map(String::as_str), Some("interpreted"));
+}
+
+#[test]
+fn forced_compiled_trace_is_rejected() {
+    let directory = TestDirectory::new("scenario-compiled-trace");
+    let structure_path = directory.path().join("machine.nbt");
+    let scenario_path = directory.path().join("scenario.toml");
+    let trace_path = directory.path().join("trace.jsonl");
+    fs::write(structure_path, structure()).unwrap();
+    fs::write(&scenario_path, scenario()).unwrap();
+
+    let output = Command::new(env!("CARGO_BIN_EXE_redstone"))
+        .arg("trace")
+        .arg(&scenario_path)
+        .arg("--engine")
+        .arg("compiled")
+        .arg("--output")
+        .arg(&trace_path)
+        .output()
+        .unwrap();
+
+    assert_forced_compiled_rejected(
+        &output,
+        "trace recording requires interpreted execution",
+    );
+    assert!(!trace_path.exists());
+}
+
+#[test]
+fn forced_compiled_vcd_is_rejected() {
+    let directory = TestDirectory::new("scenario-compiled-vcd");
+    let structure_path = directory.path().join("machine.nbt");
+    let scenario_path = directory.path().join("scenario.toml");
+    let vcd_path = directory.path().join("signals.vcd");
+    fs::write(structure_path, structure()).unwrap();
+    fs::write(&scenario_path, scenario()).unwrap();
+
+    let output = Command::new(env!("CARGO_BIN_EXE_redstone"))
+        .arg("run")
+        .arg(&scenario_path)
+        .arg("--engine")
+        .arg("compiled")
+        .arg("--vcd")
+        .arg(&vcd_path)
+        .output()
+        .unwrap();
+
+    assert_forced_compiled_rejected(
+        &output,
+        "trace recording requires interpreted execution",
+    );
+    assert!(!vcd_path.exists());
+}
+
+#[test]
+fn forced_compiled_experimental_mode_is_rejected() {
+    let directory = TestDirectory::new("scenario-compiled-experimental");
+    let structure_path = directory.path().join("machine.nbt");
+    let scenario_path = directory.path().join("scenario.toml");
+    fs::write(structure_path, structure()).unwrap();
+    fs::write(
+        &scenario_path,
+        scenario().replace("mode = \"default\"", "mode = \"experimental\""),
+    )
+    .unwrap();
+
+    let output = Command::new(env!("CARGO_BIN_EXE_redstone"))
+        .arg("run")
+        .arg(&scenario_path)
+        .arg("--engine")
+        .arg("compiled")
+        .output()
+        .unwrap();
+
+    assert_forced_compiled_rejected(
+        &output,
+        "experimental redstone requires interpreted execution",
     );
 }
 
@@ -142,6 +314,20 @@ fn run(scenario: &Path, trace: &Path, vcd: &Path) -> std::process::Output {
         .arg(vcd)
         .output()
         .unwrap()
+}
+
+fn assert_auto_fallback_warning(output: &Output, reason: &str) {
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("自动执行器回退到解释模式") && stderr.contains(reason),
+        "stderr:\n{stderr}"
+    );
+}
+
+fn assert_forced_compiled_rejected(output: &Output, reason: &str) {
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains(reason), "stderr:\n{stderr}");
 }
 
 fn structure() -> Vec<u8> {

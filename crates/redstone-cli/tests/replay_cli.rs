@@ -29,6 +29,9 @@ fn run_exports_parseable_replay_and_atomically_replaces_target() {
 
     let output = run_command("run", &scenario, &replay);
     assert_success(&output);
+    assert!(String::from_utf8_lossy(&output.stdout)
+        .lines()
+        .any(|line| line == "engine: compiled"));
     let recording = read_recording(&replay);
     let packets = parse_packets(&recording);
 
@@ -86,6 +89,26 @@ fn single_scenario_test_exports_replay() {
 
     let output = run_command("test", &scenario, &replay);
     assert_success(&output);
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let summary = stdout
+        .lines()
+        .find(|line| line.starts_with("PASS "))
+        .unwrap()
+        .split_whitespace()
+        .filter_map(|field| field.split_once('='))
+        .collect::<HashMap<_, _>>();
+    assert_eq!(summary.get("requested_engine"), Some(&"auto"));
+    assert_eq!(summary.get("engine"), Some(&"compiled"));
+    for field in [
+        "compiled_hit_rate",
+        "partial_recompilations",
+        "full_recompilations",
+        "dense_full_rebuilds",
+        "topology_rebuilds",
+        "recompile_ms",
+    ] {
+        assert!(summary.contains_key(field));
+    }
     assert!(replay.is_file());
     assert!(ZipArchive::new(File::open(replay).unwrap()).is_ok());
 }
@@ -292,8 +315,9 @@ fn piston_scenario_exports_vanilla_moving_piston_packets() {
         .join("../../assets/scenarios/tripple-piston-extender.toml");
     let replay = directory.path().join("piston.mcpr");
 
-    let output = run_command("run", &scenario, &replay);
+    let output = run_compiled_command("run", &scenario, &replay);
     assert_success(&output);
+    assert_compiled_run(&output);
     let recording = read_recording(&replay);
     let packets = parse_packets(&recording);
     assert!(
@@ -350,9 +374,12 @@ fn piston_animation_exports_vanilla_block_events_for_the_3x3_gate() {
         .arg("--replay")
         .arg(&replay)
         .arg("--replay-anim")
+        .arg("--engine")
+        .arg("compiled")
         .output()
         .unwrap();
     assert_success(&output);
+    assert_compiled_run(&output);
 
     let recording = read_recording(&replay);
     let events = parse_packets(&recording)
@@ -385,9 +412,12 @@ fn piston_animation_starts_before_slime_and_honey_branch_updates() {
         .arg("--replay")
         .arg(&replay)
         .arg("--replay-anim")
+        .arg("--engine")
+        .arg("compiled")
         .output()
         .unwrap();
     assert_success(&output);
+    assert_compiled_run(&output);
 
     let recording = read_recording(&replay);
     let packets = parse_packets(&recording);
@@ -453,6 +483,29 @@ fn run_command(command: &str, scenario: &Path, replay: &Path) -> Output {
         .arg(replay)
         .output()
         .unwrap()
+}
+
+fn run_compiled_command(command: &str, scenario: &Path, replay: &Path) -> Output {
+    Command::new(env!("CARGO_BIN_EXE_redstone"))
+        .arg(command)
+        .arg(scenario)
+        .arg("--replay")
+        .arg(replay)
+        .arg("--engine")
+        .arg("compiled")
+        .output()
+        .unwrap()
+}
+
+fn assert_compiled_run(output: &Output) {
+    assert!(
+        String::from_utf8_lossy(&output.stdout)
+            .lines()
+            .any(|line| line == "engine: compiled"),
+        "stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
 }
 
 fn assert_success(output: &Output) {

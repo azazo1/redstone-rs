@@ -72,9 +72,7 @@ impl Java26Rules {
         if !matches!(state.behavior, BlockBehavior::Observer) {
             return Ok(());
         }
-        let facing = state
-            .direction_property("facing")
-            .unwrap_or(Direction::South);
+        let facing = state.facing.unwrap_or(Direction::South);
         if pos.relative(facing) == source_pos {
             let state = state.clone();
             self.start_observer_signal(ctx, pos, &state)?;

@@ -47,6 +47,44 @@ inspect structure *args:
 bench *args:
     cargo run --release -p redstone-cli -- bench {{ args }}
 
+# just test-engines assets/scenarios/flying-machine.toml
+# 分别使用解释和编译执行器验证同一个场景.
+test-engines scenario *args:
+    cargo run --release -p redstone-cli -- test {{ scenario }} --engine interpreted {{ args }}
+    cargo run --release -p redstone-cli -- test {{ scenario }} --engine compiled {{ args }}
+
+# just test-compiled-differential --ignored
+# 运行解释器与强制编译器的逐 tick 差分测试.
+test-compiled-differential *args:
+    cargo test -p redstone-java-26 --test suite 'compiled::' -- {{ args }}
+
+# just bench-frostbyte compiled 3
+# 独立运行 Frostbyte hello-world 和 line-drawing 性能基准.
+bench-frostbyte engine="auto" runs="3":
+    #!/usr/bin/env sh
+    set -eu
+    case "{{ runs }}" in
+      ''|*[!0-9]*)
+        echo "runs 必须是正整数" >&2
+        exit 2
+        ;;
+    esac
+    if [ "{{ runs }}" -eq 0 ]; then
+      echo "runs 必须是正整数" >&2
+      exit 2
+    fi
+    for scenario in \
+      assets/scenarios/frostbyte-cpu-16bit-hello-world.toml \
+      assets/scenarios/frostbyte-cpu-16bit-line-drawing.toml
+    do
+      run=1
+      while [ "$run" -le "{{ runs }}" ]; do
+        echo "Frostbyte 基准: scenario=$scenario engine={{ engine }} run=$run/{{ runs }}"
+        cargo run --release -p redstone-cli -- run "$scenario" --engine "{{ engine }}"
+        run=$((run + 1))
+      done
+    done
+
 # just generate-observer-clock 100
 # 生成指定边长的观察者面对面高频时钟原理图.
 generate-observer-clock size="100":

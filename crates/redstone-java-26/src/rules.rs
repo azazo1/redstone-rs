@@ -1,14 +1,21 @@
+use std::collections::hash_map::DefaultHasher;
 use std::collections::{BTreeMap, HashMap, VecDeque};
-use std::hash::{BuildHasherDefault, Hasher};
+use std::hash::{BuildHasherDefault, Hash, Hasher};
 
 use indexmap::IndexSet;
 use redstone_core::{
-    Action, BlockEntityData, BlockEvent, BlockKindId, BlockPos, BlockRules, BlockStateId, DeferredRuleTask,
-    Direction, EntityId, EventContext, NeighborUpdate, Probe, ProbeValue, RedstoneMode, RulesError,
-    ScheduledTick, SparseWorld, TickPriority,
+    Action, BlockChange, BlockEntityData, BlockEvent, BlockKindId, BlockPos, BlockRules,
+    BlockStateId, DeferredRuleTask, Direction, EntityId, EventContext, ExecutionConfig,
+    ExecutionReport, NeighborUpdate, Probe, ProbeValue, RedstoneMode, RulesError, ScheduledTick,
+    SparseWorld, TickPriority,
 };
+use rustc_hash::FxHashMap;
 use tracing::debug;
 
+use crate::compiled::{
+    CompiledExecutor, CompiledOrderedWireEvent, CompiledWireTransition, NetworkInputPower,
+    WirePlan,
+};
 use crate::orientation::{Orientation, SideBias};
 use crate::{BlockBehavior, JAVA_VERSION, Java26Registry, PushReaction, StateDefinition};
 use crate::environment::daylight_detector_power;
@@ -24,6 +31,15 @@ mod shape;
 
 use inventory::block_entity_i64;
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct Java26RuleCacheFingerprint {
+    pub comparator_outputs: u64,
+    pub torch_toggles: u64,
+    pub event_counts: u64,
+    pub hopper_last_tick: u64,
+    pub active_hopper: u64,
+}
+
 pub struct Java26Rules {
     registry: Java26Registry,
     comparator_outputs: BTreeMap<BlockPos, u8>,
@@ -33,6 +49,14 @@ pub struct Java26Rules {
     event_counts: BTreeMap<String, i64>,
     hopper_last_tick: BTreeMap<BlockPos, u64>,
     active_hopper: Option<BlockPos>,
+    compiled: CompiledExecutor,
+    compiled_wire_events: Vec<CompiledOrderedWireEvent>,
+    compiled_wire_overlay_powers: Vec<u8>,
+    compiled_wire_overlay_epochs: Vec<u32>,
+    compiled_wire_overlay_epoch: u32,
+    compiled_wire_overlay_order: Vec<u32>,
+    compiled_wire_overlay_active: bool,
+    wire_power_transitions: FxHashMap<(BlockStateId, u8), BlockStateId>,
 }
 
 impl Java26Rules {
@@ -50,11 +74,33 @@ impl Java26Rules {
             event_counts: BTreeMap::new(),
             hopper_last_tick: BTreeMap::new(),
             active_hopper: None,
+            compiled: CompiledExecutor::default(),
+            compiled_wire_events: Vec::new(),
+            compiled_wire_overlay_powers: Vec::new(),
+            compiled_wire_overlay_epochs: Vec::new(),
+            compiled_wire_overlay_epoch: 0,
+            compiled_wire_overlay_order: Vec::new(),
+            compiled_wire_overlay_active: false,
+            wire_power_transitions: FxHashMap::default(),
         }
     }
 
     pub fn registry(&self) -> &Java26Registry {
         &self.registry
+    }
+
+    pub fn semantic_cache_fingerprint(&self) -> Java26RuleCacheFingerprint {
+        Java26RuleCacheFingerprint {
+            comparator_outputs: hash_value(&self.comparator_outputs),
+            torch_toggles: hash_value(&self.torch_toggles),
+            event_counts: hash_value(&self.event_counts),
+            hopper_last_tick: hash_value(&self.hopper_last_tick),
+            active_hopper: hash_value(&self.active_hopper),
+        }
+    }
+
+    pub fn comparator_output_cache(&self) -> &BTreeMap<BlockPos, u8> {
+        &self.comparator_outputs
     }
 
     fn state(&self, state: BlockStateId) -> Result<&StateDefinition, RulesError> {
@@ -74,6 +120,20 @@ impl Java26Rules {
             .map_err(|error| RulesError::Message(error.to_string()))
     }
 
+    fn wire_state_with_power(
+        &mut self,
+        state: BlockStateId,
+        power: u8,
+    ) -> Result<BlockStateId, RulesError> {
+        let power = power.min(15);
+        if let Some(next) = self.wire_power_transitions.get(&(state, power)).copied() {
+            return Ok(next);
+        }
+        let next = self.changed_state(state, "power", power_value(power))?;
+        self.wire_power_transitions.insert((state, power), next);
+        Ok(next)
+    }
+
     fn set_block(
         &mut self,
         ctx: &mut EventContext<'_>,
@@ -90,7 +150,11 @@ impl Java26Rules {
             && self
                 .state(state)
                 .is_ok_and(|state| matches!(state.behavior, BlockBehavior::Wire));
-        let old = ctx.set_block(pos, state, cause)?;
+        let old = if wire_to_wire {
+            ctx.set_block_state_only(pos, state, cause)?
+        } else {
+            ctx.set_block(pos, state, cause)?
+        };
         if changed && !wire_to_wire {
             self.block_signal_cache.clear();
         }
@@ -202,9 +266,7 @@ impl Java26Rules {
         pos: BlockPos,
         state: &StateDefinition,
     ) {
-        let facing = state
-            .direction_property("facing")
-            .unwrap_or(Direction::North);
+        let facing = state.facing.unwrap_or(Direction::North);
         let output_direction = facing.opposite();
         let output_pos = pos.relative(output_direction);
         let orientation = match ctx.mode {
@@ -311,7 +373,7 @@ impl Java26Rules {
         match &state.behavior {
             BlockBehavior::RedstoneBlock => 15,
             BlockBehavior::Wire => {
-                let power = state.power;
+                let power = self.visible_wire_power(pos, state);
                 match direction {
                     Direction::Down => 0,
                     Direction::Up => power,
@@ -339,7 +401,7 @@ impl Java26Rules {
                 if !state.bool_property("lit") {
                     return 0;
                 }
-                if (*wall && state.direction_property("facing") == Some(direction))
+                if (*wall && state.facing == Some(direction))
                     || (!*wall && direction == Direction::Up)
                 {
                     0
@@ -348,25 +410,21 @@ impl Java26Rules {
                 }
             }
             BlockBehavior::Repeater => {
-                if state.bool_property("powered")
-                    && state.direction_property("facing") == Some(direction)
-                {
+                if state.bool_property("powered") && state.facing == Some(direction) {
                     15
                 } else {
                     0
                 }
             }
             BlockBehavior::Comparator => {
-                if state.direction_property("facing") == Some(direction) {
+                if state.facing == Some(direction) {
                     self.comparator_outputs.get(&pos).copied().unwrap_or(0)
                 } else {
                     0
                 }
             }
             BlockBehavior::Observer => {
-                if state.bool_property("powered")
-                    && state.direction_property("facing") == Some(direction)
-                {
+                if state.bool_property("powered") && state.facing == Some(direction) {
                     15
                 } else {
                     0
@@ -417,7 +475,7 @@ impl Java26Rules {
                 }
             }
             BlockBehavior::TripwireHook => {
-                if state.direction_property("facing") == Some(direction) {
+                if state.facing == Some(direction) {
                     self.weak_signal(world, pos, state, direction)
                 } else {
                     0
@@ -470,6 +528,21 @@ impl Java26Rules {
     }
 
     fn wire_target_power(&mut self, world: &SparseWorld, pos: BlockPos) -> u8 {
+        if let Some(plan) = self.compiled.wire_plan(pos) {
+            let block_power = self.compiled_wire_block_power(world, &plan);
+            if block_power == 15 {
+                return 15;
+            }
+            let wire_power = plan
+                .wire_inputs
+                .iter()
+                .filter_map(|input| self.registry.state(world.get_block(*input)))
+                .map(wire_power_of)
+                .max()
+                .unwrap_or(0);
+            return block_power.max(wire_power.saturating_sub(1));
+        }
+
         let block_power = if let Some(power) = self.block_signal_cache.get(&pos) {
             *power
         } else {
@@ -518,6 +591,236 @@ impl Java26Rules {
         block_power.max(wire_power.saturating_sub(1))
     }
 
+    fn compiled_wire_block_power(
+        &self,
+        world: &SparseWorld,
+        plan: &WirePlan,
+    ) -> u8 {
+        let mut block_power = 0;
+        for input in &plan.block_inputs {
+            let Some(input_state) = self.registry.state(world.get_block(input.pos)) else {
+                continue;
+            };
+            let own_signal = if matches!(input_state.behavior, BlockBehavior::Wire) {
+                0
+            } else {
+                self.weak_signal(world, input.pos, input_state, input.direction)
+            };
+            let mut input_power = own_signal.max(input.constant_power);
+            if input_state.redstone_conductor {
+                for source in &input.conductor_sources {
+                    let Some(source_state) = self.registry.state(world.get_block(source.pos)) else {
+                        continue;
+                    };
+                    if !matches!(source_state.behavior, BlockBehavior::Wire) {
+                        input_power = input_power.max(self.direct_signal(
+                            world,
+                            source.pos,
+                            source.direction,
+                        ));
+                    }
+                    if input_power == 15 {
+                        break;
+                    }
+                }
+            }
+            block_power = block_power.max(input_power);
+            if block_power == 15 {
+                break;
+            }
+        }
+        block_power
+    }
+
+    fn refresh_compiled_electrical_target(
+        &mut self,
+        ctx: &mut EventContext<'_>,
+        pos: BlockPos,
+        state_id: BlockStateId,
+        behavior: BlockBehavior,
+        input: Option<NetworkInputPower>,
+    ) -> Result<bool, RulesError> {
+        match behavior {
+            BlockBehavior::Torch { .. } => {
+                self.refresh_compiled_torch(ctx, pos, state_id, input)?
+            }
+            BlockBehavior::Repeater => {
+                self.refresh_compiled_repeater(ctx, pos, state_id, input)?
+            }
+            BlockBehavior::Comparator => self.refresh_comparator(ctx, pos, state_id)?,
+            BlockBehavior::Lamp
+            | BlockBehavior::CopperBulb
+            | BlockBehavior::PoweredConsumer
+            | BlockBehavior::Door
+            | BlockBehavior::PoweredRail
+            | BlockBehavior::NoteBlock
+            | BlockBehavior::Bell
+            | BlockBehavior::Tnt => self.refresh_powered_consumer_with_input(
+                ctx,
+                pos,
+                state_id,
+                input.map(|input| input.default > 0),
+            )?,
+            _ => return Ok(false),
+        }
+        Ok(true)
+    }
+
+    fn apply_compiled_ordered_wire_events(
+        &mut self,
+        ctx: &mut EventContext<'_>,
+        events: &[CompiledOrderedWireEvent],
+    ) -> Result<(u64, u64), RulesError> {
+        let batch_writes = self.compiled.batch_wire_writes();
+        if batch_writes {
+            self.compiled_wire_overlay_epoch = self.compiled_wire_overlay_epoch.wrapping_add(1);
+            if self.compiled_wire_overlay_epoch == 0 {
+                self.compiled_wire_overlay_epochs.fill(0);
+                self.compiled_wire_overlay_epoch = 1;
+            }
+            self.compiled_wire_overlay_order.clear();
+        }
+        self.compiled_wire_overlay_active = batch_writes;
+        let mut wire_events = 0u64;
+        let mut boundary_events = 0u64;
+        let result = (|| {
+            for event in events.iter().copied() {
+                match event {
+                    CompiledOrderedWireEvent::Wire(transition) => {
+                        wire_events += 1;
+                        let transition = self.compiled.resolve_wire_transition(transition)?;
+                        if batch_writes {
+                            self.stage_compiled_wire_transition(ctx, transition)?;
+                        } else {
+                            self.apply_compiled_wire_transition(ctx, transition)?;
+                        }
+                    }
+                    CompiledOrderedWireEvent::Boundary {
+                        target,
+                        input,
+                    } => {
+                        boundary_events += 1;
+                        let (pos, source_pos) = self.compiled.resolve_boundary(target)?;
+                        let state_id = ctx.world.get_block(pos);
+                        let (behavior, is_rail, is_piston_head, handles_neighbor_update) = {
+                            let state = self.state(state_id)?;
+                            (
+                                state.behavior,
+                                state.is_rail,
+                                state.is_piston_head,
+                                state.handles_neighbor_update,
+                            )
+                        };
+                        if !self.refresh_compiled_electrical_target(
+                            ctx,
+                            pos,
+                            state_id,
+                            behavior,
+                            input,
+                        )? && (is_rail || is_piston_head || handles_neighbor_update)
+                        {
+                            ctx.neighbor_changed(NeighborUpdate {
+                                pos,
+                                source_pos,
+                                source_block: self.wire_kind.unwrap_or(BlockKindId(0)),
+                                orientation: None,
+                                moved_by_piston: false,
+                            });
+                        }
+                    }
+                }
+            }
+            if batch_writes {
+                self.flush_compiled_wire_overlay(ctx)?;
+            }
+            Ok(())
+        })();
+        self.compiled_wire_overlay_active = false;
+        self.compiled_wire_overlay_order.clear();
+        result.map(|()| (wire_events, boundary_events))
+    }
+
+    fn stage_compiled_wire_transition(
+        &mut self,
+        ctx: &mut EventContext<'_>,
+        transition: CompiledWireTransition,
+    ) -> Result<(), RulesError> {
+        debug_assert_ne!(transition.old_power, transition.new_power);
+        let wire = transition.wire as usize;
+        if self.compiled_wire_overlay_powers.len() <= wire {
+            self.compiled_wire_overlay_powers.resize(wire + 1, 0);
+            self.compiled_wire_overlay_epochs.resize(wire + 1, 0);
+        }
+        let first_transition = self.compiled_wire_overlay_epochs[wire]
+            != self.compiled_wire_overlay_epoch;
+        self.compiled_wire_overlay_epochs[wire] = self.compiled_wire_overlay_epoch;
+        self.compiled_wire_overlay_powers[wire] = transition.new_power;
+        if first_transition {
+            self.compiled_wire_overlay_order.push(transition.wire);
+            self.update_compiled_wire_observers(ctx, &transition)?;
+        }
+        Ok(())
+    }
+
+    fn update_compiled_wire_observers(
+        &mut self,
+        ctx: &mut EventContext<'_>,
+        transition: &CompiledWireTransition,
+    ) -> Result<(), RulesError> {
+        let end = transition.observer_start + u32::from(transition.observer_count);
+        for index in transition.observer_start..end {
+            let observer_pos = self.compiled.resolve_wire_observer(index)?;
+            self.update_observer_shape(ctx, observer_pos, transition.pos)?;
+        }
+        Ok(())
+    }
+
+    fn flush_compiled_wire_overlay(
+        &mut self,
+        ctx: &mut EventContext<'_>,
+    ) -> Result<(), RulesError> {
+        let wires = std::mem::take(&mut self.compiled_wire_overlay_order);
+        for wire in &wires {
+            let index = *wire as usize;
+            if self.compiled_wire_overlay_epochs[index] != self.compiled_wire_overlay_epoch {
+                continue;
+            }
+            let power = self.compiled_wire_overlay_powers[index];
+            let pos = self.compiled.resolve_wire_pos(*wire)?;
+            let state_id = ctx.world.get_block(pos);
+            let state = self.state(state_id)?;
+            if !matches!(state.behavior, BlockBehavior::Wire) || state.power == power {
+                continue;
+            }
+            let next = self.wire_state_with_power(state_id, power)?;
+            self.set_block(ctx, pos, next, "compiled_network_wire_batch")?;
+        }
+        self.compiled_wire_overlay_order = wires;
+        Ok(())
+    }
+
+    fn apply_compiled_wire_transition(
+        &mut self,
+        ctx: &mut EventContext<'_>,
+        transition: CompiledWireTransition,
+    ) -> Result<(), RulesError> {
+        let state_id = ctx.world.get_block(transition.pos);
+        let state = self.state(state_id)?.clone();
+        if !matches!(state.behavior, BlockBehavior::Wire)
+            || state.power == transition.new_power
+        {
+            return Ok(());
+        }
+        let next = self.changed_state(
+            state_id,
+            "power",
+            power_value(transition.new_power),
+        )?;
+        self.set_block(ctx, transition.pos, next, "compiled_network_wire")?;
+        self.update_compiled_wire_observers(ctx, &transition)?;
+        Ok(())
+    }
+
     fn update_wire(
         &mut self,
         ctx: &mut EventContext<'_>,
@@ -536,7 +839,7 @@ impl Java26Rules {
                 if old_power == new_power {
                     return Ok(());
                 }
-                let new_state = self.changed_state(state_id, "power", power_value(new_power))?;
+                let new_state = self.wire_state_with_power(state_id, new_power)?;
                 self.set_block(ctx, initial_pos, new_state, "default_wire")?;
                 self.update_observers_after_wire_power_change(ctx, initial_pos)?;
                 for candidate in default_wire_update_positions(initial_pos) {
@@ -568,7 +871,7 @@ impl Java26Rules {
                         turn_on.push_back((pos, orientation));
                     }
                     if next != old {
-                        let new_state = self.changed_state(state_id, "power", power_value(next))?;
+                        let new_state = self.wire_state_with_power(state_id, next)?;
                         self.set_state_and_notify(
                             ctx,
                             pos,
@@ -595,7 +898,7 @@ impl Java26Rules {
                     let old = state.power;
                     let target = self.wire_target_power(ctx.world, pos);
                     if target > old {
-                        let new_state = self.changed_state(state_id, "power", power_value(target))?;
+                        let new_state = self.wire_state_with_power(state_id, target)?;
                         self.set_state_and_notify(
                             ctx,
                             pos,
@@ -616,37 +919,91 @@ impl Java26Rules {
     }
 
     fn refresh_torch(
-        &mut self,
+        &self,
         ctx: &mut EventContext<'_>,
         pos: BlockPos,
         state_id: BlockStateId,
     ) -> Result<(), RulesError> {
-        let state = self.state(state_id)?.clone();
-        let attached = attached_block(pos, &state);
-        let should_be_lit = self.signal(ctx.world, attached, torch_input_direction(&state)) == 0;
-        if state.bool_property("lit") != should_be_lit && !ctx.has_scheduled_tick(pos, state.kind) {
+        let state = self.state(state_id)?;
+        if ctx.has_scheduled_tick(pos, state.kind) {
+            return Ok(());
+        }
+        let attached = attached_block(pos, state);
+        let should_be_lit = self.signal(ctx.world, attached, torch_input_direction(state)) == 0;
+        if state.lit != should_be_lit {
+            ctx.schedule_tick(pos, state.kind, 2, TickPriority::Normal);
+        }
+        Ok(())
+    }
+
+    fn refresh_compiled_torch(
+        &self,
+        ctx: &mut EventContext<'_>,
+        pos: BlockPos,
+        state_id: BlockStateId,
+        input: Option<NetworkInputPower>,
+    ) -> Result<(), RulesError> {
+        let Some(input) = input else {
+            return self.refresh_torch(ctx, pos, state_id);
+        };
+        let state = self.state(state_id)?;
+        if ctx.has_scheduled_tick(pos, state.kind) {
+            return Ok(());
+        }
+        let should_be_lit = input.default == 0;
+        if state.lit != should_be_lit {
             ctx.schedule_tick(pos, state.kind, 2, TickPriority::Normal);
         }
         Ok(())
     }
 
     fn refresh_repeater(
-        &mut self,
+        &self,
         ctx: &mut EventContext<'_>,
         pos: BlockPos,
         state_id: BlockStateId,
     ) -> Result<(), RulesError> {
-        let state = self.state(state_id)?.clone();
-        if self.repeater_locked(ctx.world, pos, &state) {
+        let state = self.state(state_id)?;
+        if ctx.has_scheduled_tick(pos, state.kind) {
             return Ok(());
         }
-        let should_power = self.diode_input(ctx.world, pos, &state) > 0;
-        if should_power != state.bool_property("powered")
-            && !ctx.has_scheduled_tick(pos, state.kind)
-        {
-            let priority = if self.diode_should_prioritize(ctx.world, pos, &state) {
+        if self.repeater_locked(ctx.world, pos, state) {
+            return Ok(());
+        }
+        let should_power = self.diode_input(ctx.world, pos, state) > 0;
+        if should_power != state.powered {
+            let priority = if self.diode_should_prioritize(ctx.world, pos, state) {
                 TickPriority::ExtremelyHigh
-            } else if state.bool_property("powered") {
+            } else if state.powered {
+                TickPriority::VeryHigh
+            } else {
+                TickPriority::High
+            };
+            let delay = state.int_property("delay").unwrap_or(1).clamp(1, 4) as u64 * 2;
+            ctx.schedule_tick(pos, state.kind, delay, priority);
+        }
+        Ok(())
+    }
+
+    fn refresh_compiled_repeater(
+        &self,
+        ctx: &mut EventContext<'_>,
+        pos: BlockPos,
+        state_id: BlockStateId,
+        input: Option<NetworkInputPower>,
+    ) -> Result<(), RulesError> {
+        let Some(input) = input else {
+            return self.refresh_repeater(ctx, pos, state_id);
+        };
+        let state = self.state(state_id)?;
+        if ctx.has_scheduled_tick(pos, state.kind) || input.side > 0 {
+            return Ok(());
+        }
+        let should_power = input.default > 0;
+        if should_power != state.powered {
+            let priority = if self.diode_should_prioritize(ctx.world, pos, state) {
+                TickPriority::ExtremelyHigh
+            } else if state.powered {
                 TickPriority::VeryHigh
             } else {
                 TickPriority::High
@@ -658,23 +1015,19 @@ impl Java26Rules {
     }
 
     fn diode_input(&self, world: &SparseWorld, pos: BlockPos, state: &StateDefinition) -> u8 {
-        let facing = state
-            .direction_property("facing")
-            .unwrap_or(Direction::North);
+        let facing = state.facing.unwrap_or(Direction::North);
         let rear = pos.relative(facing);
         let input = self.signal(world, rear, facing);
         let wire_power = self
             .state(world.get_block(rear))
             .ok()
             .filter(|state| matches!(state.behavior, BlockBehavior::Wire))
-            .map_or(0, |state| state.power);
+            .map_or(0, |state| self.visible_wire_power(rear, state));
         input.max(wire_power)
     }
 
     fn side_input(&self, world: &SparseWorld, pos: BlockPos, state: &StateDefinition) -> u8 {
-        let facing = state
-            .direction_property("facing")
-            .unwrap_or(Direction::North);
+        let facing = state.facing.unwrap_or(Direction::North);
         [facing.clockwise(), facing.counter_clockwise()]
             .into_iter()
             .map(|direction| {
@@ -696,7 +1049,7 @@ impl Java26Rules {
         };
         match state.behavior {
             BlockBehavior::RedstoneBlock => 15,
-            BlockBehavior::Wire => state.power,
+            BlockBehavior::Wire => self.visible_wire_power(pos, state),
             BlockBehavior::Lever
             | BlockBehavior::Button { .. }
             | BlockBehavior::Torch { .. }
@@ -714,10 +1067,19 @@ impl Java26Rules {
         }
     }
 
+    fn visible_wire_power(&self, pos: BlockPos, state: &StateDefinition) -> u8 {
+        if self.compiled_wire_overlay_active
+            && let Some(wire) = self.compiled.wire_index(pos).map(|wire| wire as usize)
+            && self.compiled_wire_overlay_epochs.get(wire).copied()
+                == Some(self.compiled_wire_overlay_epoch)
+        {
+            return self.compiled_wire_overlay_powers[wire];
+        }
+        state.power
+    }
+
     fn repeater_locked(&self, world: &SparseWorld, pos: BlockPos, state: &StateDefinition) -> bool {
-        let facing = state
-            .direction_property("facing")
-            .unwrap_or(Direction::North);
+        let facing = state.facing.unwrap_or(Direction::North);
         [facing.clockwise(), facing.counter_clockwise()]
             .into_iter()
             .any(|direction| {
@@ -745,9 +1107,7 @@ impl Java26Rules {
     }
 
     fn analog_input(&self, world: &SparseWorld, pos: BlockPos, state: &StateDefinition) -> u8 {
-        let facing = state
-            .direction_property("facing")
-            .unwrap_or(Direction::North);
+        let facing = state.facing.unwrap_or(Direction::North);
         let rear = pos.relative(facing);
         let rear_state = self.state(world.get_block(rear)).ok();
         if rear_state.is_some_and(comparator::has_analog_output) {
@@ -789,19 +1149,20 @@ impl Java26Rules {
     }
 
     fn refresh_comparator(
-        &mut self,
+        &self,
         ctx: &mut EventContext<'_>,
         pos: BlockPos,
         state_id: BlockStateId,
     ) -> Result<(), RulesError> {
-        let state = self.state(state_id)?.clone();
-        let output = self.comparator_output(ctx.world, pos, &state);
+        let state = self.state(state_id)?;
+        if ctx.has_scheduled_tick(pos, state.kind) {
+            return Ok(());
+        }
+        let output = self.comparator_output(ctx.world, pos, state);
         let old = self.comparator_outputs.get(&pos).copied().unwrap_or(0);
         let should_power = output > 0;
-        if (old != output || state.bool_property("powered") != should_power)
-            && !ctx.has_scheduled_tick(pos, state.kind)
-        {
-            let priority = if self.diode_should_prioritize(ctx.world, pos, &state) {
+        if old != output || state.powered != should_power {
+            let priority = if self.diode_should_prioritize(ctx.world, pos, state) {
                 TickPriority::High
             } else {
                 TickPriority::Normal
@@ -811,22 +1172,70 @@ impl Java26Rules {
         Ok(())
     }
 
+    fn cache_comparator_output(&mut self, pos: BlockPos, output: u8) {
+        self.comparator_outputs.insert(pos, output);
+        self.compiled.update_comparator_output(pos, output);
+    }
+
+    fn synchronize_comparator_cache(
+        &mut self,
+        world: &SparseWorld,
+        changes: &[BlockChange],
+    ) -> Result<(), RulesError> {
+        for change in changes {
+            let old_is_comparator = matches!(
+                self.state(change.old_state)?.behavior,
+                BlockBehavior::Comparator
+            );
+            let new_is_comparator = matches!(
+                self.state(change.new_state)?.behavior,
+                BlockBehavior::Comparator
+            );
+            match (old_is_comparator, new_is_comparator) {
+                (true, false) => {
+                    self.comparator_outputs.remove(&change.pos);
+                    self.compiled.remove_comparator_output(change.pos);
+                }
+                (false, true) => {
+                    let output = comparator_output_from_block_entity(world, change.pos);
+                    self.cache_comparator_output(change.pos, output);
+                }
+                (false, false) | (true, true) => {}
+            }
+        }
+        Ok(())
+    }
+
+    fn restore_interpreted_caches(&mut self, world: &SparseWorld) {
+        self.block_signal_cache.clear();
+        let outputs = self.compiled.comparator_outputs_snapshot();
+        self.comparator_outputs.clear();
+        for (pos, output) in outputs {
+            let is_comparator = self
+                .registry
+                .state(world.get_block(pos))
+                .is_some_and(|state| matches!(state.behavior, BlockBehavior::Comparator));
+            if is_comparator {
+                self.comparator_outputs.insert(pos, output);
+            }
+        }
+        self.compiled
+            .replace_comparator_outputs(&self.comparator_outputs);
+    }
+
     fn diode_should_prioritize(
         &self,
         world: &SparseWorld,
         pos: BlockPos,
         state: &StateDefinition,
     ) -> bool {
-        let output_direction = state
-            .direction_property("facing")
-            .unwrap_or(Direction::North)
-            .opposite();
+        let output_direction = state.facing.unwrap_or(Direction::North).opposite();
         let output_state = self.state(world.get_block(pos.relative(output_direction)));
         output_state.is_ok_and(|output_state| {
             matches!(
                 output_state.behavior,
                 BlockBehavior::Repeater | BlockBehavior::Comparator
-            ) && output_state.direction_property("facing") != Some(output_direction)
+            ) && output_state.facing != Some(output_direction)
         })
     }
 
@@ -869,8 +1278,18 @@ impl Java26Rules {
         pos: BlockPos,
         state_id: BlockStateId,
     ) -> Result<(), RulesError> {
+        self.refresh_powered_consumer_with_input(ctx, pos, state_id, None)
+    }
+
+    fn refresh_powered_consumer_with_input(
+        &mut self,
+        ctx: &mut EventContext<'_>,
+        pos: BlockPos,
+        state_id: BlockStateId,
+        powered: Option<bool>,
+    ) -> Result<(), RulesError> {
         let state = self.state(state_id)?.clone();
-        let powered = self.is_powered(ctx.world, pos);
+        let powered = powered.unwrap_or_else(|| self.is_powered(ctx.world, pos));
         match state.behavior {
             BlockBehavior::Lamp => {
                 if powered && !state.bool_property("lit") {
@@ -995,6 +1414,27 @@ impl Java26Rules {
     }
 }
 
+fn hash_value(value: &impl Hash) -> u64 {
+    let mut hasher = DefaultHasher::new();
+    value.hash(&mut hasher);
+    hasher.finish()
+}
+
+fn comparator_output_from_block_entity(world: &SparseWorld, pos: BlockPos) -> u8 {
+    world
+        .block_entity(pos)
+        .map_or(0, comparator_output_from_data)
+}
+
+fn comparator_output_from_data(data: &BlockEntityData) -> u8 {
+    data.fields
+        .get("comparator_output")
+        .or_else(|| data.fields.get("OutputSignal"))
+        .and_then(serde_json::Value::as_i64)
+        .unwrap_or(0)
+        .clamp(0, 15) as u8
+}
+
 #[derive(Default)]
 struct BlockPosHasher(u64);
 
@@ -1052,6 +1492,45 @@ impl BlockRules for Java26Rules {
             .is_some_and(|state| state.supported)
     }
 
+    fn configure_execution(
+        &mut self,
+        world: &SparseWorld,
+        config: ExecutionConfig,
+    ) -> Result<(), RulesError> {
+        self.compiled.configure(&self.registry, world, config)
+    }
+
+    fn prepare_execution(&mut self, world: &SparseWorld) -> Result<(), RulesError> {
+        self.compiled.prepare(&self.registry, world)
+    }
+
+    fn synchronize_world(
+        &mut self,
+        ctx: &mut EventContext<'_>,
+        changes: &[BlockChange],
+    ) -> Result<(), RulesError> {
+        self.synchronize_comparator_cache(ctx.world, changes)?;
+        let synchronization = self
+            .compiled
+            .synchronize(&self.registry, ctx.world, changes)?;
+        if synchronization.full_recompile || synchronization.recompiled_nodes > 0 {
+            debug!(
+                full = synchronization.full_recompile,
+                recompiled_nodes = synchronization.recompiled_nodes,
+                "同步编译红石拓扑"
+            );
+        }
+        if synchronization.fallback_to_interpreted {
+            self.restore_interpreted_caches(ctx.world);
+            debug!("编译执行器回退后已恢复解释器缓存");
+        }
+        Ok(())
+    }
+
+    fn execution_report(&self) -> ExecutionReport {
+        self.compiled.report()
+    }
+
     fn load_world(&mut self, world: &SparseWorld) -> Result<(), RulesError> {
         self.block_signal_cache.clear();
         self.comparator_outputs.clear();
@@ -1061,15 +1540,11 @@ impl BlockRules for Java26Rules {
             if !matches!(state.behavior, BlockBehavior::Comparator) {
                 continue;
             }
-            let output = data
-                .fields
-                .get("comparator_output")
-                .or_else(|| data.fields.get("OutputSignal"))
-                .and_then(serde_json::Value::as_i64)
-                .unwrap_or(0)
-                .clamp(0, 15) as u8;
+            let output = comparator_output_from_data(data);
             self.comparator_outputs.insert(*pos, output);
         }
+        self.compiled
+            .replace_comparator_outputs(&self.comparator_outputs);
         Ok(())
     }
 
@@ -1233,7 +1708,39 @@ impl BlockRules for Java26Rules {
             self.refresh_piston_head(ctx, update.pos, state, update)?;
         }
         match behavior {
-            BlockBehavior::Wire => self.update_wire(ctx, update.pos, update.orientation)?,
+            BlockBehavior::Wire => {
+                let mut events = std::mem::take(&mut self.compiled_wire_events);
+                let propagated = self.compiled.propagate_ordered(update.pos, &mut events);
+                let mut applied_counts = None;
+                let result = match propagated {
+                    Ok(true) => match self.apply_compiled_ordered_wire_events(ctx, &events) {
+                        Ok(counts) => {
+                            applied_counts = Some(counts);
+                            Ok(())
+                        }
+                        Err(error) => match self.compiled.fail_ordered_application(error) {
+                            Ok(()) => {
+                                self.restore_interpreted_caches(ctx.world);
+                                self.update_wire(ctx, update.pos, update.orientation)
+                            }
+                            Err(error) => Err(error),
+                        },
+                    },
+                    Ok(false) => {
+                        self.restore_interpreted_caches(ctx.world);
+                        self.update_wire(ctx, update.pos, update.orientation)
+                    }
+                    Err(error) => Err(error),
+                };
+                if result.is_ok()
+                    && let Some((wire, boundary)) = applied_counts
+                {
+                    self.compiled.record_ordered_events(wire, boundary);
+                }
+                events.clear();
+                self.compiled_wire_events = events;
+                result?;
+            }
             BlockBehavior::Torch { .. } => self.refresh_torch(ctx, update.pos, state_id)?,
             BlockBehavior::Repeater => self.refresh_repeater(ctx, update.pos, state_id)?,
             BlockBehavior::Comparator => self.refresh_comparator(ctx, update.pos, state_id)?,
@@ -1346,7 +1853,7 @@ impl BlockRules for Java26Rules {
             BlockBehavior::Comparator => {
                 let output = self.comparator_output(ctx.world, tick.pos, &state);
                 let old_output = self.comparator_outputs.get(&tick.pos).copied().unwrap_or(0);
-                self.comparator_outputs.insert(tick.pos, output);
+                self.cache_comparator_output(tick.pos, output);
                 if old_output != output || state.property("mode") == Some("compare") {
                     let powered = output > 0;
                     if powered != state.bool_property("powered") {
@@ -1518,6 +2025,7 @@ impl BlockRules for Java26Rules {
                     .clamp(0, 15);
                 let previous = block_entity_i64(ctx.world, pos, "last_open_count").unwrap_or(0);
                 if open != previous {
+                    self.compiled.update_source_output(pos, open as u8);
                     ctx.update_block_entity(pos, |data| {
                         data.fields
                             .insert("last_open_count".to_owned(), serde_json::Value::from(open));
@@ -1606,7 +2114,7 @@ impl Java26Rules {
             let direct_state_id = ctx.world.get_block(direct);
             let direct_state = self.state(direct_state_id)?.clone();
             if matches!(direct_state.behavior, BlockBehavior::Comparator)
-                && direct_state.direction_property("facing") == Some(direction)
+                && direct_state.facing == Some(direction)
             {
                 self.refresh_comparator(ctx, direct, direct_state_id)?;
             }
@@ -1620,7 +2128,7 @@ impl Java26Rules {
             let far_state_id = ctx.world.get_block(far);
             let far_state = self.state(far_state_id)?.clone();
             if matches!(far_state.behavior, BlockBehavior::Comparator)
-                && far_state.direction_property("facing") == Some(direction)
+                && far_state.facing == Some(direction)
             {
                 self.refresh_comparator(ctx, far, far_state_id)?;
             }
@@ -1805,7 +2313,7 @@ impl Java26Rules {
                 match state.behavior {
                     BlockBehavior::Tripwire => cursor = cursor.relative(direction),
                     BlockBehavior::TripwireHook
-                        if state.direction_property("facing") == Some(direction.opposite()) =>
+                        if state.facing == Some(direction.opposite()) =>
                     {
                         let mut next = state_id;
                         if !state.bool_property("attached") {
@@ -1955,12 +2463,9 @@ fn entities_on_block(
 
 fn attached_block(pos: BlockPos, state: &StateDefinition) -> BlockPos {
     match state.behavior {
-        BlockBehavior::Torch { wall: true } => pos.relative(
-            state
-                .direction_property("facing")
-                .unwrap_or(Direction::North)
-                .opposite(),
-        ),
+        BlockBehavior::Torch { wall: true } => {
+            pos.relative(state.facing.unwrap_or(Direction::North).opposite())
+        }
         _ => pos.relative(Direction::Down),
     }
 }
@@ -2065,9 +2570,7 @@ fn attached_direction(state: &StateDefinition) -> Direction {
     match state.property("face") {
         Some("ceiling") => Direction::Down,
         Some("floor") => Direction::Up,
-        _ => state
-            .direction_property("facing")
-            .unwrap_or(Direction::North),
+        _ => state.facing.unwrap_or(Direction::North),
     }
 }
 
@@ -2093,12 +2596,8 @@ fn update_torch_output_neighbors(
                 .with_side_bias(SideBias::Left)
                 .with_up(Direction::Up);
             Some(match state.behavior {
-                BlockBehavior::Torch { wall: true } => orientation.with_front(
-                    state
-                        .direction_property("facing")
-                        .unwrap_or(Direction::North)
-                        .opposite(),
-                ),
+                BlockBehavior::Torch { wall: true } => orientation
+                    .with_front(state.facing.unwrap_or(Direction::North).opposite()),
                 _ => orientation,
             })
         }
@@ -2122,10 +2621,9 @@ fn update_torch_output_neighbors(
 
 fn torch_input_direction(state: &StateDefinition) -> Direction {
     match state.behavior {
-        BlockBehavior::Torch { wall: true } => state
-            .direction_property("facing")
-            .unwrap_or(Direction::North)
-            .opposite(),
+        BlockBehavior::Torch { wall: true } => {
+            state.facing.unwrap_or(Direction::North).opposite()
+        }
         _ => Direction::Down,
     }
 }
@@ -2258,6 +2756,7 @@ fn direction_name(direction: Direction) -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::StateResolver;
 
     #[test]
     fn default_wire_positions_follow_java_hash_set_bucket_order() {
@@ -2274,6 +2773,38 @@ mod tests {
                 pos.relative(Direction::Up),
                 pos.relative(Direction::West),
             ]
+        );
+    }
+
+    #[test]
+    fn interpreted_cache_restore_uses_compiled_comparator_outputs() {
+        let mut registry = Java26Registry::new();
+        let properties = registry
+            .complete_state_properties("minecraft:comparator", &BTreeMap::new())
+            .unwrap();
+        let comparator = registry
+            .resolve_state("minecraft:comparator", &properties)
+            .unwrap();
+        let comparator_pos = BlockPos::ZERO;
+        let stale_pos = BlockPos::new(1, 0, 0);
+        let mut world = SparseWorld::new(registry.air_state());
+        world.set_block(comparator_pos, comparator).unwrap();
+        let mut rules = Java26Rules::new(registry);
+        rules.block_signal_cache.insert(BlockPos::new(2, 0, 0), 15);
+        rules.comparator_outputs.insert(stale_pos, 3);
+        rules.compiled.update_comparator_output(comparator_pos, 11);
+        rules.compiled.update_comparator_output(stale_pos, 7);
+
+        rules.restore_interpreted_caches(&world);
+
+        assert!(rules.block_signal_cache.is_empty());
+        assert_eq!(
+            rules.comparator_outputs,
+            BTreeMap::from([(comparator_pos, 11)])
+        );
+        assert_eq!(
+            rules.compiled.comparator_outputs_snapshot(),
+            rules.comparator_outputs
         );
     }
 }

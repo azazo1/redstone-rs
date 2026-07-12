@@ -1,11 +1,18 @@
 use std::collections::BTreeMap;
+use std::sync::{
+    Arc,
+    atomic::{AtomicUsize, Ordering},
+};
 
 use redstone_core::{
-    Action, BlockEntityChange, BlockEntityData, BlockEvent, BlockKindId, BlockPos, BlockRules,
-    BlockStateId, DeferredBlockChange, DeferredBlockEntityUpdate, EventContext, NeighborUpdate,
-    Probe, ProbeValue, RedstoneMode, RulesError, ScheduledTick, Simulation, SimulationConfig,
+    Action, BlockChange, BlockEntityChange, BlockEntityData, BlockEvent, BlockKindId, BlockPos,
+    BlockRules, BlockStateId, DeferredBlockChange, DeferredBlockEntityUpdate, EventContext,
+    ExecutionBackend, ExecutionConfig, ExecutionMode, ExecutionReport, NeighborUpdate, Probe,
+    ProbeValue, RedstoneMode, RulesError, ScheduledTick, Simulation, SimulationConfig,
     SimulationEnvironment, SimulationError, SparseWorld, TickPriority, TraceKind, WorldEvent,
 };
+use tracing::{Event, Level, Subscriber, field::Visit};
+use tracing_subscriber::{layer::Context, prelude::*};
 
 const AIR: BlockStateId = BlockStateId(0);
 const BLOCK: BlockStateId = BlockStateId(1);
@@ -20,6 +27,45 @@ struct MockRules {
     execute_block_events: bool,
     side_effect_order: Vec<(&'static str, BlockPos)>,
     environment_samples: Vec<(u64, u64, u8)>,
+    execution_configs: Vec<ExecutionConfig>,
+    pending_execution_config: Option<ExecutionConfig>,
+    execution_preparations: Vec<usize>,
+    execution_report: ExecutionReport,
+    supports_compiled: bool,
+    omit_fallback_reason: bool,
+    synchronize_follow_up: bool,
+    fail_after_action_change: bool,
+    synchronized_changes: Vec<Vec<BlockChange>>,
+    barrier_order: Vec<&'static str>,
+}
+
+struct FallbackWarningCounter(Arc<AtomicUsize>);
+
+impl<S> tracing_subscriber::Layer<S> for FallbackWarningCounter
+where
+    S: Subscriber,
+{
+    fn on_event(&self, event: &Event<'_>, _ctx: Context<'_, S>) {
+        if *event.metadata().level() != Level::WARN {
+            return;
+        }
+        let mut visitor = ReasonFieldVisitor::default();
+        event.record(&mut visitor);
+        if visitor.has_reason {
+            self.0.fetch_add(1, Ordering::Relaxed);
+        }
+    }
+}
+
+#[derive(Default)]
+struct ReasonFieldVisitor {
+    has_reason: bool,
+}
+
+impl Visit for ReasonFieldVisitor {
+    fn record_debug(&mut self, field: &tracing::field::Field, _value: &dyn std::fmt::Debug) {
+        self.has_reason |= field.name() == "reason";
+    }
 }
 
 impl BlockRules for MockRules {
@@ -45,6 +91,80 @@ impl BlockRules for MockRules {
 
     fn is_supported(&self, _state: BlockStateId) -> bool {
         true
+    }
+
+    fn configure_execution(
+        &mut self,
+        _world: &SparseWorld,
+        config: ExecutionConfig,
+    ) -> Result<(), RulesError> {
+        self.execution_configs.push(config);
+        self.pending_execution_config = Some(config);
+        self.execution_report.requested_mode = config.requested_mode;
+        if config.requested_mode == ExecutionMode::Compiled
+            && (config.trace_enabled || config.redstone_mode == RedstoneMode::Experimental)
+        {
+            return Err(RulesError::Message(
+                "test rules cannot use the compiled backend".to_owned(),
+            ));
+        }
+        Ok(())
+    }
+
+    fn prepare_execution(&mut self, world: &SparseWorld) -> Result<(), RulesError> {
+        self.execution_preparations.push(world.iter_blocks().count());
+        let config = self.pending_execution_config.unwrap_or_default();
+        self.execution_report.requested_mode = config.requested_mode;
+        self.execution_report.fallback_reason = None;
+        if self.supports_compiled
+            && !config.trace_enabled
+            && config.redstone_mode == RedstoneMode::Default
+            && config.requested_mode != ExecutionMode::Interpreted
+        {
+            self.execution_report.backend = ExecutionBackend::Compiled;
+            return Ok(());
+        }
+        self.execution_report.backend = ExecutionBackend::Interpreted;
+        if config.requested_mode == ExecutionMode::Compiled {
+            return Err(RulesError::Message(
+                "test rules cannot use the compiled backend".to_owned(),
+            ));
+        }
+        if config.requested_mode == ExecutionMode::Auto && !self.omit_fallback_reason {
+            self.execution_report.fallback_reason = Some(
+                if config.trace_enabled {
+                    "test trace requires interpreted execution"
+                } else if config.redstone_mode == RedstoneMode::Experimental {
+                    "test experimental mode requires interpreted execution"
+                } else {
+                    "test rules do not support compiled execution"
+                }
+                .to_owned(),
+            );
+        }
+        Ok(())
+    }
+
+    fn synchronize_world(
+        &mut self,
+        ctx: &mut EventContext<'_>,
+        changes: &[BlockChange],
+    ) -> Result<(), RulesError> {
+        self.barrier_order.push("sync");
+        self.synchronized_changes.push(changes.to_vec());
+        if self.synchronize_follow_up
+            && changes
+                .iter()
+                .any(|change| change.pos == BlockPos::ZERO && change.new_state == BLOCK)
+        {
+            let follow_up = BlockPos::new(1, 0, 0);
+            ctx.set_block(follow_up, BLOCK, "test_execution_sync")?;
+        }
+        Ok(())
+    }
+
+    fn execution_report(&self) -> ExecutionReport {
+        self.execution_report.clone()
     }
 
     fn initialize(
@@ -99,6 +219,18 @@ impl BlockRules for MockRules {
         if let Action::SetBlockEntity { pos, data } = action {
             ctx.set_block(*pos, BLOCK, "test_block_entity_state")?;
             ctx.set_block_entity(*pos, data.clone());
+            if self.fail_after_action_change {
+                return Err(RulesError::Message("test action failure".to_owned()));
+            }
+            if self.synchronize_follow_up {
+                ctx.neighbor_changed(NeighborUpdate {
+                    pos: pos.relative(redstone_core::Direction::East),
+                    source_pos: *pos,
+                    source_block: KIND,
+                    orientation: None,
+                    moved_by_piston: false,
+                });
+            }
         }
         if let Action::HitTarget { pos, .. } = action {
             ctx.queue_block_event(BlockEvent {
@@ -123,6 +255,7 @@ impl BlockRules for MockRules {
         update: NeighborUpdate,
         _current_state: BlockStateId,
     ) -> Result<(), RulesError> {
+        self.barrier_order.push("neighbor");
         self.neighbor_positions.push(update.pos);
         self.side_effect_order.push(("neighbor", update.pos));
         self.block_entity_order.push(("neighbor", update.pos));
@@ -725,4 +858,274 @@ fn environment_time_overflow_fails_before_advancing_the_simulation() {
         Err(SimulationError::EnvironmentTimeOverflow("game_time"))
     ));
     assert_eq!(simulation.current_tick().0, 0);
+}
+
+#[test]
+fn execution_configuration_defaults_to_auto() {
+    let simulation = Simulation::load(
+        MockRules::default(),
+        SparseWorld::new(AIR),
+        SimulationConfig::default(),
+    )
+    .unwrap();
+
+    assert_eq!(
+        simulation.rules().execution_configs,
+        [ExecutionConfig {
+            requested_mode: ExecutionMode::Auto,
+            redstone_mode: RedstoneMode::Default,
+            trace_enabled: false,
+            record_events: true,
+        }]
+    );
+    assert_eq!(
+        simulation.execution_report().requested_mode,
+        ExecutionMode::Auto
+    );
+    assert_eq!(
+        simulation.execution_report().backend,
+        ExecutionBackend::Interpreted
+    );
+}
+
+#[test]
+fn forced_compiled_mode_rejects_an_unsupported_rule_set() {
+    let mut simulation = Simulation::load(
+        MockRules::default(),
+        SparseWorld::new(AIR),
+        SimulationConfig {
+            execution_mode: ExecutionMode::Compiled,
+            ..SimulationConfig::default()
+        },
+    )
+    .unwrap();
+
+    assert!(simulation.rules().execution_preparations.is_empty());
+    let result = simulation.prepare_execution();
+
+    assert!(matches!(
+        result,
+        Err(SimulationError::Rules(RulesError::Message(message)))
+            if message == "test rules cannot use the compiled backend"
+    ));
+}
+
+#[test]
+fn auto_mode_supplies_a_fallback_reason_after_preparation() {
+    let mut simulation = Simulation::load(
+        MockRules {
+            omit_fallback_reason: true,
+            ..MockRules::default()
+        },
+        SparseWorld::new(AIR),
+        SimulationConfig::default(),
+    )
+    .unwrap();
+
+    assert_eq!(simulation.execution_report().fallback_reason, None);
+    let warning_count = Arc::new(AtomicUsize::new(0));
+    let subscriber = tracing_subscriber::registry()
+        .with(FallbackWarningCounter(Arc::clone(&warning_count)));
+    tracing::subscriber::with_default(subscriber, || simulation.prepare_execution().unwrap());
+
+    assert!(simulation.execution_report().fallback_reason.is_some());
+    assert_eq!(warning_count.load(Ordering::Relaxed), 1);
+}
+
+#[test]
+fn trace_reconfiguration_rolls_back_a_forced_compiled_backend() {
+    let mut simulation = Simulation::load(
+        MockRules {
+            supports_compiled: true,
+            ..MockRules::default()
+        },
+        SparseWorld::new(AIR),
+        SimulationConfig {
+            execution_mode: ExecutionMode::Compiled,
+            ..SimulationConfig::default()
+        },
+    )
+    .unwrap();
+    simulation.prepare_execution().unwrap();
+
+    let result = simulation.set_trace_enabled(true);
+
+    assert!(matches!(result, Err(SimulationError::Rules(_))));
+    assert_eq!(
+        simulation.execution_report().backend,
+        ExecutionBackend::Compiled
+    );
+    assert_eq!(
+        simulation
+            .rules()
+            .execution_configs
+            .iter()
+            .map(|config| config.trace_enabled)
+            .collect::<Vec<_>>(),
+        [false, true, false]
+    );
+    assert_eq!(simulation.rules().execution_preparations, [0, 0]);
+}
+
+#[test]
+fn setup_changes_are_applied_before_explicit_execution_preparation() {
+    let mut simulation = Simulation::load(
+        MockRules {
+            supports_compiled: true,
+            ..MockRules::default()
+        },
+        SparseWorld::new(AIR),
+        SimulationConfig::default(),
+    )
+    .unwrap();
+    let mut source = SparseWorld::new(AIR);
+    source.set_block(BlockPos::ZERO, BLOCK).unwrap();
+
+    simulation.initialize().unwrap();
+    simulation
+        .paste_world(
+            &source,
+            BlockPos::ZERO,
+            BlockPos::ZERO,
+            false,
+            false,
+        )
+        .unwrap();
+    simulation
+        .update_region(BlockPos::ZERO, BlockPos::ZERO)
+        .unwrap();
+
+    assert!(simulation.rules().execution_preparations.is_empty());
+    simulation.prepare_execution().unwrap();
+    simulation.prepare_execution().unwrap();
+    assert_eq!(simulation.rules().execution_preparations, [1]);
+    assert_eq!(
+        simulation.execution_report().backend,
+        ExecutionBackend::Compiled
+    );
+}
+
+#[test]
+fn step_and_apply_automatically_prepare_execution_once() {
+    let mut stepped = Simulation::load(
+        MockRules {
+            supports_compiled: true,
+            ..MockRules::default()
+        },
+        SparseWorld::new(AIR),
+        SimulationConfig::default(),
+    )
+    .unwrap();
+
+    stepped.step().unwrap();
+    stepped.step().unwrap();
+    assert_eq!(stepped.rules().execution_preparations, [0]);
+
+    let mut applied = Simulation::load(
+        MockRules {
+            supports_compiled: true,
+            ..MockRules::default()
+        },
+        SparseWorld::new(AIR),
+        SimulationConfig::default(),
+    )
+    .unwrap();
+
+    applied
+        .apply(Action::UseBlock {
+            pos: BlockPos::ZERO,
+        })
+        .unwrap();
+    assert_eq!(applied.rules().execution_preparations, [0]);
+}
+
+#[test]
+fn internal_block_changes_synchronize_before_neighbor_tasks_without_recording() {
+    let mut simulation = Simulation::load(
+        MockRules {
+            synchronize_follow_up: true,
+            ..MockRules::default()
+        },
+        SparseWorld::new(AIR),
+        SimulationConfig {
+            record_events: false,
+            ..SimulationConfig::default()
+        },
+    )
+    .unwrap();
+    let block_entity = BlockEntityData {
+        kind: "test:block_entity".to_owned(),
+        fields: BTreeMap::new(),
+    };
+
+    let delta = simulation
+        .step_with_actions(&[Action::SetBlockEntity {
+            pos: BlockPos::ZERO,
+            data: block_entity,
+        }])
+        .unwrap();
+
+    assert!(delta.events.is_empty());
+    assert_eq!(simulation.world().get_block(BlockPos::ZERO), BLOCK);
+    assert_eq!(
+        simulation.world().get_block(BlockPos::new(1, 0, 0)),
+        BLOCK
+    );
+    assert_eq!(
+        simulation.rules().synchronized_changes,
+        [
+            vec![BlockChange {
+                pos: BlockPos::ZERO,
+                old_state: AIR,
+                new_state: BLOCK,
+            }],
+            vec![BlockChange {
+                pos: BlockPos::new(1, 0, 0),
+                old_state: AIR,
+                new_state: BLOCK,
+            }],
+        ]
+    );
+    assert_eq!(
+        &simulation.rules().barrier_order[..3],
+        ["sync", "sync", "neighbor"]
+    );
+}
+
+#[test]
+fn internal_block_changes_synchronize_even_when_the_rule_callback_fails() {
+    let mut simulation = Simulation::load(
+        MockRules {
+            fail_after_action_change: true,
+            ..MockRules::default()
+        },
+        SparseWorld::new(AIR),
+        SimulationConfig {
+            record_events: false,
+            ..SimulationConfig::default()
+        },
+    )
+    .unwrap();
+    let result = simulation.step_with_actions(&[Action::SetBlockEntity {
+        pos: BlockPos::ZERO,
+        data: BlockEntityData {
+            kind: "test:block_entity".to_owned(),
+            fields: BTreeMap::new(),
+        },
+    }]);
+
+    assert!(matches!(
+        result,
+        Err(SimulationError::Rules(RulesError::Message(message)))
+            if message == "test action failure"
+    ));
+    assert_eq!(simulation.world().get_block(BlockPos::ZERO), BLOCK);
+    assert_eq!(
+        simulation.rules().synchronized_changes,
+        [vec![BlockChange {
+            pos: BlockPos::ZERO,
+            old_state: AIR,
+            new_state: BLOCK,
+        }]]
+    );
 }

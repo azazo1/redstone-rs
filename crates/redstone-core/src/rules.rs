@@ -3,11 +3,13 @@ use std::collections::{BTreeSet, VecDeque};
 use thiserror::Error;
 
 use crate::{
-    Action, BlockEntityChange, BlockEntityData, BlockEvent, BlockKindId, BlockPos, BlockStateId,
-    DeferredBlockChange, DeferredRuleTask, Direction, GameTick, MicroStep, NeighborTask,
-    NeighborUpdate, Probe, ProbeValue, RedstoneMode, ScheduledTick, SimulationPhase, SparseWorld,
-    TickPriority, TraceEvent, TraceKind, WorldError, WorldEvent,
+    Action, BlockChange, BlockEntityChange, BlockEntityData, BlockEvent, BlockKindId, BlockPos,
+    BlockStateId, DeferredBlockChange, DeferredRuleTask, Direction, ExecutionConfig,
+    ExecutionReport, GameTick, MicroStep, NeighborTask, NeighborUpdate, Probe, ProbeValue,
+    RedstoneMode, ScheduledTick, SimulationPhase, SparseWorld, TickPriority, TraceEvent, TraceKind,
+    WorldError, WorldEvent,
 };
+use crate::scheduler::ScheduledTickQueue;
 
 pub trait BlockRules: Send {
     fn version(&self) -> &str;
@@ -19,6 +21,30 @@ pub trait BlockRules: Send {
     fn block_name(&self, state: BlockStateId) -> &str;
 
     fn is_supported(&self, state: BlockStateId) -> bool;
+
+    fn configure_execution(
+        &mut self,
+        _world: &SparseWorld,
+        _config: ExecutionConfig,
+    ) -> Result<(), RulesError> {
+        Ok(())
+    }
+
+    fn prepare_execution(&mut self, _world: &SparseWorld) -> Result<(), RulesError> {
+        Ok(())
+    }
+
+    fn synchronize_world(
+        &mut self,
+        _ctx: &mut EventContext<'_>,
+        _changes: &[BlockChange],
+    ) -> Result<(), RulesError> {
+        Ok(())
+    }
+
+    fn execution_report(&self) -> ExecutionReport {
+        ExecutionReport::default()
+    }
 
     fn load_world(&mut self, _world: &SparseWorld) -> Result<(), RulesError> {
         Ok(())
@@ -127,13 +153,13 @@ pub struct EventContext<'a> {
     micro_step: &'a mut MicroStep,
     next_sub_tick_order: &'a mut i64,
     random_state: &'a mut u64,
-    scheduled_ticks: &'a mut BTreeSet<ScheduledTick>,
-    scheduled_keys: &'a mut BTreeSet<(BlockPos, BlockKindId)>,
+    scheduled_ticks: &'a mut ScheduledTickQueue,
     block_events: &'a mut VecDeque<BlockEvent>,
     block_event_keys: &'a mut BTreeSet<BlockEvent>,
     trace: Option<&'a mut Vec<TraceEvent>>,
     events: Option<&'a mut Vec<WorldEvent>>,
     neighbor_tasks: &'a mut NeighborTasks,
+    block_changes: &'a mut Vec<BlockChange>,
     touched_block_entities: Vec<BlockPos>,
 }
 
@@ -150,14 +176,15 @@ impl<'a> EventContext<'a> {
         micro_step: &'a mut MicroStep,
         next_sub_tick_order: &'a mut i64,
         random_state: &'a mut u64,
-        scheduled_ticks: &'a mut BTreeSet<ScheduledTick>,
-        scheduled_keys: &'a mut BTreeSet<(BlockPos, BlockKindId)>,
+        scheduled_ticks: &'a mut ScheduledTickQueue,
         block_events: &'a mut VecDeque<BlockEvent>,
         block_event_keys: &'a mut BTreeSet<BlockEvent>,
         trace: Option<&'a mut Vec<TraceEvent>>,
         events: Option<&'a mut Vec<WorldEvent>>,
         neighbor_tasks: &'a mut NeighborTasks,
+        block_changes: &'a mut Vec<BlockChange>,
     ) -> Self {
+        block_changes.clear();
         Self {
             world,
             mode,
@@ -170,12 +197,12 @@ impl<'a> EventContext<'a> {
             next_sub_tick_order,
             random_state,
             scheduled_ticks,
-            scheduled_keys,
             block_events,
             block_event_keys,
             trace,
             events,
             neighbor_tasks,
+            block_changes,
             touched_block_entities: Vec::new(),
         }
     }
@@ -201,22 +228,15 @@ impl<'a> EventContext<'a> {
         let old_block_entity = self.world.block_entity(pos).cloned();
         let old_state = self.world.set_block(pos, state)?;
         if old_state != state {
-            self.record_event(WorldEvent::Block {
-                change: crate::BlockChange {
-                    pos,
-                    old_state,
-                    new_state: state,
-                },
-            });
-            if self.trace.is_some() {
-                self.push_trace(TraceKind::BlockChanged {
-                    pos,
-                    old_state,
-                    new_state: state,
-                    cause: cause.into(),
-                });
+            let change = BlockChange {
+                pos,
+                old_state,
+                new_state: state,
+            };
+            self.record_block_change(change, cause);
+            if old_block_entity.is_some() {
+                self.touched_block_entities.push(pos);
             }
-            self.touched_block_entities.push(pos);
         }
         if let Some(data) = old_block_entity
             && self.world.block_entity(pos).is_none()
@@ -224,7 +244,28 @@ impl<'a> EventContext<'a> {
             self.record_event(WorldEvent::BlockEntity {
                 change: BlockEntityChange::Remove { pos, data },
             });
-            self.touched_block_entities.push(pos);
+        }
+        Ok(old_state)
+    }
+
+    pub fn set_block_state_only(
+        &mut self,
+        pos: BlockPos,
+        state: BlockStateId,
+        cause: impl Into<String>,
+    ) -> Result<BlockStateId, RulesError> {
+        debug_assert!(self.world.block_entity(pos).is_none());
+        let old_state = self.world.set_block(pos, state)?;
+        debug_assert!(self.world.block_entity(pos).is_none());
+        if old_state != state {
+            self.record_block_change(
+                BlockChange {
+                    pos,
+                    old_state,
+                    new_state: state,
+                },
+                cause,
+            );
         }
         Ok(old_state)
     }
@@ -293,10 +334,6 @@ impl<'a> EventContext<'a> {
         delay: u64,
         priority: TickPriority,
     ) -> bool {
-        let key = (pos, block);
-        if !self.scheduled_keys.insert(key) {
-            return false;
-        }
         let tick = ScheduledTick {
             block,
             pos,
@@ -304,8 +341,10 @@ impl<'a> EventContext<'a> {
             priority,
             sub_tick_order: *self.next_sub_tick_order,
         };
+        if !self.scheduled_ticks.insert(tick) {
+            return false;
+        }
         *self.next_sub_tick_order += 1;
-        self.scheduled_ticks.insert(tick);
         self.push_trace(TraceKind::ScheduledTickQueued {
             pos,
             block,
@@ -317,7 +356,7 @@ impl<'a> EventContext<'a> {
     }
 
     pub fn has_scheduled_tick(&self, pos: BlockPos, block: BlockKindId) -> bool {
-        self.scheduled_keys.contains(&(pos, block))
+        self.scheduled_ticks.contains(pos, block)
     }
 
     pub fn schedule_tick_after_neighbors(
@@ -458,6 +497,44 @@ impl<'a> EventContext<'a> {
 
     pub(crate) fn take_touched_block_entities(&mut self) -> Vec<BlockPos> {
         std::mem::take(&mut self.touched_block_entities)
+    }
+
+    pub(crate) fn take_block_changes(&mut self) -> Vec<BlockChange> {
+        std::mem::take(self.block_changes)
+    }
+
+    pub(crate) fn has_block_changes(&self) -> bool {
+        !self.block_changes.is_empty()
+    }
+
+    pub(crate) fn recycle_block_changes(&mut self, mut changes: Vec<BlockChange>) {
+        changes.clear();
+        if self.block_changes.is_empty()
+            && changes.capacity() > self.block_changes.capacity()
+        {
+            *self.block_changes = changes;
+        }
+    }
+
+    fn record_block_change(
+        &mut self,
+        change: BlockChange,
+        cause: impl Into<String>,
+    ) {
+        if let Some(events) = self.events.as_mut() {
+            events.push(WorldEvent::Block {
+                change: change.clone(),
+            });
+        }
+        if self.trace.is_some() {
+            self.push_trace(TraceKind::BlockChanged {
+                pos: change.pos,
+                old_state: change.old_state,
+                new_state: change.new_state,
+                cause: cause.into(),
+            });
+        }
+        self.block_changes.push(change);
     }
 
     fn record_event(&mut self, event: WorldEvent) {

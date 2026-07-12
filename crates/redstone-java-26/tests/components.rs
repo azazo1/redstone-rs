@@ -221,7 +221,7 @@ fn comparator_prioritizes_a_tick_when_its_output_faces_another_diode() {
         .unwrap();
     let rules = Java26Rules::new(registry);
     let mut simulation = Simulation::load(rules, world, SimulationConfig::default()).unwrap();
-    simulation.set_trace_enabled(true);
+    simulation.set_trace_enabled(true).unwrap();
 
     simulation.initialize().unwrap();
 
@@ -271,7 +271,7 @@ fn repeater_uses_extremely_high_priority_before_a_crossed_diode() {
         .unwrap();
     let rules = Java26Rules::new(registry);
     let mut simulation = Simulation::load(rules, world, SimulationConfig::default()).unwrap();
-    simulation.set_trace_enabled(true);
+    simulation.set_trace_enabled(true).unwrap();
 
     simulation.initialize().unwrap();
 
@@ -631,7 +631,7 @@ fn moved_observer_schedules_an_air_update_after_settling() {
     let rules = Java26Rules::new(registry);
     let mut simulation = Simulation::load(rules, world, SimulationConfig::default())
         .unwrap();
-    simulation.set_trace_enabled(true);
+    simulation.set_trace_enabled(true).unwrap();
     simulation.initialize().unwrap();
 
     simulation.step().unwrap();
@@ -696,7 +696,7 @@ fn observer_detects_piston_base_extension() {
     let rules = Java26Rules::new(registry);
     let mut simulation = Simulation::load(rules, world, SimulationConfig::default())
         .unwrap();
-    simulation.set_trace_enabled(true);
+    simulation.set_trace_enabled(true).unwrap();
     simulation.initialize().unwrap();
 
     simulation
@@ -749,7 +749,7 @@ fn observer_detects_piston_base_retraction() {
     let rules = Java26Rules::new(registry);
     let mut simulation = Simulation::load(rules, world, SimulationConfig::default())
         .unwrap();
-    simulation.set_trace_enabled(true);
+    simulation.set_trace_enabled(true).unwrap();
     simulation.initialize().unwrap();
 
     simulation
@@ -799,7 +799,7 @@ fn observer_detects_piston_head_removal() {
     let rules = Java26Rules::new(registry);
     let mut simulation = Simulation::load(rules, world, SimulationConfig::default())
         .unwrap();
-    simulation.set_trace_enabled(true);
+    simulation.set_trace_enabled(true).unwrap();
     simulation.initialize().unwrap();
 
     simulation
@@ -848,7 +848,7 @@ fn piston_destroyed_repeater_notifies_with_the_removed_block_kind() {
     let rules = Java26Rules::new(registry);
     let mut simulation = Simulation::load(rules, world, SimulationConfig::default())
         .unwrap();
-    simulation.set_trace_enabled(true);
+    simulation.set_trace_enabled(true).unwrap();
 
     simulation.initialize().unwrap();
     simulation.step().unwrap();
@@ -1018,7 +1018,7 @@ fn removing_active_observer_refreshes_output_neighbors() {
     let rules = Java26Rules::new(registry);
     let mut simulation = Simulation::load(rules, world, SimulationConfig::default())
         .unwrap();
-    simulation.set_trace_enabled(true);
+    simulation.set_trace_enabled(true).unwrap();
 
     simulation
         .step_with_actions(&[Action::SetBlock {
@@ -1187,7 +1187,7 @@ fn observer_powers_a_quasi_connected_piston_through_slime() {
     let rules = Java26Rules::new(registry);
     let mut simulation = Simulation::load(rules, world, SimulationConfig::default())
         .unwrap();
-    simulation.set_trace_enabled(true);
+    simulation.set_trace_enabled(true).unwrap();
     simulation.add_probe(
         "slime_signal",
         Probe::Signal {
@@ -1383,7 +1383,7 @@ fn dispenser_consumes_registered_items_but_preserves_unknown_items() {
         let rules = Java26Rules::new(registry);
         let mut simulation = Simulation::load(rules, world, SimulationConfig::default())
             .unwrap();
-        simulation.set_trace_enabled(true);
+        simulation.set_trace_enabled(true).unwrap();
         simulation.initialize().unwrap();
 
         simulation
@@ -2948,7 +2948,7 @@ fn piston_moves_slime_branches_without_sticking_to_honey() {
     let rules = Java26Rules::new(registry);
     let mut simulation = Simulation::load(rules, world, SimulationConfig::default())
         .unwrap();
-    simulation.set_trace_enabled(true);
+    simulation.set_trace_enabled(true).unwrap();
     simulation.initialize().unwrap();
 
     simulation.step().unwrap();

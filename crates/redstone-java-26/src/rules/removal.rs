@@ -71,10 +71,7 @@ impl Java26Rules {
             BlockBehavior::TripwireHook
                 if state.bool_property("attached") || state.bool_property("powered") =>
             {
-                let front = state
-                    .direction_property("facing")
-                    .unwrap_or(Direction::North)
-                    .opposite();
+                let front = state.facing.unwrap_or(Direction::North).opposite();
                 ctx.update_neighbors(pos, state.kind, None, None);
                 ctx.update_neighbors(pos.relative(front), state.kind, None, None);
             }

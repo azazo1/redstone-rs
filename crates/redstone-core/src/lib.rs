@@ -1,6 +1,8 @@
 mod environment;
 mod event;
+mod execution;
 mod rules;
+mod scheduler;
 mod simulation;
 mod trace;
 mod types;
@@ -11,6 +13,7 @@ pub use event::{
     BlockEvent, DeferredBlockChange, DeferredBlockEntityUpdate, DeferredRuleTask, NeighborTask,
     NeighborUpdate, ScheduledTick, TickPriority,
 };
+pub use execution::{ExecutionBackend, ExecutionConfig, ExecutionMode, ExecutionReport};
 pub use rules::{BlockRules, EventContext, RulesError};
 pub use simulation::{Simulation, SimulationConfig, SimulationError, Snapshot, WorldPaste};
 pub use trace::{TraceError, TraceLog};

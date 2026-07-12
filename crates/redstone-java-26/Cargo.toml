@@ -9,8 +9,10 @@ autotests = false
 [dependencies]
 indexmap.workspace = true
 redstone-core = { path = "../redstone-core" }
+rustc-hash.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+smallvec.workspace = true
 thiserror.workspace = true
 tracing.workspace = true
 

@@ -228,9 +228,7 @@ impl Java26Rules {
         action: PullAction,
     ) -> Result<bool, RulesError> {
         let hopper = ContainerRef::Block(pos);
-        let facing = state
-            .direction_property("facing")
-            .unwrap_or(Direction::Down);
+        let facing = state.facing.unwrap_or(Direction::Down);
         let target = self.resolve_container(ctx, pos.relative(facing), block_center(pos.relative(facing)));
         let mut pushed = false;
         if !self.container_inventory(session, ctx.world, &hopper).is_empty()

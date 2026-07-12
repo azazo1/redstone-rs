@@ -7,10 +7,10 @@
 ## Workspace
 
 - `redstone-core`: 稀疏世界, 事件调度, 邻居更新, 探针, delta 和轨迹.
-- `redstone-java-26`: Java `26.1.2` 状态注册表和红石规则.
+- `redstone-java-26`: Java `26.1.2` 状态注册表, 红石规则和混合编译执行器.
 - `redstone-io`: Litematic, 原版 structure NBT 和 TOML 场景.
 - `redstone-replay-26`: Replay Mod MCPR 容器和 Java `26.1.2` 网络协议编码.
-- `redstone-cli`: `inspect`, `run`, `test` 和 `trace` 命令.
+- `redstone-cli`: `inspect`, `run`, `test`, `trace`, `bench` 和 `convert` 命令.
 - `tools/vanilla-oracle`: 外部 Java 参考探针的调用协议.
 
 ## 文档
@@ -51,17 +51,18 @@
 | 能力 | `redstone-rs` | Minecraft Java 26.1.2 | MCHPRS 普通引擎 | MCHPRS Redpiler | [3D Redstone Simulator `d52c5ca0`](https://github.com/GuilhermeRossato/3D-Redstone-Simulator/commit/d52c5ca09ad62f18abdcccc9b6eb18cae12b5478) |
 | --- | --- | --- | --- | --- | --- |
 | Java 规则目标 | 26.1.2, default/experimental 更新顺序 | 26.1.2 原版 | 1.20.4 计算红石子集 | 1.20.4 编译图子集 | 无版本化红石执行规则 |
+| 执行策略 | `auto`, `interpreted`, `compiled`, 编译器只加速电气传播 | 原版解释执行 | 解释执行 | 预编译连接图 | 浏览器逻辑 |
 | 真实三维线路 | 支持 | 支持 | 支持 | 编译三维世界中的连接 | 支持三维世界和方块外观 |
 | wire, torch, repeater, comparator | 支持 | 支持 | 支持 | 支持编译后的节点子集 | 未实现传播 |
-| 普通/黏性活塞, QC, zero-tick, 黏连分支 | 支持, 方块实体移动仍有限制 | 支持 | 不支持活塞行为 | 不支持 | 未实现, 位于计划中 |
+| 普通/黏性活塞, QC, zero-tick, 黏连分支 | 支持, 编译模式仍由 Java 规则处理, 方块实体移动仍有限制 | 支持 | 不支持活塞行为 | 不支持 | 未实现, 位于计划中 |
 | 观察者 | 支持 | 支持 | 不支持主动行为 | 不支持 | 未实现 |
 | 容器, hopper 和实体传感器 | 最小容器转移和实体模型 | 完整游戏规则 | 比较器容器和玩家交互子集, 无通用实体模型 | 容器常量和输入节点子集 | 无红石执行模型 |
 | 世界及 schematic 输入 | 世界目录/ZIP, Litematic, Sponge, vanilla structure | 世界和 oracle 生成的 structure | plot 和 Sponge schematic | 从 plot/选区编译 | 自有浏览器世界持久化 |
 | 场景动作和断言 | TOML action, probe, expectation | GameTest 适配全部场景动作和 probe | 基准适配器支持按钮和最终灯断言 | 同左 | 无可复现红石断言协议 |
-| 运行中修改结构 | action 和定时 paste | 支持 | WorldEdit 和玩家修改 | 修改会 reset 并停用 Redpiler | 支持浏览器放置/破坏方块 |
-| 回放和可视化 | Replay Mod MCPR, JSONL, VCD | 原版客户端, oracle JSONL | Minecraft 客户端 | Minecraft 客户端 | 浏览器三维可视化和世界历史 |
+| 运行中修改结构 | action, 定时 paste 和编译拓扑同步, 失败时按执行模式回退或报错 | 支持 | WorldEdit 和玩家修改 | 修改会 reset 并停用 Redpiler | 支持浏览器放置/破坏方块 |
+| 回放和可视化 | Replay Mod MCPR 可保留 compiled, JSONL/VCD 使用 interpreted | 原版客户端, oracle JSONL | Minecraft 客户端 | Minecraft 客户端 | 浏览器三维可视化和世界历史 |
 
-MCHPRS 普通引擎确实在三维世界中计算红石, 但当前红石执行入口没有活塞和观察者行为. Redpiler 通过预搜索 wire 路径和保存连接换取高吞吐, 运行时改建会使编译结果失效. 3D Redstone Simulator 当前主要是浏览器三维世界项目, 其 README 把 redstone simulation 和 piston simulation 列为后续目标, 因而不进入性能表.
+`redstone-rs` 的 compiled 后端保留 `SparseWorld`, 计划刻, 方块事件和 Java 26.1.2 规则作为权威状态, 编译图只加速电气传播. 活塞及其动态拓扑变化仍通过现有 Java 规则执行并同步回编译拓扑. MCHPRS 普通引擎确实在三维世界中计算红石, 但当前红石执行入口没有活塞和观察者行为. Redpiler 通过预搜索 wire 路径和保存连接换取高吞吐, 运行时改建会使编译结果失效. 3D Redstone Simulator 当前主要是浏览器三维世界项目, 其 README 把 redstone simulation 和 piston simulation 列为后续目标, 因而不进入性能表.
 
 ## 构建和测试
 
@@ -73,6 +74,25 @@ just test
 ```
 
 > 注: 如果 build 失败, 请删除 `assets/libraries` 文件夹之后重新执行 `just generate-reports && just build`.
+
+### 执行器选择
+
+`run`, `test`, `trace` 和 `bench` 接受 `--engine auto|interpreted|compiled`, 默认使用 `auto`. 执行器是 CLI 和库运行策略, 不写入场景 TOML.
+
+- `auto` 尝试编译电气传播图. 诊断模式不兼容时记录 warning 并使用解释器, 构图或动态拓扑同步失败时记录 warning 并永久回退到解释器.
+- `interpreted` 始终使用 Java 26.1.2 规则解释执行.
+- `compiled` 强制使用编译后端, 用于差分和性能测试. 遇到无法安全编译或同步的状态时直接返回错误.
+- trace, VCD, Java oracle 和 experimental redstone 需要完整诊断或特定更新顺序. `auto` 会改用 interpreted, `compiled` 会明确报错.
+- Replay MCPR 读取有序 `WorldDelta`, 不要求微轨迹, 因而录制 Replay 本身不会停用 compiled 后端.
+
+```shell
+cargo run --release -p redstone-cli -- run assets/scenarios/flying-machine.toml --engine auto
+cargo run --release -p redstone-cli -- test assets/scenarios/flying-machine.toml --engine compiled
+cargo run --release -p redstone-cli -- trace assets/scenarios/flying-machine.toml --engine interpreted --output /tmp/flying-machine.jsonl
+cargo run --release -p redstone-cli -- bench --engine auto
+```
+
+运行摘要会同时输出请求模式和实际后端, 回退原因, `compile_ms`, 节点和边数量, 编译/解释更新数, compiled 命中率, 局部/全量重编译次数, 重编译节点数和 `recompile_ms`.
 
 常用结构检查和转换命令:
 

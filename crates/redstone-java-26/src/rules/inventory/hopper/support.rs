@@ -203,7 +203,7 @@ pub(super) fn double_chest(
     if chest_type == "single" {
         return None;
     }
-    let facing = state.direction_property("facing")?;
+    let facing = state.facing?;
     let partner_direction = if chest_type == "left" {
         facing.clockwise()
     } else {
@@ -212,7 +212,7 @@ pub(super) fn double_chest(
     let partner_pos = pos.relative(partner_direction);
     let partner = rules.state(world.get_block(partner_pos)).ok()?;
     if partner.name != state.name
-        || partner.direction_property("facing") != Some(facing)
+        || partner.facing != Some(facing)
         || partner.property("type") == Some(chest_type)
         || world.block_entity(partner_pos).is_none()
     {

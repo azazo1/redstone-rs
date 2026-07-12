@@ -6,10 +6,11 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result, anyhow, bail};
-use clap::{Parser, Subcommand};
+use clap::{Parser, Subcommand, ValueEnum};
 use redstone_core::{
-    Action, BlockPos, BlockStateId, GameTick, ProbeValue, RedstoneMode, Simulation,
-    SimulationConfig, SparseWorld, TraceEvent, TraceKind, WorldPaste,
+    Action, BlockPos, BlockStateId, ExecutionBackend, ExecutionMode, ExecutionReport, GameTick,
+    ProbeValue, RedstoneMode, Simulation, SimulationConfig, SparseWorld, TraceEvent, TraceKind,
+    WorldPaste,
 };
 use redstone_io::{
     InitializationMode, Scenario, ScenarioActionKind, StructureLoader, StructureStateResolver,
@@ -38,6 +39,24 @@ mod replay_camera;
 struct Cli {
     #[command(subcommand)]
     command: Command,
+}
+
+#[derive(Clone, Copy, Debug, Default, ValueEnum)]
+enum EngineArg {
+    #[default]
+    Auto,
+    Interpreted,
+    Compiled,
+}
+
+impl From<EngineArg> for ExecutionMode {
+    fn from(value: EngineArg) -> Self {
+        match value {
+            EngineArg::Auto => Self::Auto,
+            EngineArg::Interpreted => Self::Interpreted,
+            EngineArg::Compiled => Self::Compiled,
+        }
+    }
 }
 
 #[derive(Debug, Subcommand)]
@@ -94,6 +113,8 @@ enum Command {
     },
     Run {
         scenario: PathBuf,
+        #[arg(long, value_enum, default_value = "auto")]
+        engine: EngineArg,
         #[arg(long)]
         replay: Option<PathBuf>,
         #[arg(
@@ -111,6 +132,8 @@ enum Command {
     },
     Test {
         path: PathBuf,
+        #[arg(long, value_enum, default_value = "auto")]
+        engine: EngineArg,
         #[arg(long)]
         replay: Option<PathBuf>,
         #[arg(
@@ -126,12 +149,16 @@ enum Command {
     },
     Trace {
         scenario: PathBuf,
+        #[arg(long, value_enum, default_value = "auto")]
+        engine: EngineArg,
         #[arg(long)]
         output: PathBuf,
         #[arg(long)]
         vcd: Option<PathBuf>,
     },
     Bench {
+        #[arg(long, value_enum, default_value = "auto")]
+        engine: EngineArg,
         #[arg(long, default_value_t = 1_000_000)]
         blocks: usize,
         #[arg(long, default_value_t = 10_000)]
@@ -201,6 +228,7 @@ async fn main() -> Result<()> {
         ),
         Command::Run {
             scenario,
+            engine,
             replay,
             replay_anim,
             trace,
@@ -213,9 +241,11 @@ async fn main() -> Result<()> {
                 trace.as_deref(),
                 vcd.as_deref(),
                 allow_static_fallback,
+                engine,
             ),
         Command::Test {
             path,
+            engine,
             replay,
             replay_anim,
             oracle,
@@ -227,19 +257,30 @@ async fn main() -> Result<()> {
                 replay_anim,
                 oracle,
                 allow_static_fallback,
+                engine,
             )
             .await
         }
         Command::Trace {
             scenario,
+            engine,
             output,
             vcd,
-        } => run(&scenario, None, false, Some(&output), vcd.as_deref(), false),
+        } => run(
+            &scenario,
+            None,
+            false,
+            Some(&output),
+            vcd.as_deref(),
+            false,
+            engine,
+        ),
         Command::Bench {
+            engine,
             blocks,
             active,
             ticks,
-        } => bench(blocks, active, ticks),
+        } => bench(blocks, active, ticks, engine),
         Command::Convert {
             input,
             output,
@@ -254,7 +295,7 @@ async fn main() -> Result<()> {
     }
 }
 
-fn bench(blocks: usize, active: usize, ticks: usize) -> Result<()> {
+fn bench(blocks: usize, active: usize, ticks: usize, engine: EngineArg) -> Result<()> {
     if blocks == 0 || ticks == 0 {
         bail!("blocks 和 ticks 必须大于 0");
     }
@@ -296,7 +337,15 @@ fn bench(blocks: usize, active: usize, ticks: usize) -> Result<()> {
     let build_elapsed = started.elapsed();
     let sections = world.section_count();
     let rules = Java26Rules::new(registry);
-    let mut simulation = Simulation::load(rules, world, SimulationConfig::default())?;
+    let mut simulation = Simulation::load(
+        rules,
+        world,
+        SimulationConfig {
+            execution_mode: engine.into(),
+            ..SimulationConfig::default()
+        },
+    )?;
+    simulation.prepare_execution()?;
     let mut samples = Vec::with_capacity(ticks);
     info!(blocks, active, sections, ?build_elapsed, "完成基准世界构建");
     for _ in 0..ticks {
@@ -305,6 +354,7 @@ fn bench(blocks: usize, active: usize, ticks: usize) -> Result<()> {
         samples.push(started.elapsed());
     }
     samples.sort_unstable();
+    print_execution_report(&simulation.execution_report());
     println!("blocks: {blocks}");
     println!("active_components: {active}");
     println!("sections: {sections}");
@@ -388,6 +438,7 @@ struct RunSummary {
     trace_events: usize,
     tick_elapsed: Duration,
     stability: Option<StabilityPoint>,
+    execution: ExecutionReport,
 }
 
 const TICK_PROGRESS_UPDATE_INTERVAL: u64 = 10;
@@ -465,6 +516,7 @@ fn run(
     trace_path: Option<&Path>,
     vcd_path: Option<&Path>,
     allow_static_fallback: bool,
+    engine: EngineArg,
 ) -> Result<()> {
     let summary = execute_scenario(
         scenario_path,
@@ -473,7 +525,9 @@ fn run(
         trace_path,
         vcd_path,
         allow_static_fallback,
+        engine,
     )?;
+    print_execution_report(&summary.execution);
     println!("ticks: {}", summary.ticks);
     println!("blocks: {}", summary.blocks);
     println!("trace_events: {}", summary.trace_events);
@@ -506,6 +560,7 @@ fn execute_scenario(
     trace_path: Option<&Path>,
     vcd_path: Option<&Path>,
     allow_static_fallback: bool,
+    engine: EngineArg,
 ) -> Result<RunSummary> {
     let scenario = Scenario::load(scenario_path)?;
     if scenario.version != JAVA_VERSION {
@@ -581,6 +636,7 @@ fn execute_scenario(
             strict: scenario.strict && !allow_static_fallback,
             trace: trace_path.is_some() || vcd_path.is_some(),
             record_events: replay_path.is_some(),
+            execution_mode: engine.into(),
             ..SimulationConfig::default()
         },
     )?;
@@ -612,6 +668,7 @@ fn execute_scenario(
             "粘贴场景附加结构"
         );
     }
+    simulation.prepare_execution()?;
 
     let mut replay = if let (Some(path), Some(timeline)) = (replay_path, replay_timeline) {
         Some(create_replay_writer(
@@ -781,7 +838,47 @@ fn execute_scenario(
         trace_events: simulation.trace().events().len(),
         tick_elapsed,
         stability: stability.stable(),
+        execution: simulation.execution_report(),
     })
+}
+
+fn execution_backend_name(backend: ExecutionBackend) -> &'static str {
+    match backend {
+        ExecutionBackend::Interpreted => "interpreted",
+        ExecutionBackend::Compiled => "compiled",
+    }
+}
+
+fn print_execution_report(report: &ExecutionReport) {
+    println!("requested_engine: {}", report.requested_mode);
+    println!("engine: {}", execution_backend_name(report.backend));
+    println!(
+        "fallback_reason: {}",
+        report.fallback_reason.as_deref().unwrap_or("none")
+    );
+    println!(
+        "compile_ms: {:.3}",
+        report.compile_duration.as_secs_f64() * 1_000.0
+    );
+    println!("nodes: {}", report.node_count);
+    println!("edges: {}", report.edge_count);
+    println!("compiled_updates: {}", report.compiled_updates);
+    println!("interpreted_updates: {}", report.interpreted_updates);
+    println!("compiled_hit_rate: {:.6}", report.compiled_hit_rate());
+    println!("partial_recompilations: {}", report.partial_recompilations);
+    println!("full_recompilations: {}", report.full_recompilations);
+    println!("dense_full_rebuilds: {}", report.dense_full_rebuilds);
+    println!(
+        "topology_rebuilds: {}",
+        report
+            .partial_recompilations
+            .saturating_add(report.full_recompilations)
+    );
+    println!("recompiled_nodes: {}", report.recompiled_nodes);
+    println!(
+        "recompile_ms: {:.3}",
+        report.recompile_duration.as_secs_f64() * 1_000.0
+    );
 }
 
 fn union_replay_regions(left: ReplayRegion, right: ReplayRegion) -> ReplayRegion {
@@ -885,6 +982,7 @@ async fn test_path(
     replay_anim: bool,
     oracle: bool,
     allow_static_fallback: bool,
+    engine: EngineArg,
 ) -> Result<()> {
     if path.is_dir() && replay.is_some() {
         bail!("目录测试暂不支持 --replay, 请指定单个场景文件");
@@ -927,6 +1025,7 @@ async fn test_path(
                     replay_anim,
                     oracle,
                     allow_static_fallback,
+                    engine,
                 )
                 .await;
                 progress.pb_inc(1);
@@ -945,10 +1044,28 @@ async fn test_path(
     for (_, scenario, result) in results {
         match result {
             Ok(summary) => println!(
-                "PASS {} ticks={} trace_events={}",
+                "PASS {} ticks={} trace_events={} requested_engine={} engine={} fallback_reason={} compile_ms={:.3} nodes={} edges={} compiled_updates={} interpreted_updates={} compiled_hit_rate={:.6} partial_recompilations={} full_recompilations={} dense_full_rebuilds={} topology_rebuilds={} recompiled_nodes={} recompile_ms={:.3}",
                 scenario.display(),
                 summary.ticks,
-                summary.trace_events
+                summary.trace_events,
+                summary.execution.requested_mode,
+                execution_backend_name(summary.execution.backend),
+                summary.execution.fallback_reason.as_deref().unwrap_or("none"),
+                summary.execution.compile_duration.as_secs_f64() * 1_000.0,
+                summary.execution.node_count,
+                summary.execution.edge_count,
+                summary.execution.compiled_updates,
+                summary.execution.interpreted_updates,
+                summary.execution.compiled_hit_rate(),
+                summary.execution.partial_recompilations,
+                summary.execution.full_recompilations,
+                summary.execution.dense_full_rebuilds,
+                summary
+                    .execution
+                    .partial_recompilations
+                    .saturating_add(summary.execution.full_recompilations),
+                summary.execution.recompiled_nodes,
+                summary.execution.recompile_duration.as_secs_f64() * 1_000.0
             ),
             Err(error) => {
                 failures += 1;
@@ -969,6 +1086,7 @@ async fn execute_test_scenario(
     replay_anim: bool,
     oracle: bool,
     allow_static_fallback: bool,
+    engine: EngineArg,
 ) -> Result<RunSummary> {
     let run_oracle = if oracle {
         let parsed = Scenario::load(scenario)?;
@@ -998,6 +1116,7 @@ async fn execute_test_scenario(
         trace_path.as_deref(),
         None,
         allow_static_fallback,
+        engine,
     );
     let comparison = if let (Ok(_), Some(trace_path)) = (&result, trace_path.as_deref()) {
         compare_with_oracle(scenario, trace_path).await

@@ -49,9 +49,7 @@ impl Java26Rules {
         state: &StateDefinition,
         update: NeighborUpdate,
     ) -> Result<(), RulesError> {
-        let facing = state
-            .direction_property("facing")
-            .unwrap_or(Direction::North);
+        let facing = state.facing.unwrap_or(Direction::North);
         let base_pos = pos.relative(facing.opposite());
         let base = self.state(ctx.world.get_block(base_pos))?;
         let expected_sticky = state.property("type") == Some("sticky");
@@ -59,7 +57,7 @@ impl Java26Rules {
             base.behavior,
             BlockBehavior::Piston { sticky } if sticky == expected_sticky
         ) && base.bool_property("extended")
-            && base.direction_property("facing") == Some(facing);
+            && base.facing == Some(facing);
         if matches_base {
             let orientation = update.orientation.map(|orientation| {
                 Orientation::from_index(orientation)
@@ -84,9 +82,7 @@ impl Java26Rules {
         state_id: BlockStateId,
     ) -> Result<(), RulesError> {
         let state = self.state(state_id)?.clone();
-        let facing = state
-            .direction_property("facing")
-            .unwrap_or(Direction::North);
+        let facing = state.facing.unwrap_or(Direction::North);
         let should_extend = self.is_quasi_powered(ctx.world, pos, facing);
         let extended = state.bool_property("extended");
         if should_extend != extended {
@@ -144,9 +140,7 @@ impl Java26Rules {
         event: i32,
     ) -> Result<bool, RulesError> {
         let state = self.state(state_id)?.clone();
-        let facing = state
-            .direction_property("facing")
-            .unwrap_or(Direction::North);
+        let facing = state.facing.unwrap_or(Direction::North);
         let sticky = matches!(state.behavior, BlockBehavior::Piston { sticky: true });
         if event == 0 {
             if !self.is_quasi_powered(ctx.world, pos, facing) {
@@ -370,9 +364,7 @@ impl Java26Rules {
         event: i32,
     ) -> Result<(), RulesError> {
         let state = self.state(state_id)?.clone();
-        let facing = state
-            .direction_property("facing")
-            .unwrap_or(Direction::North);
+        let facing = state.facing.unwrap_or(Direction::North);
         let sticky = matches!(state.behavior, BlockBehavior::Piston { sticky: true });
         let head_pos = pos.relative(facing);
         let head_propagates = self
@@ -473,9 +465,7 @@ impl Java26Rules {
         piston_pos: BlockPos,
     ) -> Result<(), RulesError> {
         let moving_base = self.state(ctx.world.get_block(piston_pos))?.clone();
-        let facing = moving_base
-            .direction_property("facing")
-            .unwrap_or(Direction::North);
+        let facing = moving_base.facing.unwrap_or(Direction::North);
         let start = piston_pos.relative(facing).relative(facing);
         self.move_piston_structure(
             ctx,
@@ -515,9 +505,7 @@ impl Java26Rules {
             return Ok(false);
         };
         let moving_state = self.state(ctx.world.get_block(pos))?.clone();
-        let direction = moving_state
-            .direction_property("facing")
-            .unwrap_or(Direction::North);
+        let direction = moving_state.facing.unwrap_or(Direction::North);
         let extending = data
             .fields
             .get("extending")

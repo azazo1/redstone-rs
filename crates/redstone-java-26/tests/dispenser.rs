@@ -99,7 +99,7 @@ fn minecart_spawns_on_a_rail_and_falls_back_to_an_item_without_one() {
 #[test]
 fn dispensed_tnt_counts_down_and_records_an_unsupported_explosion() {
     let mut simulation = dispenser_world("minecraft:tnt", false);
-    simulation.set_trace_enabled(true);
+    simulation.set_trace_enabled(true).unwrap();
 
     simulation.run_until(GameTick(5)).unwrap();
 

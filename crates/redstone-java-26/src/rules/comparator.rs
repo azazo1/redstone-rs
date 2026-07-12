@@ -165,7 +165,7 @@ fn shelf_output(
     state: &crate::StateDefinition,
     direction: Direction,
 ) -> i32 {
-    if state.direction_property("facing").map(Direction::opposite) != Some(direction) {
+    if state.facing.map(Direction::opposite) != Some(direction) {
         return 0;
     }
     let Some(data) = world.block_entity(pos) else {
@@ -199,7 +199,7 @@ fn chest_output(
         .strip_prefix("minecraft:")
         .unwrap_or(&partner.name);
     if !chests_connect(path, partner_path)
-        || partner.direction_property("facing") != state.direction_property("facing")
+        || partner.facing != state.facing
         || partner.property("type") == state.property("type")
     {
         return 0;
@@ -208,7 +208,7 @@ fn chest_output(
 }
 
 fn chest_partner_direction(state: &crate::StateDefinition) -> Option<Direction> {
-    let facing = state.direction_property("facing")?;
+    let facing = state.facing?;
     match state.property("type")? {
         "left" => Some(facing.clockwise()),
         "right" => Some(facing.counter_clockwise()),

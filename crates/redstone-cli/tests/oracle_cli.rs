@@ -38,6 +38,84 @@ fn skip_oracle_runs_rust_assertions_without_starting_the_oracle() {
 }
 
 #[test]
+fn auto_oracle_uses_interpreted_backend_and_warns() {
+    let directory = TestDirectory::new("oracle-auto-engine");
+    let structure_path = directory.path().join("machine.nbt");
+    let scenario_path = directory.path().join("scenario.toml");
+    let oracle_path = directory.path().join("oracle.sh");
+    let called_path = directory.path().join("oracle-called");
+    fs::write(&structure_path, structure(1, 0)).unwrap();
+    fs::write(&scenario_path, oracle_engine_scenario()).unwrap();
+    write_empty_probe_oracle(&oracle_path);
+
+    let workspace = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let output = Command::new(env!("CARGO_BIN_EXE_redstone"))
+        .current_dir(&workspace)
+        .env("REDSTONE_ORACLE", &oracle_path)
+        .env("REDSTONE_TEST_ORACLE_CALLED", &called_path)
+        .arg("test")
+        .arg(&scenario_path)
+        .arg("--oracle")
+        .output()
+        .unwrap();
+
+    assert!(
+        output.status.success(),
+        "stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let pass = stdout
+        .lines()
+        .find(|line| line.starts_with("PASS "))
+        .expect("missing PASS summary");
+    assert!(pass.contains("requested_engine=auto"), "stdout:\n{stdout}");
+    assert!(pass.contains("engine=interpreted"), "stdout:\n{stdout}");
+    assert!(!pass.contains("fallback_reason=none"), "stdout:\n{stdout}");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("自动执行器回退到解释模式")
+            && stderr.contains("trace recording requires interpreted execution"),
+        "stderr:\n{stderr}"
+    );
+    assert!(called_path.is_file());
+}
+
+#[test]
+fn forced_compiled_oracle_is_rejected_before_starting_oracle() {
+    let directory = TestDirectory::new("oracle-compiled-engine");
+    let structure_path = directory.path().join("machine.nbt");
+    let scenario_path = directory.path().join("scenario.toml");
+    let oracle_path = directory.path().join("oracle.sh");
+    let called_path = directory.path().join("oracle-called");
+    fs::write(&structure_path, structure(1, 0)).unwrap();
+    fs::write(&scenario_path, oracle_engine_scenario()).unwrap();
+    write_empty_probe_oracle(&oracle_path);
+
+    let workspace = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let output = Command::new(env!("CARGO_BIN_EXE_redstone"))
+        .current_dir(&workspace)
+        .env("REDSTONE_ORACLE", &oracle_path)
+        .env("REDSTONE_TEST_ORACLE_CALLED", &called_path)
+        .arg("test")
+        .arg(&scenario_path)
+        .arg("--oracle")
+        .arg("--engine")
+        .arg("compiled")
+        .output()
+        .unwrap();
+
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("trace recording requires interpreted execution"),
+        "stderr:\n{stderr}"
+    );
+    assert!(!called_path.exists());
+}
+
+#[test]
 #[ignore = "需要先执行 just oracle-build"]
 fn real_java_oracle_matches_a_basic_action_scenario() {
     assert_oracle_matches("oracle-basic", structure(1, 0), basic_scenario());
@@ -656,6 +734,30 @@ fn structure_block(x: i32, y: i32, z: i32, state: i32) -> Value {
         ),
         ("state".to_owned(), Value::Int(state)),
     ]))
+}
+
+fn write_empty_probe_oracle(path: &Path) {
+    fs::write(
+        path,
+        r#"#!/bin/sh
+: > "$REDSTONE_TEST_ORACLE_CALLED"
+printf '%s\n' '{"format":"probe_samples_v1"}' > "$2"
+"#,
+    )
+    .unwrap();
+}
+
+fn oracle_engine_scenario() -> &'static str {
+    r#"version = "26.1.2"
+mode = "default"
+seed = 0
+max_ticks = 1
+strict = true
+
+[source]
+path = "machine.nbt"
+initialization = "raw"
+"#
 }
 
 fn basic_scenario() -> &'static str {

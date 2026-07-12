@@ -48,6 +48,7 @@
 
 - 计划刻按 `trigger_tick`, 优先级, `sub_tick_order`, 坐标和方块类型排序.
 - 同一位置和方块类型的计划刻在执行开始前去重. 计划刻执行中新增的同 tick 任务留到下一个游戏 tick.
+- 计划刻使用 256 槽环形时间轮和远期 overflow 队列. 时间轮保留 7 级优先级, `sub_tick_order`, 去重和同 tick 延迟语义.
 - 方块事件使用有序队列和集合去重. 成功执行的方块事件在该事件产生的世界变化之前进入 delta.
 - 邻居更新使用显式任务栈, 不依赖 Rust 调用栈递归. 嵌套更新会在外层六方向广播继续前抢占执行, 固定方向顺序为 west, east, down, up, north, south.
 - 规则可将计划刻, 批量方块变化和后续任务延迟到当前同步邻居链结束后执行.
@@ -55,6 +56,24 @@
 - `game_time` 每 tick 推进. `overworld_time` 可独立暂停, 两者在 tick callback 前更新并检查溢出.
 
 主要实现位于 `crates/redstone-core/src/simulation.rs`, `event.rs` 和 `rules.rs`.
+
+### 混合编译执行器
+
+公共执行策略由 `ExecutionMode` 和 `SimulationConfig.execution_mode` 选择. 默认模式为 `Auto`, 场景 TOML 不保存该策略.
+
+- `Auto` 尝试构建编译图. 诊断模式不兼容时通过 `tracing::warn` 记录原因并使用解释器. 初始编译或动态拓扑同步失败时记录原因并永久切换到解释器.
+- `Interpreted` 始终走 Java 26.1.2 规则解释路径.
+- `Compiled` 强制构建和使用编译图. 遇到 trace, VCD, Java oracle, experimental redstone 或无法安全编译和同步的状态时返回明确错误, 不静默回退.
+- trace, VCD 和 Java oracle 需要完整微事件顺序, experimental redstone 有独立更新顺序, 因而 `Auto` 在这些模式下实际使用 `Interpreted`.
+- Replay MCPR 由有序 `WorldDelta` 驱动. Replay 事件记录本身不会触发诊断回退, 因而可继续使用 `Compiled`.
+
+编译器只加速电气传播. `SparseWorld`, 计划刻, 方块事件和活塞规则仍是权威状态, 普通活塞, 黏性活塞, QC, zero-tick, 观察者及移动红石元件继续由 Java 26.1.2 规则处理. 编译节点的计划刻仍由 core 调度器按位置和方块类型调度.
+
+每次规则回调都会在内部收集有序 `BlockChange`. 回调结束后, 下一项邻居任务执行前存在同步屏障, 用于把最新世界状态和结构变化同步到编译拓扑. 普通 power 变化只更新节点状态, 类型, 朝向, wire 连接, 导体性质和 moving piston 状态等结构变化才使拓扑失效. 动态结构优先局部重编译, 规模过大时全量重编译. 局部同步失败后, `Auto` 恢复解释器缓存并永久回退, `Compiled` 返回错误, 两者都不会继续使用损坏的图.
+
+`Simulation::execution_report()` 返回当前 `ExecutionReport` 快照, 包含请求模式, 实际后端, 回退原因, 编译耗时, 节点和边数量, 编译/解释更新数, 局部/全量重编译次数, 重编译节点数和重编译耗时. `compiled_hit_rate()` 根据两类更新数计算命中率.
+
+主要实现位于 `crates/redstone-core/src/execution.rs`, `scheduler.rs` 和 `crates/redstone-java-26/src/compiled`.
 
 ### action, probe, delta 和轨迹
 
@@ -274,8 +293,9 @@
 - 明细包含官方 state ID, 完整 properties, supported 状态和原始方块实体 NBT, 支持 text 和 JSON.
 - points 和 region 结果会合并, 去重并稳定排序. 无 namespace 的方块 ID 自动补 `minecraft:`.
 
-### `run`, `trace` 和 `test`
+### `run`, `trace`, `test` 和执行器
 
+- `run`, `test`, `trace` 和 `bench` 接受 `--engine auto|interpreted|compiled`, 默认使用 `auto`.
 - `run` 加载单个场景, 执行 paste 与 action, 采样 probe, 检查全部 expectation, 并输出 tick 数, 方块数, 轨迹数量, 耗时和 TPS.
 - `run` 在最后一次外部 action 或定时 paste 之后检测稳定点. 连续 20 tick 没有 delta 事件且没有计划刻时, 输出 `stable_tick`, `active_ticking_elapsed_ms` 和 `active_ticks_per_second`, 从而把活动传播和稳定后的空闲尾部分开.
 - `trace` 是强制写出 JSONL 的单场景入口, 可同时写 VCD. `run` 也支持可选 JSONL 和 VCD.
@@ -283,6 +303,7 @@
 - `--allow-static-fallback` 可在 CLI 层关闭场景 strict 检查.
 - `test --oracle` 在 Rust 断言通过后调用 Java oracle 比较轨迹.
 - 目录批量测试不支持共享 Replay 输出路径.
+- 运行摘要输出请求模式, 实际后端, 回退原因, 编译耗时, 图规模, 编译命中率和动态重编译统计.
 
 ### `convert`
 

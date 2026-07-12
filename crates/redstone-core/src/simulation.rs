@@ -7,15 +7,18 @@ use tracing::{debug, warn};
 use tracing_indicatif::{span_ext::IndicatifSpanExt, style::ProgressStyle};
 
 use crate::{
-    Action, BlockEvent, BlockKindId, BlockPos, BlockRules, DeferredBlockEntityUpdate, Direction,
-    EventContext, GameTick, MicroStep, NeighborTask, NeighborUpdate, Probe, ProbeSample,
-    RedstoneMode, RulesError, ScheduledTick, SimulationEnvironment, SimulationPhase, SparseWorld,
-    TraceEvent, TraceKind, TraceLog, WorldDelta, WorldEvent,
+    Action, BlockChange, BlockEvent, BlockPos, BlockRules, DeferredBlockEntityUpdate, Direction,
+    EventContext, ExecutionBackend, ExecutionConfig, ExecutionMode, ExecutionReport, GameTick,
+    MicroStep, NeighborTask, NeighborUpdate, Probe, ProbeSample, RedstoneMode, RulesError,
+    SimulationEnvironment, SimulationPhase, SparseWorld, TraceEvent, TraceKind, TraceLog,
+    WorldDelta, WorldEvent,
 };
 use crate::rules::NeighborTasks;
+use crate::scheduler::ScheduledTickQueue;
 
 const DEFAULT_MAX_SCHEDULED_TICKS_PER_TICK: usize = 65_536;
 const DEFAULT_MAX_CHAINED_NEIGHBOR_UPDATES: usize = 1_000_000;
+const MAX_EXECUTION_SYNCHRONIZATION_PASSES: usize = 65_536;
 const UPDATE_REGION_PROGRESS_INTERVAL: usize = 16_384;
 
 fn region_update_progress_style() -> ProgressStyle {
@@ -29,6 +32,7 @@ fn region_update_progress_style() -> ProgressStyle {
 #[derive(Clone, Debug)]
 pub struct SimulationConfig {
     pub mode: RedstoneMode,
+    pub execution_mode: ExecutionMode,
     pub seed: u64,
     pub environment: SimulationEnvironment,
     pub strict: bool,
@@ -42,6 +46,7 @@ impl Default for SimulationConfig {
     fn default() -> Self {
         Self {
             mode: RedstoneMode::Default,
+            execution_mode: ExecutionMode::Auto,
             seed: 0,
             environment: SimulationEnvironment::default(),
             strict: true,
@@ -74,16 +79,17 @@ pub struct Simulation<R: BlockRules> {
     rules: R,
     world: SparseWorld,
     config: SimulationConfig,
+    execution_prepared: bool,
     tick: GameTick,
     game_time: u64,
     overworld_time: u64,
     micro_step: MicroStep,
     next_sub_tick_order: i64,
     random_state: u64,
-    scheduled_ticks: BTreeSet<ScheduledTick>,
-    scheduled_keys: BTreeSet<(BlockPos, BlockKindId)>,
+    scheduled_ticks: ScheduledTickQueue,
     block_events: VecDeque<BlockEvent>,
     block_event_keys: BTreeSet<BlockEvent>,
+    execution_block_changes: Vec<BlockChange>,
     trace: Vec<TraceEvent>,
     monitoring_enabled: bool,
     probes: IndexMap<String, Probe>,
@@ -112,6 +118,15 @@ impl<R: BlockRules> Simulation<R> {
             }
         }
         rules.load_world(&world)?;
+        rules.configure_execution(
+            &world,
+            ExecutionConfig {
+                requested_mode: config.execution_mode,
+                redstone_mode: config.mode,
+                trace_enabled: config.trace,
+                record_events: config.record_events,
+            },
+        )?;
         let tickable_block_entities = world
             .block_entities()
             .filter(|(pos, data)| rules.should_tick_block_entity(&world, **pos, data))
@@ -125,16 +140,17 @@ impl<R: BlockRules> Simulation<R> {
             rules,
             world,
             config,
+            execution_prepared: false,
             tick: GameTick(0),
             game_time,
             overworld_time,
             micro_step: MicroStep(0),
             next_sub_tick_order: 0,
             random_state,
-            scheduled_ticks: BTreeSet::new(),
-            scheduled_keys: BTreeSet::new(),
+            scheduled_ticks: ScheduledTickQueue::new(),
             block_events: VecDeque::new(),
             block_event_keys: BTreeSet::new(),
+            execution_block_changes: Vec::new(),
             trace: Vec::new(),
             monitoring_enabled: true,
             probes: IndexMap::new(),
@@ -164,11 +180,67 @@ impl<R: BlockRules> Simulation<R> {
         }
     }
 
-    pub fn set_trace_enabled(&mut self, enabled: bool) {
+    pub fn set_trace_enabled(&mut self, enabled: bool) -> Result<(), SimulationError> {
+        let previous = self.config.trace;
+        if previous == enabled {
+            return Ok(());
+        }
+        let was_prepared = self.execution_prepared;
         self.config.trace = enabled;
+        let configured = self.rules.configure_execution(
+            &self.world,
+            ExecutionConfig {
+                requested_mode: self.config.execution_mode,
+                redstone_mode: self.config.mode,
+                trace_enabled: enabled,
+                record_events: self.config.record_events,
+            },
+        );
+        self.execution_prepared = false;
+        let configured = configured
+            .map_err(SimulationError::from)
+            .and_then(|()| {
+                if was_prepared {
+                    self.prepare_execution()
+                } else {
+                    Ok(())
+                }
+            });
+        if let Err(error) = configured {
+            self.config.trace = previous;
+            self.execution_prepared = false;
+            let rollback = ExecutionConfig {
+                requested_mode: self.config.execution_mode,
+                redstone_mode: self.config.mode,
+                trace_enabled: previous,
+                record_events: self.config.record_events,
+            };
+            if let Err(rollback_error) = self.rules.configure_execution(&self.world, rollback) {
+                warn!(%rollback_error, "恢复执行器诊断配置失败");
+            } else if was_prepared
+                && let Err(rollback_error) = self.prepare_execution()
+            {
+                warn!(%rollback_error, "恢复执行器诊断状态失败");
+            }
+            return Err(error);
+        }
         if !enabled {
             self.trace.clear();
         }
+        Ok(())
+    }
+
+    pub fn prepare_execution(&mut self) -> Result<(), SimulationError> {
+        if self.execution_prepared {
+            return Ok(());
+        }
+        self.rules.prepare_execution(&self.world)?;
+        validate_execution_report(
+            self.config.execution_mode,
+            &normalized_execution_report(&self.rules, &self.config, true),
+        )?;
+        self.execution_prepared = true;
+        Ok(())
     }
 
     pub fn set_monitoring_enabled(&mut self, enabled: bool) {
@@ -310,6 +382,7 @@ impl<R: BlockRules> Simulation<R> {
     }
 
     pub fn apply(&mut self, action: Action) -> Result<WorldDelta, SimulationError> {
+        self.prepare_execution()?;
         let mut changes = Vec::new();
         self.push_trace(
             SimulationPhase::PreTick,
@@ -349,6 +422,7 @@ impl<R: BlockRules> Simulation<R> {
         pastes: &[WorldPaste<'_>],
         actions: &[Action],
     ) -> Result<WorldDelta, SimulationError> {
+        self.prepare_execution()?;
         let next_tick = self
             .tick
             .0
@@ -457,8 +531,16 @@ impl<R: BlockRules> Simulation<R> {
         TraceLog::borrowed(&self.trace)
     }
 
+    pub fn execution_report(&self) -> ExecutionReport {
+        normalized_execution_report(&self.rules, &self.config, self.execution_prepared)
+    }
+
     pub fn pending_scheduled_ticks(&self) -> usize {
         self.scheduled_ticks.len()
+    }
+
+    pub fn pending_scheduled_tick_entries(&self) -> Vec<crate::ScheduledTick> {
+        self.scheduled_ticks.snapshot()
     }
 
     fn run_scheduled_ticks(
@@ -467,16 +549,8 @@ impl<R: BlockRules> Simulation<R> {
     ) -> Result<(), SimulationError> {
         let due = self
             .scheduled_ticks
-            .iter()
-            .take_while(|tick| tick.trigger_tick <= self.tick)
-            .take(self.config.max_scheduled_ticks_per_tick)
-            .copied()
-            .collect::<Vec<_>>();
-        let has_more_due = self
-            .scheduled_ticks
-            .iter()
-            .nth(due.len())
-            .is_some_and(|tick| tick.trigger_tick <= self.tick);
+            .due_batch(self.tick, self.config.max_scheduled_ticks_per_tick);
+        let (due, has_more_due) = due;
         if has_more_due {
             warn!(
                 tick = self.tick.0,
@@ -485,8 +559,7 @@ impl<R: BlockRules> Simulation<R> {
             );
         }
         for tick in due {
-            self.scheduled_ticks.remove(&tick);
-            self.scheduled_keys.remove(&(tick.pos, tick.block));
+            self.scheduled_ticks.start_execution(tick);
             self.push_trace(
                 SimulationPhase::ScheduledTicks,
                 TraceKind::ScheduledTickExecuted {
@@ -820,14 +893,32 @@ impl<R: BlockRules> Simulation<R> {
             &mut self.next_sub_tick_order,
             &mut self.random_state,
             &mut self.scheduled_ticks,
-            &mut self.scheduled_keys,
             &mut self.block_events,
             &mut self.block_event_keys,
             trace,
             events,
             tasks,
+            &mut self.execution_block_changes,
         );
-        callback(&mut self.rules, &mut ctx)?;
+        let callback_result = callback(&mut self.rules, &mut ctx);
+        let mut passes = 0usize;
+        let synchronize_result = loop {
+            if !ctx.has_block_changes() {
+                break Ok(());
+            }
+            let block_changes = ctx.take_block_changes();
+            passes += 1;
+            if passes > MAX_EXECUTION_SYNCHRONIZATION_PASSES {
+                break Err(RulesError::Message(format!(
+                    "执行器世界同步超过 {MAX_EXECUTION_SYNCHRONIZATION_PASSES} 轮"
+                )));
+            }
+            let result = self.rules.synchronize_world(&mut ctx, &block_changes);
+            ctx.recycle_block_changes(block_changes);
+            if let Err(error) = result {
+                break Err(error);
+            }
+        };
         let affected = ctx.take_touched_block_entities();
         drop(ctx);
         for pos in affected {
@@ -841,6 +932,8 @@ impl<R: BlockRules> Simulation<R> {
                 self.tickable_block_entities.shift_remove(&pos);
             }
         }
+        callback_result?;
+        synchronize_result?;
         Ok(())
     }
 
@@ -899,4 +992,64 @@ pub enum SimulationError {
     UnsupportedBlocks(Vec<(BlockPos, String)>),
     #[error("环境时间溢出: {0}")]
     EnvironmentTimeOverflow(&'static str),
+    #[error("执行器不可用: {0}")]
+    ExecutionUnavailable(String),
+}
+
+fn validate_execution_report(
+    requested_mode: ExecutionMode,
+    report: &ExecutionReport,
+) -> Result<(), SimulationError> {
+    match requested_mode {
+        ExecutionMode::Compiled if report.backend != ExecutionBackend::Compiled => {
+            Err(SimulationError::ExecutionUnavailable(
+                report
+                    .fallback_reason
+                    .clone()
+                    .unwrap_or_else(|| "规则集不支持编译执行".to_owned()),
+            ))
+        }
+        ExecutionMode::Interpreted if report.backend != ExecutionBackend::Interpreted => {
+            Err(SimulationError::ExecutionUnavailable(
+                "规则集没有切换到解释执行".to_owned(),
+            ))
+        }
+        ExecutionMode::Auto => {
+            if let Some(reason) = report
+                .fallback_reason
+                .as_deref()
+                .filter(|_| report.backend == ExecutionBackend::Interpreted)
+            {
+                warn!(reason, "自动执行器回退到解释模式");
+            }
+            Ok(())
+        }
+        ExecutionMode::Interpreted | ExecutionMode::Compiled => Ok(()),
+    }
+}
+
+fn normalized_execution_report<R: BlockRules>(
+    rules: &R,
+    config: &SimulationConfig,
+    execution_prepared: bool,
+) -> ExecutionReport {
+    let mut report = rules.execution_report();
+    report.requested_mode = config.execution_mode;
+    if execution_prepared
+        && config.execution_mode == ExecutionMode::Auto
+        && report.backend == ExecutionBackend::Interpreted
+        && report.fallback_reason.is_none()
+    {
+        report.fallback_reason = Some(
+            if config.trace {
+                "轨迹诊断要求解释执行"
+            } else if config.mode == RedstoneMode::Experimental {
+                "experimental redstone 模式要求解释执行"
+            } else {
+                "规则集未启用编译执行"
+            }
+            .to_owned(),
+        );
+    }
+    report
 }

@@ -10,6 +10,10 @@ indexmap.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
+rustc-hash.workspace = true
 tokio.workspace = true
 tracing.workspace = true
 tracing-indicatif.workspace = true
+
+[dev-dependencies]
+tracing-subscriber.workspace = true

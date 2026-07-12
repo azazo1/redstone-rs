@@ -209,9 +209,7 @@ impl Java26Rules {
                 (Direction::Down, Direction::Up, SupportRequirement::Center)
             }
             BlockBehavior::Torch { wall: true } => {
-                let facing = state
-                    .direction_property("facing")
-                    .unwrap_or(Direction::North);
+                let facing = state.facing.unwrap_or(Direction::North);
                 (facing.opposite(), facing, SupportRequirement::Center)
             }
             BlockBehavior::Lever | BlockBehavior::Button { .. } => {
@@ -229,9 +227,7 @@ impl Java26Rules {
                 (Direction::Down, Direction::Up, SupportRequirement::Rigid)
             }
             BlockBehavior::TripwireHook => {
-                let facing = state
-                    .direction_property("facing")
-                    .unwrap_or(Direction::North);
+                let facing = state.facing.unwrap_or(Direction::North);
                 (facing.opposite(), facing, SupportRequirement::Full)
             }
             _ => return false,
@@ -616,15 +612,14 @@ impl Java26Rules {
             BlockBehavior::Wire => true,
             BlockBehavior::Repeater => {
                 direction.is_some_and(|direction| {
-                    let facing = state
-                        .direction_property("facing")
-                        .unwrap_or(Direction::North);
+                    let facing = state.facing.unwrap_or(Direction::North);
                     facing == direction || facing.opposite() == direction
                 })
             }
             BlockBehavior::Comparator => direction.is_some(),
-            BlockBehavior::Observer => direction
-                .is_some_and(|direction| state.direction_property("facing") == Some(direction)),
+            BlockBehavior::Observer => {
+                direction.is_some_and(|direction| state.facing == Some(direction))
+            }
             _ => direction.is_some() && is_signal_source(&state.behavior),
         }
     }
@@ -639,7 +634,7 @@ impl Java26Rules {
             let neighbor = self.state_or_air(world, pos.relative(direction));
             matches!(neighbor.behavior, BlockBehavior::Tripwire)
                 || matches!(neighbor.behavior, BlockBehavior::TripwireHook)
-                    && neighbor.direction_property("facing") == Some(direction.opposite())
+                    && neighbor.facing == Some(direction.opposite())
         });
         self.with_horizontal_properties(
             state.id,
@@ -931,7 +926,7 @@ fn fence_connects(state: &StateDefinition, direction: Direction, wooden: bool) -
     let same_fence = path.ends_with("_fence") && (path != "nether_brick_fence") == wooden;
     let gate = path.ends_with("_fence_gate")
         && state
-            .direction_property("facing")
+            .facing
             .is_some_and(|facing| facing_axis(facing) != facing_axis(direction));
     same_fence
         || gate
@@ -953,7 +948,7 @@ fn wall_connects(state: &StateDefinition, direction: Direction) -> bool {
         || path.ends_with("_bars")
         || path.ends_with("_fence_gate")
             && state
-                .direction_property("facing")
+                .facing
                 .is_some_and(|facing| facing_axis(facing) != facing_axis(direction))
         || state.supports(direction, SupportType::Full) && !connection_exception(path)
 }
