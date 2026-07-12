@@ -8,6 +8,7 @@ use redstone_java_26::{BlockBehavior, StateDefinition};
 use redstone_replay_26::RenderTracePiston;
 
 use super::mesh::{Color, Transform, Vertex, cuboid};
+use super::palette::block_color;
 
 pub(crate) fn append_block(
     output: &mut Vec<Vertex>,
@@ -98,29 +99,6 @@ pub(crate) fn append_moving_piston(
         vertex.position[1] += direction[1] * offset;
         vertex.position[2] += direction[2] * offset;
     }
-}
-
-pub(crate) fn block_color(state: &StateDefinition) -> Color {
-    let active = state.power > 0 || state.powered || state.lit;
-    let emission = if active { 0.72 } else { 0.0 };
-    let path = state.name.strip_prefix("minecraft:").unwrap_or(&state.name);
-    let rgb = match state.behavior {
-        BlockBehavior::Wire => if active { [0.95, 0.06, 0.03] } else { [0.32, 0.03, 0.02] },
-        BlockBehavior::RedstoneBlock => [0.72, 0.03, 0.03],
-        BlockBehavior::Torch { .. } => [0.96, 0.28, 0.08],
-        BlockBehavior::Repeater | BlockBehavior::Comparator => [0.83, 0.78, 0.68],
-        BlockBehavior::Lamp | BlockBehavior::CopperBulb => if state.lit { [1.0, 0.68, 0.16] } else { [0.35, 0.24, 0.12] },
-        BlockBehavior::Piston { sticky: true } => [0.34, 0.58, 0.24],
-        BlockBehavior::Piston { sticky: false } => [0.62, 0.48, 0.27],
-        BlockBehavior::Lever | BlockBehavior::Button { .. } => [0.58, 0.52, 0.43],
-        _ if path.contains("glass") => [0.42, 0.68, 0.72],
-        _ if path.contains("copper") => [0.62, 0.42, 0.24],
-        _ if path.contains("quartz") => [0.84, 0.82, 0.76],
-        _ if path.contains("wood") || path.contains("planks") || path.contains("log") => [0.48, 0.32, 0.16],
-        _ if path.contains("stone") || path.contains("deepslate") => [0.42, 0.43, 0.44],
-        _ => [0.52, 0.56, 0.58],
-    };
-    [rgb[0], rgb[1], rgb[2], emission]
 }
 
 pub(super) fn full_cube(

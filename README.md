@@ -115,7 +115,10 @@ cargo run -p redstone-cli -- convert path/to/world machine.litematic --region 0,
 cargo run -p redstone-cli -- convert scenario.toml prepared/scenario.toml
 cargo run --release -p redstone-cli -- render recording.mcpr recording.mp4
 cargo run --release -p redstone-cli -- render recording.mcpr walltime.mp4 --original-speed
+cargo run --release -p redstone-cli -- render recording.mcpr preview.mp4 --quality fast --shadows off
 ```
+
+Replay 视频默认使用 `high` 画质, 即 4x MSAA 和 2048 阴影. `balanced` 使用 2x MSAA 和 1024 阴影, `fast` 使用 1x AA 并关闭阴影. `--aa` 和 `--shadows off|low|medium|high` 可以覆盖预设. macOS 优先使用 GPU NV12 转换和 VideoToolbox, 其他环境自动回退到 BGRA readback 与可用的 H.264 编码器.
 
 `inspect` 默认输出结构汇总. `--block X,Y,Z` 只查询单个坐标并可重复使用. `--region FROM TO` 使用两个方块坐标查询闭合区域内的非空气方块, 两个端点不要求按大小排序, 并可叠加 `--type BLOCK_ID` 按方块类型筛选. 对世界目录或 ZIP, `--region` 同时限制需要读取的 chunk. `--all` 输出全部非空气方块. 明细包含状态 ID, properties, 支持状态和完整方块实体 NBT, 包括嵌套的 `components`. `--format json` 与 `--json` 均可输出 JSON.
 

@@ -332,8 +332,46 @@ pub struct RenderTrace {
     pub frames: Vec<RenderTraceFrame>,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct RenderTraceHeader {
+    pub simulation_walltime: Duration,
+    pub recorded_ticks: u64,
+}
+
 impl RenderTrace {
+    pub fn read_mcpr_header(path: impl AsRef<Path>) -> Result<RenderTraceHeader, ReplayError> {
+        let file = File::open(path)?;
+        let mut archive = ZipArchive::new(file)?;
+        let mut entry = archive
+            .by_name(RENDER_TRACE_ENTRY)
+            .map_err(|error| match error {
+                zip::result::ZipError::FileNotFound => ReplayError::MissingRenderTrace,
+                other => ReplayError::Zip(other),
+            })?;
+        read_header(&mut entry)
+    }
+
     pub fn read_mcpr(path: impl AsRef<Path>) -> Result<Self, ReplayError> {
+        Self::read_mcpr_filtered(path, |_| true)
+    }
+
+    pub fn read_mcpr_filtered(
+        path: impl AsRef<Path>,
+        mut keep: impl FnMut(BlockPos) -> bool,
+    ) -> Result<Self, ReplayError> {
+        let mut initial_blocks = Vec::new();
+        let mut trace = Self::read_mcpr_filtered_into(path, &mut keep, |block| {
+            initial_blocks.push(block);
+        })?;
+        trace.initial_blocks = initial_blocks;
+        Ok(trace)
+    }
+
+    pub fn read_mcpr_filtered_into(
+        path: impl AsRef<Path>,
+        mut keep: impl FnMut(BlockPos) -> bool,
+        mut initial_block: impl FnMut(RenderTraceBlock),
+    ) -> Result<Self, ReplayError> {
         let file = File::open(path)?;
         let mut archive = ZipArchive::new(file)?;
         let entry = archive
@@ -342,41 +380,37 @@ impl RenderTrace {
                 zip::result::ZipError::FileNotFound => ReplayError::MissingRenderTrace,
                 other => ReplayError::Zip(other),
             })?;
-        Self::read(BufReader::new(entry))
+        Self::read_filtered_into(BufReader::new(entry), &mut keep, &mut initial_block)
     }
 
     pub fn read(mut input: impl Read) -> Result<Self, ReplayError> {
-        let mut magic = [0; 8];
-        input.read_exact(&mut magic)?;
-        if &magic != MAGIC {
-            return Err(ReplayError::InvalidRenderTraceMagic);
-        }
-        let version = read_u16(&mut input)?;
-        if version != FORMAT_VERSION {
-            return Err(ReplayError::UnsupportedRenderTraceVersion { version });
-        }
-        let protocol = read_i32(&mut input)?;
-        if protocol != PROTOCOL_VERSION {
-            return Err(ReplayError::RenderTraceProtocol {
-                expected: PROTOCOL_VERSION,
-                actual: protocol,
-            });
-        }
-        let simulation_walltime = Duration::from_nanos(read_u64(&mut input)?);
-        let recorded_ticks = read_u64(&mut input)?;
+        let mut initial_blocks = Vec::new();
+        let mut trace = Self::read_filtered_into(
+            &mut input,
+            &mut |_| true,
+            &mut |block| initial_blocks.push(block),
+        )?;
+        trace.initial_blocks = initial_blocks;
+        Ok(trace)
+    }
+
+    fn read_filtered_into(
+        mut input: impl Read,
+        keep: &mut impl FnMut(BlockPos) -> bool,
+        initial_block: &mut impl FnMut(RenderTraceBlock),
+    ) -> Result<Self, ReplayError> {
+        let header = read_header(&mut input)?;
         let initial_count = read_u64(&mut input)?;
-        let initial_capacity = usize::try_from(initial_count)
-            .map_err(|_| ReplayError::RenderTraceTooLarge)?;
-        let mut initial_blocks = Vec::with_capacity(initial_capacity);
-        for _ in 0..initial_count {
-            initial_blocks.push(read_block(&mut input)?);
-        }
+        read_blocks(&mut input, initial_count, keep, initial_block)?;
         let initial_piston_count = read_u64(&mut input)?;
         let initial_piston_capacity = usize::try_from(initial_piston_count)
             .map_err(|_| ReplayError::RenderTraceTooLarge)?;
         let mut initial_pistons = Vec::with_capacity(initial_piston_capacity);
         for _ in 0..initial_piston_count {
-            initial_pistons.push(read_piston(&mut input)?);
+            let piston = read_piston(&mut input)?;
+            if keep(piston.pos) {
+                initial_pistons.push(piston);
+            }
         }
         let mut frames = Vec::new();
         let mut previous_timestamp = 0;
@@ -400,40 +434,99 @@ impl RenderTrace {
                 });
             }
             previous_timestamp = timestamp_ms;
-            let capacity = usize::try_from(count).map_err(|_| ReplayError::RenderTraceTooLarge)?;
-            let mut changes = Vec::with_capacity(capacity);
-            for _ in 0..count {
-                changes.push(read_block(&mut input)?);
-            }
+            let mut changes = Vec::new();
+            read_blocks(
+                &mut input,
+                u64::from(count),
+                keep,
+                &mut |block| changes.push(block),
+            )?;
             let piston_capacity = usize::try_from(piston_count)
                 .map_err(|_| ReplayError::RenderTraceTooLarge)?;
             let mut pistons = Vec::with_capacity(piston_capacity);
             for _ in 0..piston_count {
-                pistons.push(read_piston_event(&mut input)?);
+                let event = read_piston_event(&mut input)?;
+                let pos = match event {
+                    RenderTracePistonEvent::Upsert(piston) => piston.pos,
+                    RenderTracePistonEvent::Remove { pos } => pos,
+                };
+                if keep(pos) {
+                    pistons.push(event);
+                }
             }
-            frames.push(RenderTraceFrame {
-                timestamp_ms,
-                changes,
-                pistons,
-            });
+            if !changes.is_empty() || !pistons.is_empty() {
+                frames.push(RenderTraceFrame {
+                    timestamp_ms,
+                    changes,
+                    pistons,
+                });
+            }
         }
         Ok(Self {
-            simulation_walltime,
-            recorded_ticks,
-            initial_blocks,
+            simulation_walltime: header.simulation_walltime,
+            recorded_ticks: header.recorded_ticks,
+            initial_blocks: Vec::new(),
             initial_pistons,
             frames,
         })
     }
 }
 
-fn read_block(input: &mut impl Read) -> Result<RenderTraceBlock, ReplayError> {
-    let block = RenderTraceBlock {
-        pos: BlockPos::new(read_i32(input)?, read_i32(input)?, read_i32(input)?),
-        state: BlockStateId(read_u32(input)?),
-    };
-    validate_block(block.pos, block.state.0)?;
-    Ok(block)
+fn read_header(mut input: impl Read) -> Result<RenderTraceHeader, ReplayError> {
+        let mut magic = [0; 8];
+        input.read_exact(&mut magic)?;
+        if &magic != MAGIC {
+            return Err(ReplayError::InvalidRenderTraceMagic);
+        }
+        let version = read_u16(&mut input)?;
+        if version != FORMAT_VERSION {
+            return Err(ReplayError::UnsupportedRenderTraceVersion { version });
+        }
+        let protocol = read_i32(&mut input)?;
+        if protocol != PROTOCOL_VERSION {
+            return Err(ReplayError::RenderTraceProtocol {
+                expected: PROTOCOL_VERSION,
+                actual: protocol,
+            });
+        }
+        Ok(RenderTraceHeader {
+            simulation_walltime: Duration::from_nanos(read_u64(&mut input)?),
+            recorded_ticks: read_u64(&mut input)?,
+        })
+}
+
+fn read_blocks(
+    input: &mut impl Read,
+    count: u64,
+    keep: &mut impl FnMut(BlockPos) -> bool,
+    output: &mut impl FnMut(RenderTraceBlock),
+) -> Result<(), ReplayError> {
+    const RECORD_SIZE: usize = 16;
+    const BATCH_RECORDS: usize = 65_536;
+    let mut buffer = vec![0u8; RECORD_SIZE * BATCH_RECORDS];
+    let mut remaining = count;
+    while remaining > 0 {
+        let records = usize::try_from(remaining.min(BATCH_RECORDS as u64))
+            .map_err(|_| ReplayError::RenderTraceTooLarge)?;
+        let bytes = &mut buffer[..records * RECORD_SIZE];
+        input.read_exact(bytes)?;
+        for record in bytes.chunks_exact(RECORD_SIZE) {
+            let block = RenderTraceBlock {
+                pos: BlockPos::new(
+                    i32::from_le_bytes(record[0..4].try_into().unwrap()),
+                    i32::from_le_bytes(record[4..8].try_into().unwrap()),
+                    i32::from_le_bytes(record[8..12].try_into().unwrap()),
+                ),
+                state: BlockStateId(u32::from_le_bytes(record[12..16].try_into().unwrap())),
+            };
+            if keep(block.pos) {
+                validate_block(block.pos, block.state.0)?;
+                output(block);
+            }
+        }
+        remaining -= records as u64;
+    }
+    Ok(())
 }
 
 fn read_piston(input: &mut impl Read) -> Result<RenderTracePiston, ReplayError> {
@@ -599,6 +692,43 @@ mod tests {
             read_piston_event(&mut Cursor::new(vec![9])),
             Err(ReplayError::InvalidRenderPistonEvent { tag: 9 })
         ));
+    }
+
+    #[test]
+    fn filtered_reader_streams_initial_blocks_and_keeps_matching_deltas() {
+        let mut bytes = Vec::new();
+        bytes.extend_from_slice(MAGIC);
+        bytes.extend_from_slice(&FORMAT_VERSION.to_le_bytes());
+        bytes.extend_from_slice(&PROTOCOL_VERSION.to_le_bytes());
+        bytes.extend_from_slice(&123u64.to_le_bytes());
+        bytes.extend_from_slice(&7u64.to_le_bytes());
+        bytes.extend_from_slice(&2u64.to_le_bytes());
+        write_block(&mut bytes, BlockPos::new(-1, 0, 0), BlockStateId(1)).unwrap();
+        write_block(&mut bytes, BlockPos::new(1, 0, 0), BlockStateId(2)).unwrap();
+        bytes.extend_from_slice(&0u64.to_le_bytes());
+        bytes.extend_from_slice(&50i32.to_le_bytes());
+        bytes.extend_from_slice(&2u32.to_le_bytes());
+        bytes.extend_from_slice(&0u32.to_le_bytes());
+        write_block(&mut bytes, BlockPos::new(-1, 0, 0), BlockStateId(3)).unwrap();
+        write_block(&mut bytes, BlockPos::new(1, 0, 0), BlockStateId(4)).unwrap();
+        bytes.extend_from_slice(&END_TIMESTAMP.to_le_bytes());
+        bytes.extend_from_slice(&0u32.to_le_bytes());
+        bytes.extend_from_slice(&0u32.to_le_bytes());
+
+        let mut initial = Vec::new();
+        let trace = RenderTrace::read_filtered_into(
+            Cursor::new(bytes),
+            &mut |pos| pos.x >= 0,
+            &mut |block| initial.push(block),
+        )
+        .unwrap();
+
+        assert_eq!(initial.len(), 1);
+        assert_eq!(initial[0].state, BlockStateId(2));
+        assert!(trace.initial_blocks.is_empty());
+        assert_eq!(trace.frames.len(), 1);
+        assert_eq!(trace.frames[0].changes.len(), 1);
+        assert_eq!(trace.frames[0].changes[0].state, BlockStateId(4));
     }
 
     fn moving_piston(direction: &str) -> BlockEntityData {

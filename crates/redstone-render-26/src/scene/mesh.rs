@@ -8,13 +8,13 @@ pub(crate) type Color = [f32; 4];
 #[derive(Clone, Copy, Debug, Pod, Zeroable)]
 pub(crate) struct Vertex {
     pub position: [f32; 3],
-    pub normal: [f32; 3],
-    pub color: Color,
+    pub normal: [i8; 4],
+    pub color: [u8; 4],
 }
 
 impl Vertex {
     pub(crate) const ATTRIBUTES: [wgpu::VertexAttribute; 3] =
-        wgpu::vertex_attr_array![0 => Float32x3, 1 => Float32x3, 2 => Float32x4];
+        wgpu::vertex_attr_array![0 => Float32x3, 1 => Snorm8x4, 2 => Unorm8x4];
 
     pub(crate) fn layout() -> wgpu::VertexBufferLayout<'static> {
         wgpu::VertexBufferLayout {
@@ -23,6 +23,27 @@ impl Vertex {
             attributes: &Self::ATTRIBUTES,
         }
     }
+
+    pub(crate) fn new(position: [f32; 3], normal: [f32; 3], color: Color) -> Self {
+        Self {
+            position,
+            normal: [
+                pack_snorm(normal[0]),
+                pack_snorm(normal[1]),
+                pack_snorm(normal[2]),
+                0,
+            ],
+            color: color.map(pack_unorm),
+        }
+    }
+}
+
+fn pack_snorm(value: f32) -> i8 {
+    (value.clamp(-1.0, 1.0) * 127.0).round() as i8
+}
+
+fn pack_unorm(value: f32) -> u8 {
+    (value.clamp(0.0, 1.0) * 255.0).round() as u8
 }
 
 #[derive(Clone, Copy)]
@@ -123,19 +144,19 @@ pub(crate) fn quad(
     let base = Vec3::new(pos.x as f32, pos.y as f32, pos.z as f32);
     let normal = transform.normal(normal);
     for index in [0, 1, 2, 0, 2, 3] {
-        output.push(Vertex {
-            position: (base + transform.point(corners[index])).to_array(),
-            normal: normal.to_array(),
+        output.push(Vertex::new(
+            (base + transform.point(corners[index])).to_array(),
+            normal.to_array(),
             color,
-        });
+        ));
     }
     if double_sided {
         for index in [3, 2, 0, 2, 1, 0] {
-            output.push(Vertex {
-                position: (base + transform.point(corners[index])).to_array(),
-                normal: (-normal).to_array(),
+            output.push(Vertex::new(
+                (base + transform.point(corners[index])).to_array(),
+                (-normal).to_array(),
                 color,
-            });
+            ));
         }
     }
 }
@@ -200,7 +221,29 @@ pub(crate) fn ribbon(
     width: f32,
     color: Color,
 ) {
-    rod(output, pos, start, end, width, color);
+    let start = Vec3::from_array(start);
+    let end = Vec3::from_array(end);
+    let delta = end - start;
+    if delta.length_squared() <= f32::EPSILON {
+        return;
+    }
+    let mut side = delta.cross(Vec3::Y).normalize_or_zero();
+    if side.length_squared() <= f32::EPSILON {
+        side = Vec3::X;
+    }
+    side *= width * 0.5;
+    let corners = [start - side, end - side, end + side, start + side]
+        .map(|point| point.to_array());
+    let normal = (end - start).cross(side).normalize_or_zero().to_array();
+    quad(
+        output,
+        pos,
+        corners,
+        normal,
+        color,
+        Transform::identity(),
+        true,
+    );
 }
 
 fn direction_vector(direction: Direction) -> Vec3 {

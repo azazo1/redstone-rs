@@ -36,7 +36,7 @@ mod trace;
 pub use camera::{DEFAULT_VIEW_DISTANCE, ReplayCameraHint, ReplayCameraOptions};
 pub use trace::{
     RENDER_TRACE_ENTRY, RenderTrace, RenderTraceBlock, RenderTraceFrame, RenderTracePiston,
-    RenderTracePistonEvent,
+    RenderTracePistonEvent, RenderTraceHeader,
 };
 use trace::RenderTraceWriter;
 
@@ -577,7 +577,10 @@ impl ReplayWriter {
                 self.options.camera_path.as_ref(),
             )?,
         )?;
-        archive.start_file(RENDER_TRACE_ENTRY, options)?;
+        let trace_options = SimpleFileOptions::default()
+            .compression_method(zip::CompressionMethod::Stored)
+            .unix_permissions(0o644);
+        archive.start_file(RENDER_TRACE_ENTRY, trace_options)?;
         let mut render_trace_input = File::open(&self.render_trace_path)?;
         loop {
             let read = render_trace_input.read(&mut buffer)?;

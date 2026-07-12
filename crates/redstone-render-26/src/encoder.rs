@@ -1,11 +1,15 @@
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::sync::Arc;
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use anyhow::{Context, Result, bail};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::process::{Child, ChildStdin, Command};
+use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
+
+use crate::FrameFormat;
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub enum VideoEncoderKind {
@@ -94,11 +98,19 @@ async fn probe_encoder(ffmpeg: &Path, encoder: &str) -> Result<bool> {
 }
 
 pub(crate) struct VideoEncoder {
-    child: Child,
-    stdin: Option<ChildStdin>,
-    stderr: Option<JoinHandle<Result<Vec<u8>, std::io::Error>>>,
+    sender: Option<mpsc::Sender<Arc<[u8]>>>,
+    writer: Option<JoinHandle<Result<()>>>,
     temporary: PathBuf,
     output: PathBuf,
+    backpressure: Duration,
+}
+
+pub(crate) struct EncoderSettings {
+    pub width: u32,
+    pub height: u32,
+    pub fps: u32,
+    pub bitrate_mbps: u32,
+    pub frame_format: FrameFormat,
 }
 
 impl VideoEncoder {
@@ -106,16 +118,24 @@ impl VideoEncoder {
         ffmpeg: &Path,
         encoder: &str,
         output: &Path,
-        width: u32,
-        height: u32,
-        fps: u32,
-        bitrate_mbps: u32,
+        settings: EncoderSettings,
     ) -> Result<Self> {
+        let EncoderSettings {
+            width,
+            height,
+            fps,
+            bitrate_mbps,
+            frame_format,
+        } = settings;
         let temporary = temporary_output(output)?;
         let size = format!("{width}x{height}");
         let fps = fps.to_string();
         let bitrate = format!("{bitrate_mbps}M");
         let mut command = Command::new(ffmpeg);
+        let input_pixel_format = match frame_format {
+            FrameFormat::Bgra => "bgra",
+            FrameFormat::Nv12 => "nv12",
+        };
         command.args([
             "-hide_banner",
             "-loglevel",
@@ -125,7 +145,7 @@ impl VideoEncoder {
             "-f",
             "rawvideo",
             "-pix_fmt",
-            "bgra",
+            input_pixel_format,
             "-s",
             &size,
             "-r",
@@ -141,9 +161,21 @@ impl VideoEncoder {
             "yuv420p",
             "-movflags",
             "+faststart",
+            "-color_primaries",
+            "bt709",
+            "-color_trc",
+            "bt709",
+            "-colorspace",
+            "bt709",
+            "-color_range",
+            "tv",
+            "-bsf:v",
+            "h264_metadata=video_full_range_flag=0:colour_primaries=1:transfer_characteristics=1:matrix_coefficients=1",
         ]);
         if encoder == "libx264" {
             command.args(["-preset", "veryfast"]);
+        } else if encoder == "h264_videotoolbox" {
+            command.args(["-realtime", "1", "-prio_speed", "1"]);
         }
         command.arg(&temporary);
         command.kill_on_drop(true);
@@ -160,41 +192,42 @@ impl VideoEncoder {
             child_stderr.read_to_end(&mut bytes).await?;
             Ok(bytes)
         });
+        let (sender, receiver) = mpsc::channel(4);
+        let writer = tokio::spawn(run_writer(child, stdin, stderr, receiver));
         Ok(Self {
-            child,
-            stdin: Some(stdin),
-            stderr: Some(stderr),
+            sender: Some(sender),
+            writer: Some(writer),
             temporary,
             output: output.to_path_buf(),
+            backpressure: Duration::ZERO,
         })
     }
 
-    pub(crate) async fn write_frame(&mut self, frame: &[u8]) -> Result<()> {
-        self.stdin
-            .as_mut()
-            .context("FFmpeg stdin 已关闭")?
-            .write_all(frame)
+    pub(crate) async fn write_frame(&mut self, frame: Arc<[u8]>) -> Result<()> {
+        let started = Instant::now();
+        let result = self
+            .sender
+            .as_ref()
+            .context("FFmpeg writer 已关闭")?
+            .send(frame)
             .await
-            .context("向 FFmpeg 写入视频帧失败")
+            .context("FFmpeg writer 提前结束");
+        self.backpressure += started.elapsed();
+        if result.is_err() {
+            self.wait_writer().await?;
+        }
+        result
+    }
+
+    pub(crate) fn backpressure(&self) -> Duration {
+        self.backpressure
     }
 
     pub(crate) async fn finish(mut self) -> Result<()> {
-        if let Some(mut stdin) = self.stdin.take() {
-            stdin.shutdown().await?;
-        }
-        let status = self.child.wait().await?;
-        let stderr = self
-            .stderr
-            .take()
-            .context("FFmpeg stderr 任务已结束")?
-            .await
-            .context("读取 FFmpeg stderr 任务失败")??;
-        if !status.success() {
+        self.sender.take();
+        if let Err(error) = self.wait_writer().await {
             let _ = std::fs::remove_file(&self.temporary);
-            bail!(
-                "FFmpeg 编码失败: {}",
-                String::from_utf8_lossy(&stderr).trim()
-            );
+            return Err(error);
         }
         std::fs::rename(&self.temporary, &self.output).with_context(|| {
             format!(
@@ -209,8 +242,48 @@ impl VideoEncoder {
 
 impl Drop for VideoEncoder {
     fn drop(&mut self) {
+        if let Some(writer) = self.writer.take() {
+            writer.abort();
+        }
         let _ = std::fs::remove_file(&self.temporary);
     }
+}
+
+impl VideoEncoder {
+    async fn wait_writer(&mut self) -> Result<()> {
+        self.writer
+            .take()
+            .context("FFmpeg writer 任务已结束")?
+            .await
+            .context("FFmpeg writer 任务失败")?
+    }
+}
+
+async fn run_writer(
+    mut child: Child,
+    mut stdin: ChildStdin,
+    stderr: JoinHandle<Result<Vec<u8>, std::io::Error>>,
+    mut receiver: mpsc::Receiver<Arc<[u8]>>,
+) -> Result<()> {
+    while let Some(frame) = receiver.recv().await {
+        stdin
+            .write_all(&frame)
+            .await
+            .context("向 FFmpeg 写入视频帧失败")?;
+    }
+    stdin.shutdown().await?;
+    drop(stdin);
+    let status = child.wait().await?;
+    let stderr = stderr
+        .await
+        .context("读取 FFmpeg stderr 任务失败")??;
+    if !status.success() {
+        bail!(
+            "FFmpeg 编码失败: {}",
+            String::from_utf8_lossy(&stderr).trim()
+        );
+    }
+    Ok(())
 }
 
 fn temporary_output(output: &Path) -> Result<PathBuf> {

@@ -1,7 +1,7 @@
 use redstone_core::BlockPos;
 use redstone_java_26::StateDefinition;
 
-use super::super::mesh::{Color, Transform, Vertex, cuboid, rod};
+use super::super::mesh::{Color, Transform, Vertex, cuboid, quad, rod};
 use super::{active_color, facing};
 
 pub(super) fn wire(
@@ -11,15 +11,7 @@ pub(super) fn wire(
     color: Color,
 ) {
     let height = 0.028;
-    cuboid(
-        output,
-        pos,
-        [0.375, 0.002, 0.375],
-        [0.625, height, 0.625],
-        color,
-        None,
-        Transform::identity(),
-    );
+    wire_top(output, pos, [0.375, 0.375], [0.625, 0.625], height, color);
     for (name, min, max, wall_min, wall_max) in [
         ("north", [0.455, 0.002, 0.0], [0.545, height, 0.5], [0.455, 0.0, 0.0], [0.545, 1.0, 0.025]),
         ("south", [0.455, 0.002, 0.5], [0.545, height, 1.0], [0.455, 0.0, 0.975], [0.545, 1.0, 1.0]),
@@ -27,38 +19,78 @@ pub(super) fn wire(
         ("east", [0.5, 0.002, 0.455], [1.0, height, 0.545], [0.975, 0.0, 0.455], [1.0, 1.0, 0.545]),
     ] {
         match state.property(name) {
-            Some("side") => cuboid(
+            Some("side") => wire_top(
                 output,
                 pos,
-                min,
-                max,
+                [min[0], min[2]],
+                [max[0], max[2]],
+                height,
                 color,
-                None,
-                Transform::identity(),
             ),
             Some("up") => {
-                cuboid(
+                wire_top(
                     output,
                     pos,
-                    min,
-                    max,
+                    [min[0], min[2]],
+                    [max[0], max[2]],
+                    height,
                     color,
-                    None,
-                    Transform::identity(),
                 );
-                cuboid(
-                    output,
-                    pos,
-                    wall_min,
-                    wall_max,
-                    color,
-                    None,
-                    Transform::identity(),
-                );
+                wire_wall(output, pos, name, wall_min, wall_max, color);
             }
             _ => {}
         }
     }
+}
+
+fn wire_top(
+    output: &mut Vec<Vertex>,
+    pos: BlockPos,
+    min: [f32; 2],
+    max: [f32; 2],
+    height: f32,
+    color: Color,
+) {
+    quad(
+        output,
+        pos,
+        [
+            [min[0], height, min[1]],
+            [min[0], height, max[1]],
+            [max[0], height, max[1]],
+            [max[0], height, min[1]],
+        ],
+        [0.0, 1.0, 0.0],
+        color,
+        Transform::identity(),
+        false,
+    );
+}
+
+fn wire_wall(
+    output: &mut Vec<Vertex>,
+    pos: BlockPos,
+    direction: &str,
+    min: [f32; 3],
+    max: [f32; 3],
+    color: Color,
+) {
+    let (normal, corners) = match direction {
+        "north" => ([0.0, 0.0, -1.0], [[max[0], min[1], min[2]], [min[0], min[1], min[2]], [min[0], max[1], min[2]], [max[0], max[1], min[2]]]),
+        "south" => ([0.0, 0.0, 1.0], [[min[0], min[1], max[2]], [max[0], min[1], max[2]], [max[0], max[1], max[2]], [min[0], max[1], max[2]]]),
+        "west" => ([-1.0, 0.0, 0.0], [[min[0], min[1], min[2]], [min[0], min[1], max[2]], [min[0], max[1], max[2]], [min[0], max[1], min[2]]]),
+        "east" => ([1.0, 0.0, 0.0], [[max[0], min[1], max[2]], [max[0], min[1], min[2]], [max[0], max[1], min[2]], [max[0], max[1], max[2]]]),
+        _ => return,
+    };
+    quad(
+        output,
+        pos,
+        corners,
+        normal,
+        color,
+        Transform::identity(),
+        true,
+    );
 }
 
 pub(super) fn torch(

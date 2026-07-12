@@ -514,3 +514,52 @@ Auto 使用确定性的滑动窗口策略. 200 game tick 内第 11 次拓扑重�
 | flying-roof | 待测 | 待测 | 待测 | 待测 | 待测 | 待测 |
 | flying-machine | 待测 | 待测 | 待测 | 待测 | 待测 | 待测 |
 | piston-gate-3x3 | 待测 | 待测 | 待测 | 待测 | 待测 | 待测 |
+## 原生 Replay 渲染基线
+
+2026-07-13 在 Apple M1 16 GB, Metal, `h264_videotoolbox`, high 画质和 1920x1080 60 FPS 下记录优化前基线.
+
+- 小型 `piston-gate-3x3` replay 输出 3600 帧, wall time 为 27.21 s, 等价 132.3 输出帧/s.
+- `vendors/a.mcpr` 的 `redstone/render-v2.bin` 解压后为 1.34 GB. 运行 252.19 s 后仍未完成 trace 读取和首帧网格, 因此终止并记为 startup >252 s.
+- 大型输入的首要瓶颈位于初始 block Vec, BTreeMap 场景展开和首帧非索引网格, 不是 VideoToolbox 编码吞吐.
+
+### Replay 流水线与 mesh 优化
+
+第一阶段让 trace 初始方块直接流入 16x16x16 稠密 section, 过滤掉视距外记录时不再解析 state ID. 新生成 MCPR 的 `redstone/render-v2.bin` 改用 ZIP Stored entry, v2 二进制内容不变. `vendors/a.mcpr` 仍是旧 Deflate entry, 但 trace 读取和首帧 mesh 从 `>252 s` 降到 `6.34 s`, 已超过 39.7x 的保守下界.
+
+第二阶段加入最终分类色 greedy meshing, wire quad, rail ribbon, state geometry template, 20 byte packed vertex, camera/light frustum 和精确 section 边界失效. 大型场景初始顶点从 104063748 降到 45718914, 顶点字节从约 3.88 GiB 降到约 872 MiB. 旧实现会无条件失效当前 section 的 6 个邻居, 修正后只有局部坐标位于 0 或 15 时才失效对应边界.
+
+第三阶段使用 3 个异步 readback slot, GPU NV12 compute, 容量为 4 的 FFmpeg writer channel, GPU buffer 复用和连续相同帧 `Arc` 复用. VideoToolbox 增加 realtime 与 speed priority, H.264 bitstream 显式写入 BT.709 limited-range metadata.
+
+小型 1080p60 high 场景输出 3600 帧的结果如下. 画质仍为 4x MSAA 与 2048 阴影.
+
+| 指标 | 优化前 | 优化后 | 改善 |
+| --- | ---: | ---: | ---: |
+| wall time | 27.21 s | 18.56 s | 1.47x |
+| 平均输出帧率 | 132.3 | 193.9 | 1.47x |
+| GPU submit | 未记录 | 37.4 ms | - |
+| readback wait | 未记录 | 109.6 ms | - |
+| CPU copy | 未记录 | 51.6 ms | - |
+| encoder backpressure | 未记录 | 17087.6 ms | - |
+
+FFprobe 验证输出为 3600 帧, 1920x1080, 60 FPS, H.264, `color_range=tv`, `color_space=bt709`, `color_transfer=bt709`, `color_primaries=bt709`, 且没有音频轨. 稳态主要瓶颈已经是 VideoToolbox backpressure, 而不是 GPU readback.
+
+大型 `vendors/a.mcpr` 使用 320x180, 1 FPS, fast 的 20 帧短验收逐步结果如下. 该测试用于隔离 trace, mesh 和上传成本, 不能替代最终 1080p60 验收.
+
+| 阶段 | wall time | mesh time | 初始顶点 |
+| --- | ---: | ---: | ---: |
+| section 分片与 ribbon 前 | 48.69 s | 21.18 s | 104063748 |
+| ribbon 与 packed vertex | 37.88 s | 12.56 s | 45718914 |
+| state template cache | 37.41 s | 10.45 s | 45718914 |
+| 精确边界失效 | 19.98 s | 6.82 s | 45718914 |
+| GPU model instancing | 17.30 s | 3.78 s | 11223834 + 666982 instances |
+
+相对同一工作区首轮 48.69 s, 当前大型短验收提升 2.81x. 相对最初 `>252 s` 且未产生首帧的基线, 当前可以在 17.30 s 内完成完整短视频. GPU instancing 将设备展开顶点替换为 66.7 万个 12 byte 实例, 初始 GPU 上传不再包含约 3450 万个重复模板顶点.
+
+当前 `cpu-8bit-dvd.toml` 为 60 tick, 因此新生成 Stored v2 replay 是 3 秒 clip, 包含 479721 个方块和 40 个可见 update frame. 每种预设先预热 1 次, 再使用同一 release binary 和 `h264_videotoolbox` 连续运行 3 次. 下表保留全部输出帧率.
+
+| 画质 | 第 1 轮 | 第 2 轮 | 第 3 轮 | 中位数 | 目标 |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| high, 4x AA, 2048 shadow | 80.91 | 78.32 | 74.36 | 78.32 | >=30 |
+| fast, 1x AA, shadow off | 90.29 | 86.07 | 89.26 | 89.26 | >=60 |
+
+high 首轮总 wall 为 2.22 s, trace 与初始 mesh 在 0.43 s 完成, 180 帧输出的 mesh, submit, readback wait, CPU copy 和 encoder backpressure 分别为 1087.5, 37.2, 319.0, 13.1 和 211.2 ms. 大型 high 与 fast 的绝对帧率目标均已通过 3 轮中位数验收. 当前场景长度不是计划表中的 5 秒, 因此结果只按输出帧率验收, 不伪造 5 秒 wall 数据. `vendors/a.mcpr` 的 155 万方块压力样本仍用于 20 秒 trace 和超大初始场景验证.

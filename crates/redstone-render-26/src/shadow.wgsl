@@ -7,11 +7,12 @@ var<uniform> light: Light;
 
 struct VertexInput {
     @location(0) position: vec3<f32>,
-    @location(1) normal: vec3<f32>,
+    @location(1) normal: vec4<f32>,
     @location(2) color: vec4<f32>,
+    @location(3) instance_position: vec3<f32>,
 };
 
 @vertex
 fn vertex_main(input: VertexInput) -> @builtin(position) vec4<f32> {
-    return light.view_projection * vec4<f32>(input.position, 1.0);
+    return light.view_projection * vec4<f32>(input.position + input.instance_position, 1.0);
 }

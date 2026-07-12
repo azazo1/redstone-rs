@@ -21,7 +21,9 @@ use redstone_java_26::{
 use redstone_replay_26::{
     ReplayOptions, ReplayRegion, ReplayStats, ReplayTimeKeyframe, ReplayTimeline, ReplayWriter,
 };
-use redstone_render_26::{RenderOptions, VideoEncoderKind, render_replay};
+use redstone_render_26::{
+    RenderOptions, RenderQuality, ShadowQuality, VideoEncoderKind, render_replay,
+};
 use tokio::io::{AsyncBufReadExt, AsyncRead, BufReader};
 use tokio::process::Command as ProcessCommand;
 use tokio::sync::Semaphore;
@@ -70,6 +72,43 @@ impl From<VideoEncoderArg> for VideoEncoderKind {
             VideoEncoderArg::H264Nvenc => Self::H264Nvenc,
             VideoEncoderArg::H264Qsv => Self::H264Qsv,
             VideoEncoderArg::H264Amf => Self::H264Amf,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default, ValueEnum)]
+enum RenderQualityArg {
+    #[default]
+    High,
+    Balanced,
+    Fast,
+}
+
+impl From<RenderQualityArg> for RenderQuality {
+    fn from(value: RenderQualityArg) -> Self {
+        match value {
+            RenderQualityArg::High => Self::High,
+            RenderQualityArg::Balanced => Self::Balanced,
+            RenderQualityArg::Fast => Self::Fast,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, ValueEnum)]
+enum ShadowQualityArg {
+    Off,
+    Low,
+    Medium,
+    High,
+}
+
+impl From<ShadowQualityArg> for ShadowQuality {
+    fn from(value: ShadowQualityArg) -> Self {
+        match value {
+            ShadowQualityArg::Off => Self::Off,
+            ShadowQualityArg::Low => Self::Low,
+            ShadowQualityArg::Medium => Self::Medium,
+            ShadowQualityArg::High => Self::High,
         }
     }
 }
@@ -226,8 +265,12 @@ enum Command {
         bitrate_mbps: u32,
         #[arg(long, default_value_t = 70.0)]
         fov: f32,
-        #[arg(long, default_value_t = 4)]
-        aa: u32,
+        #[arg(long, value_enum, default_value = "high")]
+        quality: RenderQualityArg,
+        #[arg(long)]
+        aa: Option<u32>,
+        #[arg(long, value_enum)]
+        shadows: Option<ShadowQualityArg>,
         #[arg(long, default_value_t = 32)]
         view_distance: i32,
         #[arg(long, value_enum, default_value = "auto")]
@@ -354,7 +397,9 @@ async fn main() -> Result<()> {
             fps,
             bitrate_mbps,
             fov,
+            quality,
             aa,
+            shadows,
             view_distance,
             encoder,
             ffmpeg,
@@ -368,7 +413,9 @@ async fn main() -> Result<()> {
                 fps,
                 bitrate_mbps,
                 fov_degrees: fov,
+                quality: quality.into(),
                 antialiasing: aa,
+                shadows: shadows.map(Into::into),
                 encoder: encoder.into(),
                 ffmpeg,
                 original_speed,
@@ -399,6 +446,12 @@ async fn render_video(input: &Path, output: &Path, options: RenderOptions) -> Re
         encoder = stats.encoder,
         output_size = stats.output_size,
         elapsed_ms = stats.elapsed.as_secs_f64() * 1_000.0,
+        average_output_fps = stats.average_output_fps,
+        mesh_ms = stats.mesh_elapsed.as_secs_f64() * 1_000.0,
+        gpu_submit_ms = stats.gpu_submit_elapsed.as_secs_f64() * 1_000.0,
+        readback_wait_ms = stats.readback_wait_elapsed.as_secs_f64() * 1_000.0,
+        cpu_copy_ms = stats.cpu_copy_elapsed.as_secs_f64() * 1_000.0,
+        encoder_backpressure_ms = stats.encoder_backpressure_elapsed.as_secs_f64() * 1_000.0,
         original_speed = options.original_speed,
         "完成 replay 视频渲染"
     );

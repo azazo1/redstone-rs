@@ -352,7 +352,7 @@ wire 有序传播使用 `Compiled`, `Interpreted` 和 `FellBack` 三种内部结
 ### 落盘语义
 
 - 在目标同目录使用 `create_new` 建立 recording, render trace 和 archive 临时文件.
-- recording 与 render trace flush 和 `sync_all` 后, 使用 256 KiB buffer 流式压缩进 ZIP. archive finish 和 `sync_all` 完成后才 rename 到目标.
+- recording flush 和 `sync_all` 后使用 256 KiB buffer 流式压缩进 ZIP. render trace 保持相同 v2 字节格式, 但使用 ZIP Stored entry 避免视频转换时重新解压超大轨迹. archive finish 和 `sync_all` 完成后才 rename 到目标.
 - 成功后删除两个内容临时文件. 任意未 finish 的 writer 在 Drop 中清理全部临时文件.
 - 断言在 Replay finish 之后检查, 因此断言失败仍保留已完成录像. 编码失败不会用半成品替换目标.
 
@@ -362,11 +362,13 @@ wire 有序传播使用 `Compiled`, `Interpreted` 和 `FellBack` 三种内部结
 
 - `redstone render INPUT.mcpr OUTPUT.mp4` 只接受本项目新生成且包含 `redstone/render-v2.bin` 的 Replay. v1 不再读取, 需要重新生成 MCPR.
 - 渲染轨迹保存初始非空气方块, moving piston snapshot, 按 replay timestamp 排列的方块和 piston 变化, 总 tick 数和 tick 阶段实测 walltime. 轨迹不保存实体, 粒子或音频.
-- wgpu 优先选择高性能图形适配器, 不可用时尝试软件适配器. 场景按 chunk 缓存网格, 方块变化只使相关 chunk 和水平邻居失效.
+- wgpu 优先选择高性能图形适配器, 不可用时尝试软件适配器. 场景按 16x16x16 section 保存稠密状态和网格, 只有边界方块变化才使对应相邻 section 失效. 相机视锥和阴影覆盖分别限制 section 构建与 draw.
 - 已分类红石设备使用按 26.1.2 方块状态驱动的程序化多部件模型. wire 连接和爬墙, 二极管档位与模式, 控件安装面, 门类开合, 铁轨形状, 活塞方向和容器轮廓均可辨识. 供电与点亮状态使用高亮材质, 其他方块使用分类色立方体.
 - moving piston 使用独立动态 GPU buffer, 按原版 2 tick 区间连续插值. TIME path 暂停会冻结活塞, 变速和 `--original-speed` 会同步改变动画速度.
-- 默认输出 `1920x1080`, `60 FPS`, `20 Mbps`, `70` 度 FOV, `4x MSAA` 和 32 chunk 渲染距离. 宽高, FPS, 码率, FOV, AA, 渲染距离, FFmpeg 路径和 H.264 编码器均可配置.
-- 自动编码器会用单帧 probe 选择平台硬件 H.264, 然后回退到 `libx264`. 视频固定为静音 MP4 和 `yuv420p`.
+- 默认输出 `1920x1080`, `60 FPS`, `20 Mbps`, `70` 度 FOV, `high` 画质和 32 chunk 渲染距离. `high`, `balanced` 和 `fast` 分别对应 `4x/2048`, `2x/1024` 和 `1x/off`. `--aa` 与 `--shadows` 显式值优先于预设.
+- macOS 使用 compute pass 将最终 BGRA 转为 BT.709 limited-range NV12, 其他平台保留 BGRA fallback. 3 个异步 readback slot 只等待最旧 submission. FFmpeg stdin 由容量为 4 的 tokio channel 驱动, VideoToolbox 启用 realtime 和 speed priority.
+- 完整立方体按最终分类色 greedy meshing. 高频 wire 和 rail 薄结构使用 quad/ribbon. 顶点使用 20 byte packed normal 和 color, section buffer 与动态活塞 buffer 在容量足够时原位更新. 非完整设备按 `(state_id, visible_faces)` 共享局部模板, GPU 将全部可见 section 的同模型实例合并为一次 instanced draw.
+- 自动编码器会用单帧 probe 选择平台硬件 H.264, 然后回退到 `libx264`. 视频固定为静音 MP4, BT.709 metadata 和 `yuv420p` 输出. 连续相同场景, 摄像机和活塞 sample 复用同一个 `Arc` frame.
 - 默认按 `timelines.json` 的 TIME path 渲染. `--original-speed` 按录制时测得的模拟 walltime 还原实际吞吐速度. 例如模拟达到 3000 TPS 时, 视频中的游戏时间以标准 20 TPS 的 150 倍推进.
 - 摄像机在 walltime 模式下按总时长比例重映射, 因而仍会完整走完 Position Path.
 

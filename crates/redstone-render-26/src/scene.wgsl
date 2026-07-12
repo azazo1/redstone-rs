@@ -20,8 +20,9 @@ var shadow_sampler: sampler_comparison;
 
 struct VertexInput {
     @location(0) position: vec3<f32>,
-    @location(1) normal: vec3<f32>,
+    @location(1) normal: vec4<f32>,
     @location(2) color: vec4<f32>,
+    @location(3) instance_position: vec3<f32>,
 };
 
 struct VertexOutput {
@@ -35,11 +36,12 @@ struct VertexOutput {
 @vertex
 fn vertex_main(input: VertexInput) -> VertexOutput {
     var output: VertexOutput;
-    output.clip_position = camera.view_projection * vec4<f32>(input.position, 1.0);
-    output.normal = input.normal;
+    let position = input.position + input.instance_position;
+    output.clip_position = camera.view_projection * vec4<f32>(position, 1.0);
+    output.normal = input.normal.xyz;
     output.color = input.color;
-    output.world_position = input.position;
-    output.shadow_position = light.view_projection * vec4<f32>(input.position, 1.0);
+    output.world_position = position;
+    output.shadow_position = light.view_projection * vec4<f32>(position, 1.0);
     return output;
 }
 
@@ -62,5 +64,10 @@ fn fragment_main(input: VertexOutput) -> @location(0) vec4<f32> {
     let lighting = 0.28 + height_fill + diffuse * (0.18 + visibility * 0.4);
     let emission = input.color.a;
     let rgb = input.color.rgb * lighting + input.color.rgb * emission;
-    return vec4<f32>(rgb, 1.0);
+    let encoded = select(
+        1.055 * pow(max(rgb, vec3<f32>(0.0)), vec3<f32>(1.0 / 2.4)) - 0.055,
+        12.92 * rgb,
+        rgb <= vec3<f32>(0.0031308),
+    );
+    return vec4<f32>(encoded, 1.0);
 }

@@ -1,7 +1,7 @@
 use redstone_core::BlockPos;
 use redstone_java_26::StateDefinition;
 
-use super::super::mesh::{Color, Transform, Vertex, cuboid, rod};
+use super::super::mesh::{Color, Transform, Vertex, cuboid, ribbon};
 use super::{active_color, facing};
 
 pub(super) fn observer(
@@ -170,21 +170,21 @@ pub(super) fn rail(
 
 fn straight_x(output: &mut Vec<Vertex>, pos: BlockPos, west_y: f32, east_y: f32, color: Color) {
     for z in [0.25, 0.75] {
-        rod(output, pos, [0.0, west_y, z], [1.0, east_y, z], 0.055, color);
+        ribbon(output, pos, [0.0, west_y, z], [1.0, east_y, z], 0.055, color);
     }
     for x in [0.16, 0.5, 0.84] {
         let y = west_y + (east_y - west_y) * x;
-        rod(output, pos, [x, y, 0.2], [x, y, 0.8], 0.045, [0.38, 0.27, 0.14, 0.0]);
+        ribbon(output, pos, [x, y, 0.2], [x, y, 0.8], 0.045, [0.38, 0.27, 0.14, 0.0]);
     }
 }
 
 fn straight_z(output: &mut Vec<Vertex>, pos: BlockPos, north_y: f32, south_y: f32, color: Color) {
     for x in [0.25, 0.75] {
-        rod(output, pos, [x, north_y, 0.0], [x, south_y, 1.0], 0.055, color);
+        ribbon(output, pos, [x, north_y, 0.0], [x, south_y, 1.0], 0.055, color);
     }
     for z in [0.16, 0.5, 0.84] {
         let y = north_y + (south_y - north_y) * z;
-        rod(output, pos, [0.2, y, z], [0.8, y, z], 0.045, [0.38, 0.27, 0.14, 0.0]);
+        ribbon(output, pos, [0.2, y, z], [0.8, y, z], 0.045, [0.38, 0.27, 0.14, 0.0]);
     }
 }
 
@@ -196,8 +196,8 @@ fn curve(
     color: Color,
 ) {
     let center = [0.5, 0.07, 0.5];
-    rod(output, pos, first, center, 0.07, color);
-    rod(output, pos, center, second, 0.07, color);
+    ribbon(output, pos, first, center, 0.07, color);
+    ribbon(output, pos, center, second, 0.07, color);
     let inner_first = [
         first[0] * 0.68 + 0.16,
         first[1],
@@ -208,6 +208,6 @@ fn curve(
         second[1],
         second[2] * 0.68 + 0.16,
     ];
-    rod(output, pos, inner_first, center, 0.05, color);
-    rod(output, pos, center, inner_second, 0.05, color);
+    ribbon(output, pos, inner_first, center, 0.05, color);
+    ribbon(output, pos, center, inner_second, 0.05, color);
 }
