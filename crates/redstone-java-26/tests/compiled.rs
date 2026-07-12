@@ -114,6 +114,59 @@ fn compiled_wire_and_diode_match_interpreted_each_tick() {
 }
 
 #[test]
+fn auto_falls_back_after_frequent_topology_recompilation() {
+    let mut registry = Java26Registry::new();
+    let wire = default_state(&mut registry, "minecraft:redstone_wire");
+    let support = default_state(&mut registry, "minecraft:stone");
+    let wire_pos = BlockPos::new(0, 1, 0);
+    let mut world = SparseWorld::new(registry.air_state());
+    world
+        .set_block(wire_pos.relative(Direction::Down), support)
+        .unwrap();
+    world.set_block(wire_pos, wire).unwrap();
+    let mut simulation = Simulation::load(
+        Java26Rules::new(registry),
+        world,
+        SimulationConfig {
+            execution_mode: ExecutionMode::Auto,
+            ..SimulationConfig::default()
+        },
+    )
+    .unwrap();
+    simulation.prepare_execution().unwrap();
+
+    for index in 0..20 {
+        let action = if index % 2 == 0 {
+            Action::BreakBlock { pos: wire_pos }
+        } else {
+            Action::SetBlock {
+                pos: wire_pos,
+                state: wire,
+            }
+        };
+        simulation.apply(action).unwrap();
+        if simulation.execution_report().backend == ExecutionBackend::Interpreted {
+            break;
+        }
+    }
+
+    let report = simulation.execution_report();
+    assert_eq!(report.backend, ExecutionBackend::Interpreted);
+    assert_eq!(
+        report
+            .partial_recompilations
+            .saturating_add(report.full_recompilations),
+        11
+    );
+    assert!(
+        report
+            .fallback_reason
+            .as_deref()
+            .is_some_and(|reason| reason.contains("11 topology recompilations within 200 game ticks"))
+    );
+}
+
+#[test]
 fn compiled_source_state_paste_matches_interpreted_each_tick() {
     let mut registry = Java26Registry::new();
     let lever_off = state_with(

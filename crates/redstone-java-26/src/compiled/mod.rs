@@ -5,13 +5,13 @@ mod network;
 mod passes;
 mod runtime;
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, VecDeque};
 use std::sync::Arc;
 use std::time::Instant;
 
 use redstone_core::{
     BlockChange, BlockPos, ExecutionBackend, ExecutionConfig, ExecutionMode, ExecutionReport,
-    RedstoneMode, RulesError, SparseWorld,
+    GameTick, RedstoneMode, RulesError, SparseWorld,
 };
 use tracing::{info, info_span, warn};
 
@@ -24,6 +24,9 @@ pub(crate) use self::network::runtime::{
 };
 pub(crate) use self::runtime::{CompiledWireTransition, Synchronization};
 use self::runtime::CompiledRuntime;
+
+const AUTO_RECOMPILE_WINDOW_TICKS: u64 = 200;
+const AUTO_RECOMPILE_LIMIT: usize = 11;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum OrderedPropagation {
@@ -39,6 +42,7 @@ pub(crate) struct CompiledExecutor {
     config: Option<ExecutionConfig>,
     permanent_fallback_reason: Option<String>,
     comparator_outputs: BTreeMap<BlockPos, u8>,
+    recent_recompilations: VecDeque<GameTick>,
 }
 
 impl CompiledExecutor {
@@ -73,6 +77,7 @@ impl CompiledExecutor {
 
         self.config = Some(config);
         self.runtime = None;
+        self.recent_recompilations.clear();
         if config.requested_mode == ExecutionMode::Interpreted {
             self.report = ExecutionReport {
                 requested_mode: config.requested_mode,
@@ -174,6 +179,7 @@ impl CompiledExecutor {
         registry: &Java26Registry,
         world: &SparseWorld,
         changes: &[BlockChange],
+        tick: GameTick,
     ) -> Result<Synchronization, RulesError> {
         if let Some(reason) = &self.permanent_fallback_reason
             && self.report.requested_mode == ExecutionMode::Compiled
@@ -188,8 +194,14 @@ impl CompiledExecutor {
         let synchronization =
             runtime.synchronize(registry, world, changes, &self.comparator_outputs);
         match synchronization {
-            Ok(synchronization) => {
+            Ok(mut synchronization) => {
                 self.refresh_report();
+                if (synchronization.full_recompile || synchronization.recompiled_nodes > 0)
+                    && let Some(reason) = self.auto_recompile_fallback_reason(tick)
+                {
+                    self.fail_runtime("compiled redstone topology changed too frequently", reason)?;
+                    synchronization.fallback_to_interpreted = true;
+                }
                 Ok(synchronization)
             }
             Err(error) => {
@@ -382,6 +394,34 @@ impl CompiledExecutor {
         self.report.dense_full_rebuilds = runtime.dense_full_rebuilds();
         self.report.recompiled_nodes = runtime.recompiled_nodes();
         self.report.recompile_duration = runtime.recompile_duration();
+    }
+
+    fn auto_recompile_fallback_reason(&mut self, tick: GameTick) -> Option<String> {
+        if self.report.requested_mode != ExecutionMode::Auto {
+            return None;
+        }
+        if self
+            .recent_recompilations
+            .front()
+            .is_some_and(|first| tick.0 < first.0)
+        {
+            self.recent_recompilations.clear();
+        }
+        while self
+            .recent_recompilations
+            .front()
+            .is_some_and(|first| tick.0 - first.0 >= AUTO_RECOMPILE_WINDOW_TICKS)
+        {
+            self.recent_recompilations.pop_front();
+        }
+        self.recent_recompilations.push_back(tick);
+        (self.recent_recompilations.len() >= AUTO_RECOMPILE_LIMIT).then(|| {
+            format!(
+                "{} topology recompilations within {} game ticks",
+                self.recent_recompilations.len(),
+                AUTO_RECOMPILE_WINDOW_TICKS
+            )
+        })
     }
 
     fn fail_runtime(
@@ -671,6 +711,68 @@ mod tests {
 
         let error = executor.prepare(&registry, &world).unwrap_err();
         assert!(error.to_string().contains("not a fixed point"));
+    }
+
+    #[test]
+    fn auto_recompile_window_falls_back_after_more_than_ten_recompilations() {
+        let mut executor = CompiledExecutor {
+            report: ExecutionReport {
+                requested_mode: ExecutionMode::Auto,
+                backend: ExecutionBackend::Compiled,
+                ..ExecutionReport::default()
+            },
+            ..CompiledExecutor::default()
+        };
+
+        for tick in 0..10 {
+            assert!(
+                executor
+                    .auto_recompile_fallback_reason(GameTick(tick * 19))
+                    .is_none()
+            );
+        }
+        let reason = executor
+            .auto_recompile_fallback_reason(GameTick(199))
+            .unwrap();
+        assert!(reason.contains("11 topology recompilations within 200 game ticks"));
+    }
+
+    #[test]
+    fn auto_recompile_window_resets_and_forced_compiled_never_falls_back() {
+        let mut auto = CompiledExecutor {
+            report: ExecutionReport {
+                requested_mode: ExecutionMode::Auto,
+                backend: ExecutionBackend::Compiled,
+                ..ExecutionReport::default()
+            },
+            ..CompiledExecutor::default()
+        };
+        for tick in 0..10 {
+            assert!(
+                auto.auto_recompile_fallback_reason(GameTick(tick))
+                    .is_none()
+            );
+        }
+        assert!(
+            auto.auto_recompile_fallback_reason(GameTick(200))
+                .is_none()
+        );
+
+        let mut compiled = CompiledExecutor {
+            report: ExecutionReport {
+                requested_mode: ExecutionMode::Compiled,
+                backend: ExecutionBackend::Compiled,
+                ..ExecutionReport::default()
+            },
+            ..CompiledExecutor::default()
+        };
+        for tick in 0..20 {
+            assert!(
+                compiled
+                    .auto_recompile_fallback_reason(GameTick(tick))
+                    .is_none()
+            );
+        }
     }
 
     fn resolve_default(registry: &mut Java26Registry, name: &str) -> BlockStateId {

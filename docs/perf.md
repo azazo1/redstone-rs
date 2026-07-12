@@ -489,6 +489,24 @@ just run assets/scenarios/frostbyte-cpu-16bit-hello-world.toml --engine interpre
 
 compiled hello-world 的稳定前中位数是 interpreted 的 3.86 倍. 该对比只计算 tick 阶段, compiled 的 2909.625 ms 中位构图耗时仍单独列出. compiled 的 wall 包含构图和世界加载, 因而 hello-world 总 wall 高于 interpreted.
 
+### Replay 记录成本
+
+Frostbyte hello-world 使用 `--engine compiled --replay` 时, `record_events=true` 会保留有序 `WorldDelta`, Replay writer 还会在 tick 循环内把每个方块变化编码为协议包. 因此 replay TPS 包含事件收集和录像编码, 不能与关闭 replay 的纯 tick 吞吐直接比较.
+
+```shell
+just run assets/scenarios/frostbyte-cpu-16bit-hello-world.toml --engine compiled --replay /tmp/frostbyte.mcpr
+```
+
+当前路径对每个中间 wire 状态执行 `SparseWorld` 写入和事件记录, 单轮实测 `active_ticks_per_second=5747.004`. 批量世界写回实验独立运行 3 次的 active TPS 为 4313.703, 6397.184 和 5798.574, 中位数 5798.574. 该结果与原路径处于同一档, 说明实际世界写入不是主瓶颈, 因而该实验代码未保留. 所有轮次的 206 个灯断言均通过, 录像约 6.3 MiB.
+
+另一次实验仅在 Replay 编码前合并同 tick 同位置的 wire power 包, 录像降至 3.7 MiB, 但额外索引使 active TPS 降到 5347.044, 同时削弱完整事件语义. 该方案未保留. replay 从普通 compiled 的约 1 万降到约 5.8 千, 主要来自必须执行的 `WorldDelta` 收集和逐事件协议编码.
+
+### Auto 动态拓扑熔断
+
+Auto 使用确定性的滑动窗口策略. 200 game tick 内第 11 次拓扑重编译完成后, 执行器保存编译统计, 恢复解释器缓存并永久切换到 interpreted. 窗口判断不使用 wall 时间, 相同输入不会因为机器负载不同而选择不同后端. 强制 `Compiled` 不应用该策略.
+
+`flying-machine.toml` 实跑在第 11 次重编译后输出 `engine=interpreted`, `partial_recompilations=11`, `dense_full_rebuilds=11` 和明确的 `fallback_reason`. 场景断言继续通过.
+
 动态拓扑回归分别以 `interpreted` 和 `compiled` 运行 `flying-roof`, `flying-machine` 和 `piston-gate-3x3`. 每个组合同样独立运行 3 次, 比较完整场景的 `ticks_per_second`, 局部重编译次数和重编译节点数. 编译模式耗时中位数不得超过同版本解释模式的 `110%`.
 
 | 场景 | interpreted tick/s 中位数 | compiled tick/s 中位数 | compiled / interpreted 耗时 | topology rebuilds | recompiled nodes | 断言 |

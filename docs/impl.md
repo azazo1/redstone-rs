@@ -61,7 +61,7 @@
 
 公共执行策略由 `ExecutionMode` 和 `SimulationConfig.execution_mode` 选择. 默认模式为 `Auto`, 场景 TOML 不保存该策略.
 
-- `Auto` 尝试构建编译图. 诊断模式不兼容时通过 `tracing::warn` 记录原因并使用解释器. 初始编译或动态拓扑同步失败时记录原因并永久切换到解释器.
+- `Auto` 尝试构建编译图. 诊断模式不兼容时通过 `tracing::warn` 记录原因并使用解释器. 初始编译或动态拓扑同步失败时记录原因并永久切换到解释器. 200 game tick 窗口内超过 10 次拓扑重编译时同样永久回退, 判定只依赖 tick 和次数.
 - `Interpreted` 始终走 Java 26.1.2 规则解释路径.
 - `Compiled` 强制构建和使用编译图. 遇到 trace, VCD, Java oracle, experimental redstone 或无法安全编译和同步的状态时返回明确错误, 不静默回退.
 - trace, VCD 和 Java oracle 需要完整微事件顺序, experimental redstone 有独立更新顺序, 因而 `Auto` 在这些模式下实际使用 `Interpreted`.

@@ -84,11 +84,11 @@ just test
 
 `run`, `test`, `trace` 和 `bench` 接受 `--engine auto|interpreted|compiled`, 默认使用 `auto`. 执行器是 CLI 和库运行策略, 不写入场景 TOML.
 
-- `auto` 尝试编译电气传播图. 诊断模式不兼容时记录 warning 并使用解释器, 构图或动态拓扑同步失败时记录 warning 并永久回退到解释器.
+- `auto` 尝试编译电气传播图. 诊断模式不兼容时记录 warning 并使用解释器, 构图或动态拓扑同步失败时记录 warning 并永久回退到解释器. 200 game tick 内超过 10 次拓扑重编译也会永久回退, 防止飞行器持续重建图.
 - `interpreted` 始终使用 Java 26.1.2 规则解释执行.
 - `compiled` 强制使用编译后端, 用于差分和性能测试. 遇到无法安全编译或同步的状态时直接返回错误.
 - trace, VCD, Java oracle 和 experimental redstone 需要完整诊断或特定更新顺序. `auto` 会改用 interpreted, `compiled` 会明确报错.
-- Replay MCPR 读取有序 `WorldDelta`, 不要求微轨迹, 因而录制 Replay 本身不会停用 compiled 后端.
+- Replay MCPR 读取有序 `WorldDelta`, 不要求微轨迹, 因而录制 Replay 本身不会停用 compiled 后端. replay 会保留并编码有序方块事件, TPS 不能直接等同于关闭 replay 的纯 tick 吞吐.
 
 ```shell
 cargo run --release -p redstone-cli -- run assets/scenarios/flying-machine.toml --engine auto

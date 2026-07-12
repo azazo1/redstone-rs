@@ -1512,7 +1512,7 @@ impl BlockRules for Java26Rules {
         self.synchronize_comparator_cache(ctx.world, changes)?;
         let synchronization = self
             .compiled
-            .synchronize(&self.registry, ctx.world, changes)?;
+            .synchronize(&self.registry, ctx.world, changes, ctx.tick)?;
         if synchronization.full_recompile || synchronization.recompiled_nodes > 0 {
             debug!(
                 full = synchronization.full_recompile,
