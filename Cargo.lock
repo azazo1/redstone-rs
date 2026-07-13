@@ -991,7 +991,7 @@ dependencies = [
 
 [[package]]
 name = "redstone-cli"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "clap",
@@ -1015,7 +1015,7 @@ dependencies = [
 
 [[package]]
 name = "redstone-core"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "indexmap",
  "rustc-hash 2.1.3",
@@ -1030,7 +1030,7 @@ dependencies = [
 
 [[package]]
 name = "redstone-io"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "fastnbt",
  "flate2",
@@ -1047,7 +1047,7 @@ dependencies = [
 
 [[package]]
 name = "redstone-java-26"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "indexmap",
  "redstone-core",
@@ -1062,7 +1062,7 @@ dependencies = [
 
 [[package]]
 name = "redstone-render-26"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "bytemuck",
@@ -1080,7 +1080,7 @@ dependencies = [
 
 [[package]]
 name = "redstone-replay-26"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "crc32fast",
  "redstone-core",
