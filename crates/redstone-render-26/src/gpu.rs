@@ -43,7 +43,6 @@ pub(crate) struct GpuRenderer {
     nv12: Option<Nv12Converter>,
     width: u32,
     height: u32,
-    fov_degrees: f32,
     shadow_enabled: bool,
     timings: GpuTimings,
     static_generation: u64,
@@ -115,7 +114,6 @@ impl GpuRenderer {
         height: u32,
         samples: u32,
         shadow_size: u32,
-        fov_degrees: f32,
     ) -> Result<Self> {
         let instance = wgpu::Instance::new(
             wgpu::InstanceDescriptor::new_without_display_handle_from_env(),
@@ -475,7 +473,6 @@ impl GpuRenderer {
             nv12,
             width,
             height,
-            fov_degrees,
             shadow_enabled: shadow_size > 0,
             timings: GpuTimings::default(),
             static_generation: 0,
@@ -589,14 +586,18 @@ impl GpuRenderer {
         )
     }
 
-    pub(crate) fn render(&mut self, pose: CameraPose) -> Result<Option<Vec<u8>>> {
+    pub(crate) fn render(
+        &mut self,
+        pose: CameraPose,
+        fov_degrees: f32,
+    ) -> Result<Option<Vec<u8>>> {
         let completed = if self.pending_readbacks.len() == self.readbacks.len() {
             self.read_oldest()?
         } else {
             None
         };
         let (view_projection, light_view_projection) =
-            camera_matrices(pose, self.width, self.height, self.fov_degrees);
+            camera_matrices(pose, self.width, self.height, fov_degrees);
         self.queue.write_buffer(
             &self.camera_buffer,
             0,

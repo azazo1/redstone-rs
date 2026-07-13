@@ -9,7 +9,7 @@ use redstone_core::{
     BlockEntityChange, BlockEvent, BlockPos, SimulationEnvironment, SparseWorld, WorldDelta,
     WorldEvent,
 };
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use zip::ZipWriter;
 use zip::write::SimpleFileOptions;
@@ -44,6 +44,7 @@ pub const MINECRAFT_VERSION: &str = "26.1.2";
 pub const PROTOCOL_VERSION: i32 = 775;
 pub const FILE_FORMAT_VERSION: i32 = 14;
 pub const TICK_MILLIS: u64 = 50;
+pub const RENDER_OPTIONS_ENTRY: &str = "redstone/render-options.json";
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct ReplayTimeKeyframe {
@@ -151,7 +152,8 @@ impl ReplayTimeline {
     }
 }
 
-#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
 pub enum ReplayCameraInterpolation {
     Linear,
     Cubic,
@@ -242,6 +244,73 @@ pub struct ReplayOptions {
     pub camera: ReplayCameraOptions,
     pub camera_hints: Vec<ReplayCameraHint>,
     pub camera_path: Option<ReplayCameraPath>,
+    pub render_options: ReplayRenderOptions,
+}
+
+#[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize)]
+pub struct ReplayRenderOptions {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fov_degrees: Option<f32>,
+    #[serde(default)]
+    pub fov_interpolation: ReplayCameraInterpolation,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub fov_keyframes: Vec<ReplayFovKeyframe>,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Serialize)]
+pub struct ReplayFovKeyframe {
+    pub time_ms: i64,
+    pub fov_degrees: f32,
+}
+
+impl ReplayRenderOptions {
+    fn is_default(&self) -> bool {
+        self == &Self::default()
+    }
+
+    fn validate(&self, duration_ms: Option<i64>) -> Result<(), ReplayError> {
+        if let Some(value) = self.fov_degrees
+            && (!(10.0..=140.0).contains(&value) || !value.is_finite())
+        {
+            return Err(ReplayError::RenderFovOutOfRange { value });
+        }
+        for keyframe in &self.fov_keyframes {
+            let value = keyframe.fov_degrees;
+            if !(10.0..=140.0).contains(&value) || !value.is_finite() {
+                return Err(ReplayError::RenderFovOutOfRange { value });
+            }
+        }
+        for pair in self.fov_keyframes.windows(2) {
+            if pair[1].time_ms <= pair[0].time_ms {
+                return Err(ReplayError::RenderFovTimeOrder {
+                    previous: pair[0].time_ms,
+                    next: pair[1].time_ms,
+                });
+            }
+        }
+        if let Some(duration_ms) = duration_ms
+            && !self.fov_keyframes.is_empty()
+            && (self.fov_keyframes.len() < 2
+                || self.fov_keyframes[0].time_ms != 0
+                || self.fov_keyframes.last().unwrap().time_ms != duration_ms)
+        {
+            return Err(ReplayError::RenderFovPathEndpoints { duration_ms });
+        }
+        Ok(())
+    }
+
+    pub fn read_mcpr(path: impl AsRef<Path>) -> Result<Self, ReplayError> {
+        let file = File::open(path)?;
+        let mut archive = zip::ZipArchive::new(file)?;
+        let mut entry = match archive.by_name(RENDER_OPTIONS_ENTRY) {
+            Ok(entry) => entry,
+            Err(zip::result::ZipError::FileNotFound) => return Ok(Self::default()),
+            Err(error) => return Err(error.into()),
+        };
+        let options = serde_json::from_reader::<_, Self>(&mut entry)?;
+        options.validate(None)?;
+        Ok(options)
+    }
 }
 
 impl ReplayOptions {
@@ -264,6 +333,7 @@ impl ReplayOptions {
             camera: ReplayCameraOptions::default(),
             camera_hints: Vec::new(),
             camera_path: None,
+            render_options: ReplayRenderOptions::default(),
         }
     }
 
@@ -289,6 +359,11 @@ impl ReplayOptions {
 
     pub fn with_camera_path(mut self, path: Option<ReplayCameraPath>) -> Self {
         self.camera_path = path;
+        self
+    }
+
+    pub fn with_render_options(mut self, options: ReplayRenderOptions) -> Self {
+        self.render_options = options;
         self
     }
 }
@@ -337,6 +412,9 @@ impl ReplayWriter {
         initial_world: &SparseWorld,
     ) -> Result<Self, ReplayError> {
         options.camera.validate()?;
+        options
+            .render_options
+            .validate(Some(options.timeline.duration_ms()))?;
         if let Some(path) = &options.camera_path {
             ReplayCameraPath::new(
                 path.interpolation,
@@ -577,6 +655,10 @@ impl ReplayWriter {
                 self.options.camera_path.as_ref(),
             )?,
         )?;
+        if !self.options.render_options.is_default() {
+            archive.start_file(RENDER_OPTIONS_ENTRY, options)?;
+            serde_json::to_writer(&mut archive, &self.options.render_options)?;
+        }
         let trace_options = SimpleFileOptions::default()
             .compression_method(zip::CompressionMethod::Stored)
             .unix_permissions(0o644);
@@ -1239,6 +1321,12 @@ pub enum ReplayError {
     CameraAnglesNotFinite { yaw: f32, pitch: f32 },
     #[error("Replay 摄像头 pitch 超出 -90..=90: {pitch}")]
     CameraPitchOutOfRange { pitch: f32 },
+    #[error("Replay 渲染 FOV 超出 10..=140: {value}")]
+    RenderFovOutOfRange { value: f32 },
+    #[error("Replay 渲染 FOV 路径必须从 0 ms 覆盖到 {duration_ms} ms")]
+    RenderFovPathEndpoints { duration_ms: i64 },
+    #[error("Replay 渲染 FOV 关键帧时间必须严格递增: {previous} -> {next}")]
+    RenderFovTimeOrder { previous: i64, next: i64 },
     #[error("方块状态 ID 超出 26.1.2 全局注册表范围: {state}")]
     BlockStateOutOfRange { state: u32 },
     #[error("block event {name} 超出无符号字节范围: {value}")]
@@ -1502,6 +1590,20 @@ mod tests {
                 camera: ReplayCameraOptions::default(),
                 camera_hints: Vec::new(),
                 camera_path: None,
+                render_options: ReplayRenderOptions {
+                    fov_degrees: Some(82.0),
+                    fov_interpolation: ReplayCameraInterpolation::Linear,
+                    fov_keyframes: vec![
+                        ReplayFovKeyframe {
+                            time_ms: 0,
+                            fov_degrees: 82.0,
+                        },
+                        ReplayFovKeyframe {
+                            time_ms: 150,
+                            fov_degrees: 70.0,
+                        },
+                    ],
+                },
             },
             &world,
         )
@@ -1555,6 +1657,13 @@ mod tests {
         assert_eq!(metadata["protocol"], PROTOCOL_VERSION);
         assert_eq!(metadata["duration"], 150);
         assert_eq!(metadata["date"], 1234);
+        let render_options = {
+            let mut entry = archive.by_name(RENDER_OPTIONS_ENTRY).unwrap();
+            serde_json::from_reader::<_, serde_json::Value>(&mut entry).unwrap()
+        };
+        assert_eq!(render_options["fov_degrees"], 82.0);
+        assert_eq!(render_options["fov_interpolation"], "linear");
+        assert_eq!(render_options["fov_keyframes"][1]["fov_degrees"], 70.0);
 
         let recording = read_entry(&mut archive, "recording.tmcpr");
         let crc = String::from_utf8(read_entry(&mut archive, "recording.tmcpr.crc32")).unwrap();

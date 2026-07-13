@@ -6,43 +6,45 @@ strict = true
 
 [replay.camera]
 view_distance = 8
+fov = 78.0
 interpolation = "catmull_rom"
 
 [[replay.camera.keyframes]]
 time_ms = 0
-position = [-25.0, 48.0, 62.0]
-yaw = -132.60
-pitch = 34.09
+position = [-13.5, 30.0, 58.0]
+yaw = -138.37
+pitch = 22.55
+fov = 82.0
 
 [[replay.camera.keyframes]]
 time_ms = 1000
-position = [-25.0, 48.0, 62.0]
-yaw = -132.60
-pitch = 34.09
+position = [-13.5, 30.0, 58.0]
+yaw = -138.37
+pitch = 22.55
 
 [[replay.camera.keyframes]]
 time_ms = 22000
-position = [-12.0, 50.0, 78.0]
-yaw = -147.57
-pitch = 36.45
+yaw = -152.35
+pitch = 22.87
 
 [[replay.camera.keyframes]]
 time_ms = 43000
-position = [10.0, 52.0, 94.0]
-yaw = -171.37
-pitch = 37.84
+position = [12.5, 31.0, 86.0]
+yaw = -172.87
+pitch = 23.47
+fov = 72.0
 
 [[replay.camera.keyframes]]
 time_ms = 64000
-position = [32.0, 50.0, 100.0]
-yaw = 165.96
-pitch = 37.04
+yaw = 167.74
+pitch = 23.02
 
 [[replay.camera.keyframes]]
 time_ms = 85000
-position = [44.0, 48.0, 102.0]
-yaw = 152.02
-pitch = 36.35
+position = [40.5, 30.0, 94.0]
+yaw = 151.19
+pitch = 23.66
+fov = 80.0
 
 
 [source]

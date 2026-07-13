@@ -5,7 +5,7 @@ use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result, bail};
 use redstone_java_26::Java26Registry;
-use redstone_replay_26::RenderTrace;
+use redstone_replay_26::{RenderTrace, ReplayRenderOptions};
 
 mod encoder;
 mod gpu;
@@ -17,7 +17,7 @@ pub use encoder::VideoEncoderKind;
 use encoder::{EncoderSettings, VideoEncoder, select_encoder};
 use gpu::GpuRenderer;
 use scene::{Scene, SceneView};
-use timeline::ReplayTimeline;
+use timeline::{FovTimeline, ReplayTimeline};
 use timeline::CameraPose;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -65,7 +65,7 @@ pub struct RenderOptions {
     pub height: u32,
     pub fps: u32,
     pub bitrate_mbps: u32,
-    pub fov_degrees: f32,
+    pub fov_degrees: Option<f32>,
     pub quality: RenderQuality,
     pub antialiasing: Option<u32>,
     pub shadows: Option<ShadowQuality>,
@@ -82,7 +82,7 @@ impl Default for RenderOptions {
             height: 1080,
             fps: 60,
             bitrate_mbps: 20,
-            fov_degrees: 70.0,
+            fov_degrees: None,
             quality: RenderQuality::High,
             antialiasing: None,
             shadows: None,
@@ -138,10 +138,15 @@ pub async fn render_replay(
     options: &RenderOptions,
     mut progress: impl FnMut(u64, u64),
 ) -> Result<RenderStats> {
-    validate_options(output, options)?;
+    let replay_render_options = resolved_fov_options(
+        options,
+        ReplayRenderOptions::read_mcpr(input)?,
+    );
+    validate_options(output, options, replay_render_options.fov_degrees.unwrap_or(70.0))?;
     let quality = options.resolved_quality();
     let started = Instant::now();
     let timeline = ReplayTimeline::load(input)?;
+    let fov_timeline = FovTimeline::new(replay_render_options, timeline.duration_ms())?;
     let header = RenderTrace::read_mcpr_header(input)?;
     let render_duration_ms = if options.original_speed {
         if header.recorded_ticks == 0 || header.simulation_walltime.is_zero() {
@@ -169,6 +174,7 @@ pub async fn render_replay(
         options.fps,
         options.original_speed,
         render_duration_ms,
+        &fov_timeline,
     );
     let required_chunks = required_chunks(&frame_plans, options.view_distance_chunks);
     tracing::info!(
@@ -191,14 +197,17 @@ pub async fn render_replay(
     let encoder_name = select_encoder(&options.ffmpeg, options.encoder).await?;
     let initial_pose = frame_plans[0].pose;
     let mesh_started = Instant::now();
-    let scene_view = |pose| SceneView {
+    let scene_view = |pose, fov_degrees| SceneView {
         pose,
         view_distance: options.view_distance_chunks,
-        fov_degrees: options.fov_degrees,
+        fov_degrees,
         aspect_ratio: options.width as f32 / options.height as f32,
         shadows: quality.shadow_size > 0,
     };
-    let initial_meshes = scene.rebuild_visible(scene_view(initial_pose), &mut registry)?;
+    let initial_meshes = scene.rebuild_visible(
+        scene_view(initial_pose, frame_plans[0].fov_degrees),
+        &mut registry,
+    )?;
     let initial_vertices = initial_meshes
         .iter()
         .map(|mesh| mesh.vertices.len())
@@ -223,7 +232,6 @@ pub async fn render_replay(
         options.height,
         quality.antialiasing,
         quality.shadow_size,
-        options.fov_degrees,
     )
     .await?;
     gpu.update_meshes(initial_meshes)?;
@@ -261,7 +269,8 @@ pub async fn render_replay(
         }
         let pose = plan.pose;
         let mesh_started = Instant::now();
-        let mesh_updates = scene.rebuild_visible(scene_view(pose), &mut registry)?;
+        let mesh_updates =
+            scene.rebuild_visible(scene_view(pose, plan.fov_degrees), &mut registry)?;
         gpu.update_meshes(mesh_updates)?;
         let dynamic_vertices = scene.dynamic_vertices(
             replay_ms,
@@ -274,6 +283,7 @@ pub async fn render_replay(
         let visual_key = VisualKey {
             position: pose.position.map(f64::to_bits),
             rotation: pose.rotation.map(f32::to_bits),
+            fov_degrees: plan.fov_degrees.to_bits(),
             scene: scene.visual_sample(replay_ms),
         };
         if last_visual_key == Some(visual_key) {
@@ -281,7 +291,7 @@ pub async fn render_replay(
                 .back_mut()
                 .expect("重复帧之前必须已经提交首帧") += 1;
         } else {
-            if let Some(frame) = gpu.render(pose)? {
+            if let Some(frame) = gpu.render(pose, plan.fov_degrees)? {
                 let copies = visual_groups
                     .pop_front()
                     .context("GPU 完成帧缺少重复计数")?;
@@ -325,6 +335,7 @@ pub async fn render_replay(
 struct VisualKey {
     position: [u64; 3],
     rotation: [u32; 3],
+    fov_degrees: u32,
     scene: (u64, Option<i32>),
 }
 
@@ -343,6 +354,7 @@ async fn write_frame_copies(
 struct FramePlan {
     replay_ms: i32,
     pose: CameraPose,
+    fov_degrees: f32,
 }
 
 fn build_frame_plans(
@@ -351,6 +363,7 @@ fn build_frame_plans(
     fps: u32,
     original_speed: bool,
     render_duration_ms: f64,
+    fov_timeline: &FovTimeline,
 ) -> Vec<FramePlan> {
     let source_span = f64::from(timeline.source_end_ms() - timeline.source_start_ms());
     (0..total_frames)
@@ -371,6 +384,7 @@ fn build_frame_plans(
             FramePlan {
                 replay_ms,
                 pose: timeline.camera(camera_ms),
+                fov_degrees: fov_timeline.sample(camera_ms),
             }
         })
         .collect()
@@ -405,7 +419,21 @@ fn walltime_clip_duration_ms(
     simulation_walltime.as_secs_f64() * 1000.0 * source_ticks / recorded_ticks as f64
 }
 
-fn validate_options(output: &Path, options: &RenderOptions) -> Result<()> {
+fn resolved_fov_options(
+    options: &RenderOptions,
+    replay_options: ReplayRenderOptions,
+) -> ReplayRenderOptions {
+    if let Some(fov_degrees) = options.fov_degrees {
+        ReplayRenderOptions {
+            fov_degrees: Some(fov_degrees),
+            ..ReplayRenderOptions::default()
+        }
+    } else {
+        replay_options
+    }
+}
+
+fn validate_options(output: &Path, options: &RenderOptions, fov_degrees: f32) -> Result<()> {
     if options.width < 16
         || options.height < 16
         || options.width > 8192
@@ -421,7 +449,7 @@ fn validate_options(output: &Path, options: &RenderOptions) -> Result<()> {
     if !(1..=500).contains(&options.bitrate_mbps) {
         bail!("视频码率必须位于 1..=500 Mbps");
     }
-    if !(10.0..=140.0).contains(&options.fov_degrees) || !options.fov_degrees.is_finite() {
+    if !(10.0..=140.0).contains(&fov_degrees) || !fov_degrees.is_finite() {
         bail!("视频 FOV 必须位于 10..=140");
     }
     if !matches!(options.resolved_quality().antialiasing, 1 | 2 | 4 | 8) {
@@ -466,5 +494,30 @@ mod tests {
         };
         assert_eq!(overridden.resolved_quality().antialiasing, 8);
         assert_eq!(overridden.resolved_quality().shadow_size, 2048);
+    }
+
+    #[test]
+    fn explicit_fov_overrides_replay_and_default() {
+        let replay = ReplayRenderOptions {
+            fov_degrees: Some(82.0),
+            ..ReplayRenderOptions::default()
+        };
+        assert_eq!(
+            resolved_fov_options(&RenderOptions::default(), replay.clone()).fov_degrees,
+            Some(82.0)
+        );
+
+        let explicit = RenderOptions {
+            fov_degrees: Some(75.0),
+            ..RenderOptions::default()
+        };
+        let resolved = resolved_fov_options(&explicit, replay);
+        assert_eq!(resolved.fov_degrees, Some(75.0));
+        assert!(resolved.fov_keyframes.is_empty());
+        assert_eq!(
+            resolved_fov_options(&RenderOptions::default(), ReplayRenderOptions::default())
+                .fov_degrees,
+            None
+        );
     }
 }

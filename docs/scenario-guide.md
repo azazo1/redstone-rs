@@ -144,6 +144,12 @@ interpolation = "catmull_rom"
 [[replay.camera.keyframes]]
 time_ms = 0
 f3 = "/execute in minecraft:overworld run tp @s -195.81 75.78 38.54 -65.90 16.93"
+fov = 82.0
+
+[[replay.camera.keyframes]]
+time_ms = 3500
+yaw = -45.0
+pitch = 22.0
 
 [[replay.camera.keyframes]]
 time_ms = 7000
@@ -151,9 +157,10 @@ position = [-180.0, 82.0, 30.0]
 yaw = -30.0
 pitch = 25.0
 roll = 0.0
+fov = 72.0
 ```
 
-`interpolation` 可取 `linear`, `cubic` 或 `catmull_rom`, 并应用到整条路径. F3+C 只接受 `minecraft:overworld`, `@s` 和绝对数值坐标. 每个位置关键帧必须在 `f3` 与结构化字段之间二选一. 显式路径至少需要两帧, 第一帧必须为 0 ms, 最后一帧必须等于 TIME path 总时长.
+`interpolation` 可取 `linear`, `cubic` 或 `catmull_rom`, 并应用到 position, rotation 和 FOV 轨道. F3+C 只接受 `minecraft:overworld`, `@s` 和绝对数值坐标. `f3` 不能与结构化 pose 混用, 但可以同时设置 `fov`. 结构化关键帧可以省略 `position` 或整组 `yaw/pitch`; 缺失分量使用相邻显式样本插值, 区间外保持最近样本. `fov` 使用独立稀疏轨道, 未设置的关键帧不会打断插值. 显式列表至少需要两帧, 第一帧必须为 0 ms, 最后一帧必须等于 TIME path 总时长.
 
 配置必须满足 `start_tick <= end_tick <= max_ticks`. 非空源区间要求 `duration_ms > 0`. 当起止 tick 相同时, 只能省略 `duration_ms` 或将其设为 0, 此时 TIME 和 POSITION 各只写一个 0 ms 关键帧. 源 tick 转换后的 timestamp 必须处于 Replay Mod 的 `i32` 毫秒范围, `duration_ms` 必须处于 Java long 范围.
 
@@ -162,6 +169,7 @@ roll = 0.0
 ```toml
 [replay.camera]
 view_distance = 8
+fov = 78.0
 position = [12.5, 20.0, -6.5]
 yaw = 135.0
 pitch = 35.0
@@ -172,6 +180,7 @@ pitch = 35.0
 | 字段 | 类型 | 默认值 | 说明 |
 | --- | --- | --- | --- |
 | `view_distance` | `2..=32` 整数 | `8` | 自动摄像头所依据的 Replay 播放视距, 单位为 chunk |
+| `fov` | `10..=140` 浮点数 | `70` | 原生视频渲染的基础垂直视野角度, 也作为稀疏 FOV 轨道的首尾回退值 |
 | `position` | `[x, y, z]` | 自动 | 初始摄像头世界坐标 |
 | `yaw` | 浮点数 | 自动 | 水平观察角度, Minecraft 角度制 |
 | `pitch` | `-90..=90` 浮点数 | 自动 | 垂直观察角度, 正值向下 |
@@ -184,7 +193,7 @@ pitch = 35.0
 
 自动取景会对候选观察面评分. 被断言引用的方块探针权重最高, 其他方块探针次之, 初始世界中的红石灯和铜灯提供较低权重. 这使摄像头倾向于朝向观测结果和输出元件较集中的一面. 没有足够提示或两面得分相同时使用稳定的默认侧.
 
-录像仍会按内容需要扩大服务端 chunk cache radius, 不会按 `view_distance` 裁剪远端录像数据. 播放端最终有效渲染距离还会受到本地视频设置限制.
+录像仍会按内容需要扩大服务端 chunk cache radius, 不会按 `view_distance` 裁剪远端录像数据. 播放端最终有效渲染距离还会受到本地视频设置限制. 基础 `fov`, 关键帧 FOV 和插值模式会写入 MCPR 的 `redstone/render-options.json`, 供原生视频渲染器逐帧读取, 不改变 Replay Mod 客户端自己的 FOV 设置.
 
 ## Replay 原生视频
 
@@ -199,7 +208,7 @@ redstone render recording.mcpr fast.mp4 --quality fast --shadows off
 
 默认模式遵循 TIME path 的剪辑, 变速和暂停. `--original-speed` 使用场景 tick 阶段记录的实际 walltime, 让视频速度与本次仿真的真实 TPS 对应, 而不是恢复为 Minecraft 标准 20 TPS. 例如 3000 TPS 等于 150 倍游戏时间速度. 摄像机路径会按压缩后的总时长重映射.
 
-默认参数为 1920x1080, 60 FPS, 20 Mbps, 70 度 FOV, `high` 画质和 32 chunk 渲染距离. `high` 为 4x MSAA 与 2048 阴影, `balanced` 为 2x 与 1024 阴影, `fast` 为 1x 并关闭阴影. `--aa` 和 `--shadows off|low|medium|high` 可以覆盖预设. 大型 replay 按 section 和视锥建立 GPU buffer. 关键红石设备使用纯色程序化结构模型, moving piston 按 2 tick 连续插值. 旧 MCPR 和外部 ReplayMod 文件没有 `redstone/render-v2.bin`, 需要使用当前版本重新生成.
+默认参数为 1920x1080, 60 FPS, 20 Mbps, 70 度 FOV, `high` 画质和 32 chunk 渲染距离. 场景设置的 `replay.camera.fov` 优先于 70 度默认值, `--fov` 再覆盖录像内设置. `high` 为 4x MSAA 与 2048 阴影, `balanced` 为 2x 与 1024 阴影, `fast` 为 1x 并关闭阴影. `--aa` 和 `--shadows off|low|medium|high` 可以覆盖预设. 大型 replay 按 section 和视锥建立 GPU buffer. 关键红石设备使用纯色程序化结构模型, moving piston 按 2 tick 连续插值. 旧 MCPR 和外部 ReplayMod 文件没有 `redstone/render-v2.bin`, 需要使用当前版本重新生成.
 
 ## 结构来源
 

@@ -64,6 +64,7 @@ pub(crate) struct SceneView {
 struct ViewKey {
     position: [u64; 3],
     rotation: [u32; 3],
+    fov_degrees: u32,
     view_distance: i32,
     shadows: bool,
 }
@@ -201,6 +202,7 @@ impl Scene {
         let view_key = ViewKey {
             position: camera_position.map(f64::to_bits),
             rotation: view.pose.rotation.map(f32::to_bits),
+            fov_degrees: view.fov_degrees.to_bits(),
             view_distance,
             shadows: view.shadows,
         };

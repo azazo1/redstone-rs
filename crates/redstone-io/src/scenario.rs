@@ -120,6 +120,8 @@ pub struct ScenarioReplayCamera {
     #[serde(default = "default_replay_view_distance")]
     pub view_distance: i32,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fov: Option<f32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub position: Option<[f64; 3]>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub yaw: Option<f32>,
@@ -137,6 +139,8 @@ pub struct ScenarioReplayCameraKeyframe {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub f3: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fov: Option<f32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub position: Option<[f64; 3]>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub yaw: Option<f32>,
@@ -150,6 +154,7 @@ impl Default for ScenarioReplayCamera {
     fn default() -> Self {
         Self {
             view_distance: default_replay_view_distance(),
+            fov: None,
             position: None,
             yaw: None,
             pitch: None,
@@ -719,11 +724,13 @@ time_ms = 1500
 tick = 80
 
 [replay.camera]
+fov = 82.0
 interpolation = "cubic"
 
 [[replay.camera.keyframes]]
 time_ms = 0
 f3 = "/execute in minecraft:overworld run tp @s -1.5 75.0 3.25 -65.0 16.0"
+fov = 78.0
 
 [[replay.camera.keyframes]]
 time_ms = 1500
@@ -745,8 +752,10 @@ path = "machine.nbt"
             replay.camera.interpolation,
             ScenarioReplayCameraInterpolation::Cubic
         );
+        assert_eq!(replay.camera.fov, Some(82.0));
         assert_eq!(replay.camera.keyframes.len(), 2);
         assert!(replay.camera.keyframes[0].f3.is_some());
+        assert_eq!(replay.camera.keyframes[0].fov, Some(78.0));
         assert_eq!(replay.camera.keyframes[1].roll, 5.0);
     }
 

@@ -154,6 +154,8 @@ fn replay_timeline_keeps_recording_time_and_writes_editing_paths() {
 
     let metadata = read_metadata(&replay);
     assert_eq!(metadata["duration"], 200);
+    let render_options = redstone_replay_26::ReplayRenderOptions::read_mcpr(&replay).unwrap();
+    assert_eq!(render_options.fov_degrees, Some(82.0));
 
     let timelines = read_timelines(&replay);
     let paths = timelines[""].as_array().unwrap();
@@ -770,6 +772,9 @@ strict = true
 start_tick = 1
 end_tick = 3
 duration_ms = 50
+
+[replay.camera]
+fov = 82.0
 
 [source]
 path = "machine.nbt"

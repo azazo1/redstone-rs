@@ -344,7 +344,7 @@ wire 有序传播使用 `Compiled`, `Interpreted` 和 `FellBack` 三种内部结
 
 - `ReplayTimeline` 不改写底层 packet 时间. 简单模式将源 `[start_tick,end_tick]` 线性映射到 `duration_ms`; 多关键帧模式支持分段变速和相同 tick 暂停, 但不允许倒放.
 - 静态区间只允许 `duration_ms=0`, 非空区间必须大于 0, tick 与时长都检查溢出.
-- Position Path 支持 linear, cubic-spline 和 Catmull-Rom 全路径插值. 位置关键帧可使用结构化 pose 或 F3+C 的 Overworld 绝对传送命令.
+- Position Path 支持 linear, cubic-spline 和 Catmull-Rom 全路径插值. 位置关键帧可使用结构化 pose 或 F3+C 的 Overworld 绝对传送命令. 结构化关键帧允许 position 和 rotation 独立稀疏, 缺失分量按同一插值模式补全.
 - 未配置 Position keyframe 时起止 pose 相同, 继续生成固定机位.
 - 自动取景使用实际非空气内容边界. 平面结构从薄轴观察, 普通体积使用斜上方候选位, 并按 expectation 引用的方块 probe, 其他 probe, 红石灯和铜灯泡的权重选择观察面.
 - 可完全指定 position, 或同时指定 yaw 和 pitch. pitch 限制为 `-90..90`, view distance 限制为 `2..32`.
@@ -365,7 +365,7 @@ wire 有序传播使用 `Compiled`, `Interpreted` 和 `FellBack` 三种内部结
 - wgpu 优先选择高性能图形适配器, 不可用时尝试软件适配器. 场景按 16x16x16 section 保存稠密状态和网格, 只有边界方块变化才使对应相邻 section 失效. 相机视锥和阴影覆盖分别限制 section 构建与 draw.
 - 已分类红石设备使用按 26.1.2 方块状态驱动的程序化多部件模型. wire 连接和爬墙, 二极管档位与模式, 控件安装面, 门类开合, 铁轨形状, 活塞方向和容器轮廓均可辨识. 供电与点亮状态使用高亮材质, 其他方块使用分类色立方体.
 - moving piston 使用独立动态 GPU buffer, 按原版 2 tick 区间连续插值. TIME path 暂停会冻结活塞, 变速和 `--original-speed` 会同步改变动画速度.
-- 默认输出 `1920x1080`, `60 FPS`, `20 Mbps`, `70` 度 FOV, `high` 画质和 32 chunk 渲染距离. `high`, `balanced` 和 `fast` 分别对应 `4x/2048`, `2x/1024` 和 `1x/off`. `--aa` 与 `--shadows` 显式值优先于预设.
+- 默认输出 `1920x1080`, `60 FPS`, `20 Mbps`, `70` 度 FOV, `high` 画质和 32 chunk 渲染距离. 基础 FOV 和稀疏 FOV 关键帧写入 `redstone/render-options.json`, 原生渲染器按 position path 的插值模式逐帧采样并同步更新投影与视锥, `--fov` 显式值会覆盖整条录像 FOV 轨道. `high`, `balanced` 和 `fast` 分别对应 `4x/2048`, `2x/1024` 和 `1x/off`. `--aa` 与 `--shadows` 显式值优先于预设.
 - macOS 使用 compute pass 将最终 BGRA 转为 BT.709 limited-range NV12, 其他平台保留 BGRA fallback. 3 个异步 readback slot 只等待最旧 submission. FFmpeg stdin 由容量为 4 的 tokio channel 驱动, VideoToolbox 启用 realtime 和 speed priority.
 - 完整立方体按最终分类色 greedy meshing. 高频 wire 和 rail 薄结构使用 quad/ribbon. 顶点使用 20 byte packed normal 和 color, section buffer 与动态活塞 buffer 在容量足够时原位更新. 非完整设备按 `(state_id, visible_faces)` 共享局部模板, GPU 将全部可见 section 的同模型实例合并为一次 instanced draw.
 - 自动编码器会用单帧 probe 选择平台硬件 H.264, 然后回退到 `libx264`. 视频固定为静音 MP4, BT.709 metadata 和 `yuv420p` 输出. 连续相同场景, 摄像机和活塞 sample 复用同一个 `Arc` frame.

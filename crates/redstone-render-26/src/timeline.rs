@@ -4,6 +4,7 @@ use std::io::Read;
 use std::path::Path;
 
 use anyhow::{Context, Result, bail};
+use redstone_replay_26::{ReplayCameraInterpolation, ReplayRenderOptions};
 use serde::Deserialize;
 use zip::ZipArchive;
 
@@ -18,6 +19,84 @@ enum Interpolation {
     Linear,
     Cubic,
     CatmullRom { alpha: f64 },
+}
+
+#[derive(Clone, Debug)]
+pub struct FovTimeline {
+    fallback: f32,
+    times: Vec<i64>,
+    values: Vec<f64>,
+    interpolation: Interpolation,
+}
+
+impl FovTimeline {
+    pub fn new(options: ReplayRenderOptions, duration_ms: i64) -> Result<Self> {
+        let keyframes = options
+            .fov_keyframes
+            .iter()
+            .map(|keyframe| (keyframe.time_ms, keyframe.fov_degrees))
+            .collect::<Vec<_>>();
+        if !keyframes.is_empty()
+            && (keyframes.len() < 2
+                || keyframes[0].0 != 0
+                || keyframes.last().unwrap().0 != duration_ms)
+        {
+            bail!("FOV path 必须至少有两帧并完整覆盖视频时长");
+        }
+        for pair in keyframes.windows(2) {
+            if pair[1].0 <= pair[0].0 {
+                bail!("FOV path 编辑时间必须严格递增");
+            }
+        }
+        Ok(Self {
+            fallback: options.fov_degrees.unwrap_or(70.0),
+            times: keyframes.iter().map(|(time_ms, _)| *time_ms).collect(),
+            values: keyframes
+                .iter()
+                .map(|(_, value)| f64::from(*value))
+                .collect(),
+            interpolation: options.fov_interpolation.into(),
+        })
+    }
+
+    pub fn sample(&self, time_ms: f64) -> f32 {
+        if self.times.is_empty() {
+            return self.fallback;
+        }
+        let last = self.times.len() - 1;
+        if time_ms <= self.times[0] as f64 {
+            return self.values[0] as f32;
+        }
+        if time_ms >= self.times[last] as f64 {
+            return self.values[last] as f32;
+        }
+        let segment = self
+            .times
+            .windows(2)
+            .position(|pair| time_ms < pair[1] as f64)
+            .unwrap_or(last - 1);
+        let start = self.times[segment] as f64;
+        let end = self.times[segment + 1] as f64;
+        let fraction = (time_ms - start) / (end - start);
+        (sample_component(
+            &self.values,
+            &self.times,
+            segment,
+            fraction,
+            self.interpolation,
+        ) as f32)
+            .clamp(10.0, 140.0)
+    }
+}
+
+impl From<ReplayCameraInterpolation> for Interpolation {
+    fn from(value: ReplayCameraInterpolation) -> Self {
+        match value {
+            ReplayCameraInterpolation::Linear => Self::Linear,
+            ReplayCameraInterpolation::Cubic => Self::Cubic,
+            ReplayCameraInterpolation::CatmullRom => Self::CatmullRom { alpha: 0.5 },
+        }
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -143,6 +222,11 @@ impl ReplayTimeline {
         let fraction = (time_ms - start) / (end - start);
         let mut position = [0.0; 3];
         let mut rotation = [0.0; 3];
+        let times = self
+            .camera_keyframes
+            .iter()
+            .map(|(time_ms, _)| *time_ms)
+            .collect::<Vec<_>>();
         for axis in 0..3 {
             let position_values = self
                 .camera_keyframes
@@ -151,7 +235,7 @@ impl ReplayTimeline {
                 .collect::<Vec<_>>();
             position[axis] = sample_component(
                 &position_values,
-                &self.camera_keyframes,
+                &times,
                 segment,
                 fraction,
                 self.camera_segments[segment],
@@ -163,7 +247,7 @@ impl ReplayTimeline {
                 .collect::<Vec<_>>();
             rotation[axis] = sample_component(
                 &rotation_values,
-                &self.camera_keyframes,
+                &times,
                 segment,
                 fraction,
                 self.camera_segments[segment],
@@ -267,7 +351,7 @@ fn sample_linear_pairs(keyframes: &[(i64, i32)], time_ms: f64) -> f64 {
 
 fn sample_component(
     values: &[f64],
-    keyframes: &[(i64, CameraPose)],
+    times: &[i64],
     segment: usize,
     fraction: f64,
     interpolation: Interpolation,
@@ -285,13 +369,13 @@ fn sample_component(
             let b = -3.0 * p1 + 3.0 * p2 - 2.0 * t0 - t1;
             ((a * fraction + b) * fraction + t0) * fraction + p1
         }
-        Interpolation::Cubic => sample_natural_cubic(values, keyframes, segment, fraction),
+        Interpolation::Cubic => sample_natural_cubic(values, times, segment, fraction),
     }
 }
 
 fn sample_natural_cubic(
     values: &[f64],
-    keyframes: &[(i64, CameraPose)],
+    times: &[i64],
     segment: usize,
     fraction: f64,
 ) -> f64 {
@@ -304,8 +388,8 @@ fn sample_natural_cubic(
     let mut diagonal = vec![1.0; n];
     let mut upper = vec![0.0; n];
     for index in 1..n - 1 {
-        let left = (keyframes[index].0 - keyframes[index - 1].0) as f64;
-        let right = (keyframes[index + 1].0 - keyframes[index].0) as f64;
+        let left = (times[index] - times[index - 1]) as f64;
+        let right = (times[index + 1] - times[index]) as f64;
         diagonal[index] = 2.0 * (left + right);
         upper[index] = right;
         rhs[index] = 6.0
@@ -318,7 +402,7 @@ fn sample_natural_cubic(
     for index in (1..n - 1).rev() {
         second[index] = (rhs[index] - upper[index] * second[index + 1]) / diagonal[index];
     }
-    let h = (keyframes[segment + 1].0 - keyframes[segment].0) as f64;
+    let h = (times[segment + 1] - times[segment]) as f64;
     let a = 1.0 - fraction;
     let b = fraction;
     a * values[segment]
@@ -380,6 +464,8 @@ struct RawInterpolator {
 
 #[cfg(test)]
 mod tests {
+    use redstone_replay_26::ReplayFovKeyframe;
+
     use super::*;
 
     #[test]
@@ -410,5 +496,34 @@ mod tests {
             unwrapped_rotation: unwrap_rotations(&keyframes),
         };
         assert!((timeline.camera(500.0).rotation[0] - 180.0).abs() < 0.001);
+    }
+
+    #[test]
+    fn fov_timeline_interpolates_between_sparse_samples() {
+        let timeline = FovTimeline::new(
+            ReplayRenderOptions {
+                fov_degrees: Some(70.0),
+                fov_interpolation: ReplayCameraInterpolation::Linear,
+                fov_keyframes: vec![
+                    ReplayFovKeyframe {
+                        time_ms: 0,
+                        fov_degrees: 80.0,
+                    },
+                    ReplayFovKeyframe {
+                        time_ms: 500,
+                        fov_degrees: 70.0,
+                    },
+                    ReplayFovKeyframe {
+                        time_ms: 1000,
+                        fov_degrees: 60.0,
+                    },
+                ],
+            },
+            1000,
+        )
+        .unwrap();
+
+        assert_eq!(timeline.sample(250.0), 75.0);
+        assert_eq!(timeline.sample(750.0), 65.0);
     }
 }

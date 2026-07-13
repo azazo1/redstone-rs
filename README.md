@@ -143,3 +143,4 @@ Replay 视频默认使用 `high` 画质, 即 4x MSAA 和 2048 阴影. `balanced`
 - [digital-clock.litematic](assets/schematics/digital-clock.litematic): <https://www.planetminecraft.com/project/digital-clock-v2/>
 - [head.litematic](assets/schematics/head.litematic): <https://www.planetminecraft.com/project/redstone-automaton-5932751/>
 - [CPU_22_08_2025.zip](assets/worlds/CPU_22_08_2025.zip): <https://www.planetminecraft.com/project/frostbyte-a-16-bit-minecraft-cpu-with-just-redstone/> (<https://github.com/IceWizard7/frostbyte-cpu>)
+- [flying-machine.litematic](assets/schematics/flying-machine.litematic): <https://www.planetminecraft.com/project/mumbo-jumbo-s-flying-machines-guide-recreation/>

@@ -263,8 +263,8 @@ enum Command {
         fps: u32,
         #[arg(long, default_value_t = 20)]
         bitrate_mbps: u32,
-        #[arg(long, default_value_t = 70.0)]
-        fov: f32,
+        #[arg(long, help = "覆盖录像内设置的 FOV")]
+        fov: Option<f32>,
         #[arg(long, value_enum, default_value = "high")]
         quality: RenderQualityArg,
         #[arg(long)]
@@ -1161,6 +1161,7 @@ fn create_replay_writer(
     );
     let camera = replay_camera::options(scenario);
     let camera_path = replay_camera::path(scenario, timeline.duration_ms())?;
+    let render_options = replay_camera::render_options(scenario, timeline.duration_ms())?;
     let camera_hints = replay_camera::hints(
         scenario,
         [simulation.world()],
@@ -1179,7 +1180,8 @@ fn create_replay_writer(
         .with_piston_animation(replay_anim)
         .with_camera(camera)
         .with_camera_hints(camera_hints)
-        .with_camera_path(camera_path),
+        .with_camera_path(camera_path)
+        .with_render_options(render_options),
         simulation.world(),
     )
     .with_context(|| format!("初始化 Replay Mod 录像失败: {}", replay_path.display()))
