@@ -4,6 +4,47 @@ seed = 0
 max_ticks = 1700
 strict = true
 
+[replay.camera]
+view_distance = 8
+interpolation = "catmull_rom"
+
+[[replay.camera.keyframes]]
+time_ms = 0
+position = [-25.0, 48.0, 62.0]
+yaw = -132.60
+pitch = 34.09
+
+[[replay.camera.keyframes]]
+time_ms = 1000
+position = [-25.0, 48.0, 62.0]
+yaw = -132.60
+pitch = 34.09
+
+[[replay.camera.keyframes]]
+time_ms = 22000
+position = [-12.0, 50.0, 78.0]
+yaw = -147.57
+pitch = 36.45
+
+[[replay.camera.keyframes]]
+time_ms = 43000
+position = [10.0, 52.0, 94.0]
+yaw = -171.37
+pitch = 37.84
+
+[[replay.camera.keyframes]]
+time_ms = 64000
+position = [32.0, 50.0, 100.0]
+yaw = 165.96
+pitch = 37.04
+
+[[replay.camera.keyframes]]
+time_ms = 85000
+position = [44.0, 48.0, 102.0]
+yaw = 152.02
+pitch = 36.35
+
+
 [source]
 path = "../schematics/flying-machine.litematic"
 initialization = "raw"
